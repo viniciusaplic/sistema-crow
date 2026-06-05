@@ -149,11 +149,13 @@ tbody td{padding:11px 16px;font-size:14px}
 .parcela-alert .parcela-valor{color:var(--accent)}
 
 /* FILTROS */
-.filtros-bar{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.filtros-bar{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
+.filtros-bar.collapsed .filtros-inner{display:none}
 .filtro-group{display:flex;flex-direction:column;gap:4px}
 .filtro-group label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
 .filtro-group input,.filtro-group select{border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:13px;font-family:'DM Sans',sans-serif;outline:none;background:var(--card);min-width:140px}
 .filtro-group input:focus,.filtro-group select:focus{border-color:var(--accent)}
+.filtros-toggle{display:none;width:100%;background:none;border:none;font-size:13px;font-weight:600;color:var(--primary);cursor:pointer;font-family:'DM Sans',sans-serif;text-align:left;padding:0}
 
 /* RESUMO PEDIDOS */
 .resumo-pedidos{display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap}
@@ -215,17 +217,18 @@ tbody td{padding:11px 16px;font-size:14px}
 @media(max-width:768px){
   .content{padding:16px 14px}
   .dashboard-cards{grid-template-columns:1fr 1fr}
-  .filtros-bar{flex-direction:column;gap:8px}
-  .filtro-group input,.filtro-group select{min-width:100%;width:100%}
-  .resumo-pedidos{flex-direction:column}
+  .filtros-bar{display:block;padding:10px 12px}
+  .filtros-toggle{display:flex;align-items:center;justify-content:space-between;padding:2px 0}
+  .filtros-inner{display:none;padding-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .filtros-inner.open{display:grid}
+  .filtro-group input,.filtro-group select{min-width:unset;width:100%}
+  .filtros-btns{grid-column:span 2;display:flex;gap:8px;padding-top:4px}
+  .resumo-pedidos{display:grid;grid-template-columns:1fr 1fr;gap:8px}
   .resumo-card{min-width:unset}
   .section-header{flex-direction:column;align-items:flex-start}
   .search-box{width:100%}
   .search-input{flex:1}
   .form-row.triple{grid-template-columns:1fr 1fr}
-  /* Esconder tabelas pesadas em tablet — usar cards */
-  .hide-tablet{display:none!important}
-  .show-tablet{display:block!important}
 }
 
 /* ══ MOBILE (480px) ══ */
@@ -234,29 +237,23 @@ tbody td{padding:11px 16px;font-size:14px}
   .topbar{padding:0 14px;height:54px}
   .topbar-logo{font-size:17px}
   .topbar-nome{display:none}
-  .nav-tabs{padding:0 10px;gap:2px}
-  .nav-tab{padding:12px 10px;font-size:13px}
+  .nav-tabs{padding:0 8px;gap:0}
+  .nav-tab{padding:12px 8px;font-size:12px}
   .dashboard-cards{grid-template-columns:1fr 1fr;gap:10px}
-  .dash-card{padding:14px 16px}
+  .dash-card{padding:14px 14px}
   .dash-card-value{font-size:20px}
   .form-row,.form-row.triple{grid-template-columns:1fr}
-  .item-row{grid-template-columns:2fr 50px 90px 70px 70px 24px;font-size:11px;padding:8px 8px}
-  .modal{padding:20px 16px}
+  .item-row{grid-template-columns:2fr 45px 85px 65px 65px 22px;font-size:11px;padding:8px 6px}
+  .modal{padding:20px 14px}
   .modal-title{font-size:17px}
   .btn{padding:8px 14px;font-size:13px}
   .btn-sm{padding:6px 10px;font-size:12px}
   .parcelas-grid{grid-template-columns:1fr 1fr}
   .totais-box{flex-direction:column;gap:8px}
   .search-input{width:100%}
-  .hide-mobile{display:none!important}
-  .show-mobile{display:block!important}
-  /* Tabelas viram cards no mobile */
-  .table-wrap table,.table-wrap thead,.table-wrap tbody,.table-wrap tr,.table-wrap td,.table-wrap th{display:block;width:100%}
-  .table-wrap thead{display:none}
-  .table-wrap tbody tr{border:1px solid var(--border);border-radius:10px;margin-bottom:8px;padding:12px;background:var(--card)}
-  .table-wrap tbody tr:hover{background:var(--card)}
-  .table-wrap tbody td{border:none;padding:3px 0;font-size:13px}
-  .table-wrap tbody td:before{content:attr(data-label);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:1px}
+  .filtros-inner{grid-template-columns:1fr}
+  .filtros-btns{grid-column:span 1}
+  .resumo-pedidos{grid-template-columns:1fr}
 }
 ::-webkit-scrollbar{width:6px;height:6px}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
@@ -325,34 +322,41 @@ tbody td{padding:11px 16px;font-size:14px}
         <div class="section-title">Meus Pedidos</div>
         <button class="btn btn-primary" onclick="abrirModalPedido()">+ Novo Pedido</button>
       </div>
-      <div class="filtros-bar">
-        <div class="filtro-group">
-          <label>Data início</label>
-          <input type="date" id="f-data-ini">
+      <div class="filtros-bar" id="filtros-pedidos-bar">
+        <button class="filtros-toggle" onclick="toggleFiltros('filtros-pedidos-inner')">
+          <span>🔍 Filtros</span><span id="filtros-pedidos-arrow">▼</span>
+        </button>
+        <div class="filtros-inner" id="filtros-pedidos-inner">
+          <div class="filtro-group">
+            <label>Data início</label>
+            <input type="date" id="f-data-ini">
+          </div>
+          <div class="filtro-group">
+            <label>Data fim</label>
+            <input type="date" id="f-data-fim">
+          </div>
+          <div class="filtro-group">
+            <label>Cliente</label>
+            <input type="text" id="f-cliente" placeholder="Nome do cliente...">
+          </div>
+          <div class="filtro-group">
+            <label>Produto</label>
+            <input type="text" id="f-produto" placeholder="Nome ou código...">
+          </div>
+          <div class="filtro-group">
+            <label>Situação</label>
+            <select id="f-status">
+              <option value="Confirmado">Confirmados</option>
+              <option value="Orçamento">Orçamentos</option>
+              <option value="Cancelado">Cancelados</option>
+              <option value="">Todos</option>
+            </select>
+          </div>
+          <div class="filtros-btns">
+            <button class="btn btn-secondary btn-sm" onclick="renderPedidos()">Filtrar</button>
+            <button class="btn btn-outline btn-sm" onclick="limparFiltrosPedidos()">Limpar</button>
+          </div>
         </div>
-        <div class="filtro-group">
-          <label>Data fim</label>
-          <input type="date" id="f-data-fim">
-        </div>
-        <div class="filtro-group">
-          <label>Cliente</label>
-          <input type="text" id="f-cliente" placeholder="Nome do cliente...">
-        </div>
-        <div class="filtro-group">
-          <label>Produto</label>
-          <input type="text" id="f-produto" placeholder="Nome ou código...">
-        </div>
-        <div class="filtro-group">
-          <label>Situação</label>
-          <select id="f-status">
-            <option value="Confirmado">Confirmados</option>
-            <option value="Orçamento">Orçamentos</option>
-            <option value="Cancelado">Cancelados</option>
-            <option value="">Todos</option>
-          </select>
-        </div>
-        <button class="btn btn-secondary btn-sm" onclick="renderPedidos()">Filtrar</button>
-        <button class="btn btn-outline btn-sm" onclick="limparFiltrosPedidos()">Limpar</button>
       </div>
       <div class="resumo-pedidos" id="resumo-pedidos"></div>
       <div class="table-wrap">
@@ -369,11 +373,18 @@ tbody td{padding:11px 16px;font-size:14px}
         <button class="btn btn-primary" onclick="abrirModalOrcamento()">+ Novo Orçamento</button>
       </div>
       <div class="filtros-bar">
-        <div class="filtro-group">
-          <label>Cliente</label>
-          <input type="text" id="fo-cliente" placeholder="Nome do cliente...">
+        <button class="filtros-toggle" onclick="toggleFiltros('filtros-orc-inner')">
+          <span>🔍 Filtros</span><span id="filtros-orc-arrow">▼</span>
+        </button>
+        <div class="filtros-inner" id="filtros-orc-inner">
+          <div class="filtro-group">
+            <label>Cliente</label>
+            <input type="text" id="fo-cliente" placeholder="Nome do cliente...">
+          </div>
+          <div class="filtros-btns">
+            <button class="btn btn-secondary btn-sm" onclick="renderOrcamentos()">Filtrar</button>
+          </div>
         </div>
-        <button class="btn btn-secondary btn-sm" onclick="renderOrcamentos()">Filtrar</button>
       </div>
       <div class="table-wrap">
         <div id="orcamentos-table"></div>
@@ -840,6 +851,13 @@ async function renderPainel(){
 }
 
 // ══ PEDIDOS ══
+function toggleFiltros(id){
+  const el = document.getElementById(id);
+  const arrow = document.getElementById(id.replace('inner','arrow'));
+  el.classList.toggle('open');
+  if(arrow) arrow.textContent = el.classList.contains('open') ? '▲' : '▼';
+}
+
 function limparFiltrosPedidos(){
   document.getElementById('f-data-ini').value='';
   document.getElementById('f-data-fim').value='';
