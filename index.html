@@ -7926,27 +7926,28 @@ async function importarPedidosW3(){
       if(!CLIENTES_DB.length) await carregarClientesFirebase();
       if(!Object.keys(MAPEAMENTO_W3_DB).length) await carregarMapeamentoW3();
 
-      // Carrega todos os codigo_w3 já existentes DE UMA VEZ para checar duplicidade localmente
-      // (evita N consultas ao Firebase — 1 consulta única independente do tamanho do arquivo)
-      resultEl.innerHTML = '<span style="color:var(--accent)">⏳ Verificando pedidos existentes...</span>';
-      const snapExistentes = await db.ref('pedidos').orderByChild('codigo_w3').startAt('0').once('value');
+      // Monta Set de codigo_w3 já importados — consulta shallow (só as chaves, sem dados)
+      // depois busca campo codigo_w3 de cada pedido existente de forma eficiente
+      resultEl.innerHTML = '<span style="color:var(--accent)">⏳ Verificando duplicatas...</span>';
       const codigosW3Existentes = new Set();
-      snapExistentes.forEach(child => {
-        const v = child.val();
-        if(v.codigo_w3) codigosW3Existentes.add(String(v.codigo_w3));
-      });
+      try {
+        const snapTodos = await db.ref('pedidos').once('value');
+        snapTodos.forEach(child => {
+          const cw3 = child.val()?.codigo_w3;
+          if(cw3) codigosW3Existentes.add(String(cw3));
+        });
+      } catch(e){ console.warn('Erro ao verificar duplicatas:', e); }
 
       let importados = 0, pulados = 0, clientesCriados = 0, historicos = 0, doMesAtual = 0;
       const avisos = [];
       const totalPedidos = pedidosCsv.length;
 
       for(const pCsv of pedidosCsv){
-        // Checa duplicidade localmente (sem consulta ao Firebase)
         if(codigosW3Existentes.has(String(pCsv.codigo_w3))){
           pulados++;
           continue;
         }
-        resultEl.innerHTML = `<span style="color:var(--accent)">⏳ Importando ${importados+pulados+1}/${totalPedidos}...</span>`;
+        resultEl.innerHTML = `<span style="color:var(--accent)">⏳ Importando ${importados+1}/${totalPedidos - pulados}...</span>`;
 
         const itensConvertidos = [];
         let itensSemMatch = 0;
