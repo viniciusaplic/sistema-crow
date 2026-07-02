@@ -1,0 +1,1604 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CROW — Sistema de Vendas | v2.07.2026</title>
+  <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAIIElEQVR4nK2XW2ycxRXHz5mZ77a7zsYb353Eudi5OIE4LaQQF6ntC6mEcJuHiAeqkqpUIGSh0PJSqlYF9YVK5aK2gNT2KUG0FAqkTSEqxCTEwQmhUXwJMRCXXIwdx3HW9l7nO+f0wd+aTWwHejnSp/2+2ZlzfnP7zxkUEYEFTESEmVkppRARS+UjIyPn+gcGLgwOflj45OwnKj2RRlAI1dVVvHHDBmxvb29obGhYvZDfkhER4UIARERaa136Hhwc/OC1vXtH9u/fX3Oyt69pcnIyTkQAiCDMAACAiKCUgkUVFfmOjjtPrFm7Np/NZgEBARVCMpmE5cuWOc3Nzak1a9Y0OcbE5gCUeh0Fp9ffeKPnN888E3/7QNemQrEIIgIiAqlUavp7O+95P55I8PD5Ye/Vva/ecHn8cqC0FmZGANCu6wIigrV2FtB1XWBmqK2tHWtv3zpkyoOXhltrrbu7u9//+aOP+oe7j2wtFAqglBJjDIEIEjPm83n/4zNnKja3bU4H8SAMbahDCvWq5cvH6+vrpwrFAniuB4KYUIDTmWzGLRQKgeu6fm1d3YVUaslUVVU1gURGRCQiYq2d/vEjPzmYqFgkxvXEj8XDIJ4IXT+Q8sfxfDGuN/vueP5n/0Vl2nEFUIlxPalraJx+oLPz0N/27TsyPDx8VkSsRMM5G3x8fPzC7du2nXI9X/xYPPRjcbo2cPnjx+IUS1TYawG9IMZBPE6O50tD49LCE08+1ZVOp0fkGmNmRiIiRMTp6emJbdu+mT723nsrXc+z1lrn81bxQoaIwsxQXV09fexoz2hDfX0zAIC11iqlMKqDAICq1OAH993/r/9XcK01K6UknZ5MHD9+fJSZmYjIcRxHa2201kYppZVSCkVE3jpwoKej41tfIeaQiMznh5lrClEEAIgIAQC01pBKpdIrVqy88uQTvxrdcvNNX87lchlrbVgoFKaK1oKwgAEA2L17D9owZKU1XjfKdXptwxAREdauWzfc2rp+tLamNsciZvJKGn/08MOpbGb63MSVdEUul9PW2mXWWhCJAD78cDAlzAqUYkSEkjSUfhERysvLA7MIMhHesHHD8M1btnw6PTlt+k8NLNn/+hu12VzOm2kiUCakwMyglAIAmAFIJpN5YgYJQ2RmQETQWoMxhhERiAittVgqFxFQSgkRoeu6dseOHb2hLZq9r+1dO3bpUkIpVfLBiChRBzgKjsysS1NlRETuvvs7l9/tOUqxWDwfBJ5orRUxaKVVBoQRBMX1XOfC+fN+On3FMcYRay1WVVVN7dy5s+/g2121PUePrYqUjpkZRQSZWWmtyVqrAUArpaD0eL4PvuvmDSLimpaWiuVNTbnx8XG8fHnCzWazjrUWAcATmRm+RCIRrm9tnerr7U3mclmsrKzM33//fX17du9pOTM0VOW6LhORIiJVtjA5DEPtui5s3bq17xtf/9p4W1ub29jYmKysrPRjQeDD4e7unuqa2oLSRrTjinG9q1QtEhbRjitBPCHxRUlyPI8f+enPDt/Y1jaqjZEgnpgjWF4QIy+IyY677jp+sre391oRKpnpPnIkPzU15fq+TyHR7OlXbiIC2hgQEc5lMmr79u0Dwxcu+H29fTVBEJANw6vaaa2JiPS9936/+9dPP701mntmnjk2ERExEiQ4e+7cYH19Q97zg9CLxfl60uv6AS9avNj+9tnnuipTSwqeH8yp7wUxdlyPV7esuZLN5i5F50txoRFQy5YubXnohw+9i4haK0UL7XWlFDMz3tZ+2+mpqUnIZDKu1prnqyeIuG3b7aeCwF8ShmFojFlQWRUR0a5du7bceustg7ZYNFrreSGUUqyUgvbbvnpp8PRgsJBDABDHGNh046a8iEj5/p/XLyKiVirYs3t3bOXKlWPWWj0fRLT3YfWqVTI2NmYWciwioLWGmpqa0oFzfQCllCIiqq+vX/rKK3+52NTUdMUWi9oYE15bt1gswuLFSZXP52qLM9mRmtfrDMrnxZ5xCgCgo2W7ft26Da/v2ze8cePGUVssGmOMLavLnufB5YkJ9oPYp1G6NWcNRMoJF8fGvhDGbA8iiLC5eXXrgQNv0fZvb/8nMzsiIlprQkQIwxA+/uhjrKuro4WSWUSEkAhOfzA4c6ounHRfDRBBGCKixclkwwsvPL/5l48/3hWPxyEMQ42IAgBy6J1DtevXrc0DwLzzS0RamOHNN/+xCgAsIi6YeUeAc42IiJlZRKR/YODEHR0dvUE8Ico4kqxM5X73+z8cWFJVnfVn1G6OFkTpnLz455cOiojk8/k8M9N8seYFKJm11paY/vinF99u2/ylEcfz5Y47O3of6Ow84riexBIVcxLWCIoaly3PnDzZe6Lkj5nZXmWhvS5ANBph6T2bzY098+xzXauaWyYefHBXz7r1rcPGmR/Cj8VZO67U1NUXnnjqqa7h4U+H5vN//fm5em5nb0rpdHrstb1/HTDGQGdn5y2Tk5Oe47phGIZXpXNKKQnDEJVSkEwmbVvbpsENra0TTU0rwpqaGhMEAXxhgNJ6ISIyxswGeufw4aPfvWdny/lz5ysFBBzHCZlZRZ1DRBSlFFtrNSCCirKrCPA/AygHYWaeOdSUGhkZGXrssV+M7nl+z035QsFwdGeM5FsAZtM6jjbF7A76rwDKrXxqzpwZ+uill18+v2/f3+v6+3uXT2cyMWaZvU+Wek70mdL/zwAAAMzCIizlt+mzZ88O9Q8MjPQPDBSGzgw5Fy+OxtLpKVMsFKBo7WJicokZ/g0385o2tmTYxgAAAABJRU5ErkJggg==">
+<!-- SheetJS para exportação Excel -->
+<!-- html2canvas para gerar imagem do pedido -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.12.1/JsBarcode.all.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap');
+:root {
+  --primary:#1a1a2e; --accent:#c8102e; --accent2:#e8c547;
+  --bg:#d6d3cf; --card:#fff; --text:#1a1a2e; --muted:#7a7a8c;
+  --border:#e0ddd8; --success:#2d7a4f; --radius:12px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+
+/* LOGIN */
+#login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--primary);position:relative;overflow:hidden}
+#login-screen::before{content:'';position:absolute;width:600px;height:600px;background:radial-gradient(circle,rgba(200,16,46,.3) 0%,transparent 70%);top:-200px;right:-200px}
+.login-box{background:#fff;border:1px solid #e5e7eb;border-radius:20px;padding:48px;width:100%;max-width:420px;position:relative;z-index:1}
+.login-logo{font-family:'Syne',sans-serif;font-weight:800;font-size:32px;color:#fff;letter-spacing:-1px;margin-bottom:4px}
+.login-logo span{color:var(--accent)}
+.login-sub{color:rgba(255,255,255,.4);font-size:13px;margin-bottom:36px}
+.login-box label{display:block;color:#374151;font-size:12px;font-weight:500;letter-spacing:.5px;margin-bottom:6px;text-transform:uppercase}
+.login-box input{width:100%;background:#f9fafb;border:1px solid #d1d5db;border-radius:8px;padding:12px 16px;color:#111;font-size:15px;font-family:'DM Sans',sans-serif;margin-bottom:20px;outline:none;transition:border-color .2s}
+.login-box input:focus{border-color:var(--accent)}
+.btn-login{width:100%;background:var(--accent);color:#fff;border:none;border-radius:8px;padding:14px;font-size:15px;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;transition:opacity .2s}
+.btn-login:hover{opacity:.9}
+.login-error{color:#ff6b6b;font-size:13px;margin-top:12px;text-align:center}
+
+/* LAYOUT */
+#app{display:none;min-height:100vh}
+.topbar{background:#3a3a3a;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 24px;height:60px;position:sticky;top:0;z-index:100}
+.topbar-logo{display:flex;align-items:center}
+.topbar-logo img{height:36px;width:auto;object-fit:contain}
+.topbar-user{display:flex;align-items:center;gap:12px;font-size:13px;color:rgba(255,255,255,.7)}
+.user-badge{background:var(--accent);color:#fff;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px}
+.admin-badge{background:var(--accent2);color:var(--primary);font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;text-transform:uppercase}
+.btn-sair{background:rgba(255,255,255,.1);border:none;color:rgba(255,255,255,.7);padding:6px 14px;border-radius:6px;font-size:13px;cursor:pointer;font-family:'DM Sans',sans-serif}
+.btn-sair:hover{background:rgba(255,255,255,.15)}
+
+.nav-tabs{background:var(--card);border-bottom:1px solid var(--border);display:flex;padding:0 24px;gap:4px;overflow:visible;position:relative}
+.nav-tab{padding:14px 18px;font-size:14px;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap;transition:all .15s;user-select:none}
+.nav-tab:hover{color:var(--text)}
+.nav-tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+.nav-tab.admin-only{display:none}
+.nav-group{position:relative}
+.nav-group.admin-only{display:none}
+.nav-group-trigger{padding:14px 18px;font-size:14px;font-weight:500;color:var(--muted);cursor:pointer;white-space:nowrap;user-select:none;border-bottom:3px solid transparent}
+.nav-group-trigger:hover{color:var(--text)}
+.nav-group.has-active .nav-group-trigger{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+.nav-group-menu{display:none;position:absolute;top:100%;left:0;background:var(--card);border:1px solid var(--border);border-radius:0 0 10px 10px;box-shadow:0 8px 24px rgba(0,0,0,.15);min-width:200px;z-index:500;flex-direction:column;padding:6px}
+.nav-group-menu.open{display:flex}
+.nav-group-menu .nav-tab{padding:10px 14px;border-bottom:none;border-radius:8px;width:100%;box-sizing:border-box}
+.nav-group-menu .nav-tab:hover{background:var(--bg)}
+.nav-group-menu .nav-tab.active{background:var(--bg);color:var(--accent)}
+
+.content{padding:28px 24px;max-width:1200px;margin:0 auto}
+
+/* CARDS */
+.dashboard-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:28px}
+.dash-card{background:var(--card);border-radius:var(--radius);padding:20px 24px;border:1px solid var(--border)}
+.dash-card-label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:500;margin-bottom:8px}
+.dash-card-value{font-family:'Syne',sans-serif;font-size:26px;font-weight:700}
+.dash-card-value.accent{color:var(--accent)}
+.dash-card-value.success{color:var(--success)}
+
+/* SECTION */
+.section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px}
+.section-title{font-family:'Syne',sans-serif;font-size:20px;font-weight:700}
+.search-box{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.search-input{border:1px solid var(--border);border-radius:8px;padding:9px 14px;font-size:14px;font-family:'DM Sans',sans-serif;outline:none;width:220px;background:var(--card);transition:border-color .2s}
+.search-input:focus{border-color:var(--accent)}
+select.search-input{cursor:pointer}
+
+/* BUTTONS */
+.btn{padding:9px 18px;border-radius:8px;font-size:14px;font-weight:500;font-family:'DM Sans',sans-serif;cursor:pointer;border:none;transition:opacity .2s,transform .1s}
+.btn:active{transform:scale(.97)}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{opacity:.9}
+.btn-secondary{background:var(--primary);color:#fff}
+.btn-secondary:hover{opacity:.85}
+.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text)}
+.btn-outline:hover{background:var(--bg)}
+.btn-sm{padding:6px 12px;font-size:13px}
+.btn-success{background:var(--success);color:#fff}
+.btn-warning{background:#f59e0b;color:#fff}
+.btn-danger{background:var(--accent);color:#fff}
+
+/* TABLE */
+.table-wrap{background:var(--card);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden}
+table{width:100%;border-collapse:collapse}
+thead th{background:var(--primary);color:rgba(255,255,255,.7);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;padding:12px 16px;text-align:left}
+tbody tr{border-bottom:1px solid var(--border);transition:background .1s}
+tbody tr:last-child{border-bottom:none}
+tbody tr:hover{background:#fafaf8}
+tbody td{padding:11px 16px;font-size:14px}
+.pagination{display:flex;align-items:center;gap:8px;padding:16px;justify-content:center;border-top:1px solid var(--border);flex-wrap:wrap}
+.page-btn{padding:6px 12px;border-radius:6px;border:1px solid var(--border);background:var(--card);cursor:pointer;font-size:13px;font-family:'DM Sans',sans-serif}
+.page-btn:hover{background:var(--bg)}
+.page-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.page-info{font-size:13px;color:var(--muted)}
+
+/* BADGES */
+.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:500}
+.badge-green{background:#e8f5ee;color:var(--success)}
+.badge-red{background:#ffeef0;color:var(--accent)}
+.badge-yellow{background:#fff8e0;color:#b5860d}
+.badge-gray{background:#f0f0f0;color:var(--muted)}
+.badge-blue{background:#e0f0ff;color:#1565c0}
+
+/* MODAL */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto}
+.modal-overlay.open{display:flex}
+.modal{background:var(--card);border-radius:16px;padding:32px;width:100%;max-width:720px;position:relative;margin:auto}
+.modal-title{font-family:'Syne',sans-serif;font-size:20px;font-weight:700;margin-bottom:24px}
+.modal-close{position:absolute;top:20px;right:20px;background:var(--bg);border:none;border-radius:50%;width:32px;height:32px;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.form-row.single{grid-template-columns:1fr}
+.form-row.triple{grid-template-columns:1fr 1fr 1fr}
+.form-group{display:flex;flex-direction:column;gap:6px}
+.form-group label{font-size:12px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.form-group input,.form-group select,.form-group textarea{border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:14px;font-family:'DM Sans',sans-serif;outline:none;transition:border-color .2s;background:var(--card)}
+.form-group input:focus,.form-group select:focus,.form-group textarea:focus{border-color:var(--accent)}
+.form-group input:read-only{background:var(--bg);color:var(--muted)}
+.form-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:24px}
+
+/* PEDIDO */
+.item-row{display:grid;grid-template-columns:2fr 70px 110px 90px 80px 32px;gap:8px;padding:10px 14px;align-items:center;border-bottom:1px solid var(--border);background:var(--card);font-size:13px}
+.item-row:last-child{border-bottom:none}
+.item-row-header{background:var(--primary);color:rgba(255,255,255,.6);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+.item-row input[type=number]{border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:'DM Sans',sans-serif;width:100%;outline:none}
+.item-row input:focus{border-color:var(--accent)}
+.btn-del{background:none;border:none;cursor:pointer;color:#ccc;font-size:18px}
+.btn-del:hover{color:var(--accent)}
+.totais-box{background:var(--primary);color:#fff;border-radius:10px;padding:16px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px}
+.totais-item{font-size:13px;color:rgba(255,255,255,.6)}
+.totais-item strong{font-family:'Syne',sans-serif;font-size:18px;color:#fff;display:block}
+.totais-item.highlight strong{color:var(--accent2)}
+.alerta{padding:12px 16px;border-radius:8px;font-size:13px;margin-bottom:12px}
+.alerta-warning{background:#fff3cd;color:#856404;border:1px solid #ffc107}
+.alerta-danger{background:#ffeef0;color:#842029;border:1px solid #f5c2c7}
+.alerta-success{background:#d1e7dd;color:#0f5132;border:1px solid #badbcc}
+.alerta-info{background:#cff4fc;color:#055160;border:1px solid #b6effb}
+
+/* PRODUTO FOTO */
+.prod-foto{width:40px;height:40px;border-radius:6px;object-fit:cover;border:1px solid var(--border);background:#f5f5f5;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.prod-foto img{width:100%;height:100%;object-fit:cover;border-radius:5px}
+
+/* PARCELAS */
+.parcelas-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-top:12px}
+.parcela-item{background:var(--bg);border-radius:8px;padding:10px 14px;border:1px solid var(--border);font-size:13px}
+.parcela-num{font-weight:600;color:var(--primary);font-size:12px;text-transform:uppercase;margin-bottom:2px}
+.parcela-valor{font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:var(--success)}
+.parcela-data{color:var(--muted);font-size:12px;margin-top:2px}
+.parcela-alert .parcela-valor{color:var(--accent)}
+
+/* FILTROS */
+.filtros-bar{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;margin-bottom:14px}
+.filtro-group{display:flex;flex-direction:column;gap:4px}
+.filtro-group label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
+.filtro-group input,.filtro-group select{border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:13px;font-family:'DM Sans',sans-serif;outline:none;background:var(--card);min-width:140px}
+.filtro-group input:focus,.filtro-group select:focus{border-color:var(--accent)}
+.filtros-toggle{display:flex;align-items:center;justify-content:space-between;width:100%;background:none;border:none;font-size:13px;font-weight:600;color:var(--primary);cursor:pointer;font-family:'DM Sans',sans-serif;padding:2px 0}
+.filtros-inner{display:none;padding-top:12px;flex-wrap:wrap;gap:8px;align-items:flex-end}
+.filtros-inner.open{display:flex}
+
+/* RESUMO PEDIDOS */
+.resumo-pedidos{display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap}
+.resumo-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 20px;font-size:13px;color:var(--muted);flex:1;min-width:150px}
+.resumo-card strong{display:block;font-family:'Syne',sans-serif;font-size:20px;color:var(--text);margin-top:4px}
+.resumo-card.destaque strong{color:var(--success)}
+
+/* EDIT LOCK */
+.edit-lock{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px}
+.edit-lock.can-edit{color:var(--success)}
+.edit-lock.locked{color:var(--accent)}
+
+/* ESTOQUE */
+.estoque-ok{color:var(--success);font-weight:600;font-size:12px}
+.estoque-low{color:#b5860d;font-weight:600;font-size:12px}
+.estoque-zero{color:var(--accent);font-weight:600;font-size:12px}
+
+/* LOADING */
+.loading-overlay{position:fixed;inset:0;background:rgba(26,26,46,.8);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px}
+.spinner{width:40px;height:40px;border:3px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse-urgente{0%,100%{opacity:1}50%{opacity:.6}}
+.loading-text{color:#fff;font-size:14px;font-family:'DM Sans',sans-serif}
+
+/* MAPS BTN */
+.btn-maps{background:#4285f4;color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;font-family:'DM Sans',sans-serif;display:inline-flex;align-items:center;gap:4px;text-decoration:none}
+.btn-maps:hover{opacity:.9}
+
+/* NOTIFICACAO */
+.toast{position:fixed;bottom:24px;right:24px;background:var(--primary);color:#fff;padding:14px 20px;border-radius:10px;font-size:14px;z-index:9998;opacity:0;transform:translateY(20px);transition:all .3s;max-width:320px}
+.toast.show{opacity:1;transform:translateY(0)}
+.toast.success{background:var(--success)}
+.toast.error{background:var(--accent)}
+
+/* ORCAMENTO TAG */
+.tag-orcamento{background:#fff8e0;color:#b5860d;border:1px solid #ffc107;font-size:11px;padding:2px 8px;border-radius:12px;font-weight:600}
+
+/* ══ CARDS GENÉRICOS ══ */
+.cliente-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:10px}
+.cliente-card-nome{font-weight:600;font-size:15px;margin-bottom:4px}
+.cliente-card-info{font-size:13px;color:var(--muted);margin-bottom:2px}
+.cliente-card-info span{color:var(--text)}
+.cliente-card-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+
+.pedido-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:10px}
+.pedido-card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;flex-wrap:wrap;gap:6px}
+.pedido-card-num{font-family:'Syne',sans-serif;font-weight:700;font-size:16px}
+.pedido-card-info{font-size:13px;color:var(--muted);margin-bottom:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.pedido-card-info span{color:var(--text)}
+.pedido-card-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+
+.produto-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:8px;display:flex;gap:12px;align-items:flex-start}
+.produto-card-foto{flex-shrink:0}
+.produto-card-info{flex:1}
+.produto-card-nome{font-size:13px;font-weight:500;margin-bottom:4px;line-height:1.3}
+.produto-card-preco{font-family:'Syne',sans-serif;font-weight:700;font-size:15px;color:var(--success)}
+.produto-card-detalhe{font-size:12px;color:var(--muted);margin-top:2px}
+
+/* ══ TABLET (768px) ══ */
+@media(max-width:768px){
+  .content{padding:16px 14px}
+  .dashboard-cards{grid-template-columns:1fr 1fr}
+  .filtro-group input,.filtro-group select{min-width:unset;width:100%;padding:10px 12px;font-size:14px}
+  .filtros-inner{display:none;padding-top:10px;display:none;grid-template-columns:1fr 1fr;gap:8px}
+  .filtros-inner.open{display:grid}
+  .filtros-btns{grid-column:span 2;display:flex;gap:8px;flex-wrap:wrap;padding-top:4px}
+  .filtros-btns .btn{flex:1;min-width:90px;text-align:center;justify-content:center}
+  .resumo-pedidos{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .resumo-card{min-width:unset;padding:12px 14px}
+  .resumo-card strong{font-size:18px}
+  .resumo-card:nth-child(3){grid-column:span 2}
+  .section-header{flex-direction:column;align-items:flex-start}
+  .search-box{width:100%}
+  .search-input{flex:1}
+  .form-row.triple{grid-template-columns:1fr 1fr}
+}
+
+/* ══ MOBILE (480px) ══ */
+@media(max-width:480px){
+  .content{padding:12px 10px}
+  .topbar{padding:0 14px;height:54px}
+  .topbar-logo img{height:30px}
+  .topbar-nome{display:none}
+  .nav-tabs{padding:0 8px;gap:0;overflow-x:auto;overflow-y:visible}
+  .nav-tab{padding:12px 8px;font-size:12px}
+  .nav-group{overflow:visible}
+  .nav-group-menu{position:fixed;top:auto;left:8px;right:8px;width:auto;min-width:unset;z-index:9999;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.25)}
+  .dashboard-cards{grid-template-columns:1fr 1fr;gap:10px}
+  .dash-card{padding:14px 14px}
+  .dash-card-value{font-size:20px}
+  .form-row,.form-row.triple{grid-template-columns:1fr}
+  .item-row{grid-template-columns:2fr 45px 85px 65px 65px 22px;font-size:11px;padding:8px 6px}
+  .modal{padding:20px 14px}
+  .modal-title{font-size:17px}
+  .btn{padding:8px 14px;font-size:13px}
+  .btn-sm{padding:7px 12px;font-size:13px}
+  .parcelas-grid{grid-template-columns:1fr 1fr}
+  .filtros-inner{grid-template-columns:1fr}
+  .filtros-btns{grid-column:span 1;flex-direction:column}
+  .filtros-btns .btn{width:100%}
+  .filtro-group input,.filtro-group select{padding:11px 12px;font-size:15px}
+  .resumo-pedidos{grid-template-columns:1fr 1fr;gap:8px}
+  .resumo-card{padding:10px 12px}
+  .resumo-card strong{font-size:16px}
+  .resumo-card:nth-child(3){grid-column:span 2}
+  .totais-box{flex-direction:column;gap:8px}
+  .search-input{width:100%}
+}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+/* PROMOÇÕES / CATÁLOGO */
+.arquivo-card{background:var(--card);border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);transition:box-shadow .2s}
+.arquivo-card:hover{box-shadow:0 4px 16px rgba(0,0,0,.10)}
+</style>
+</head>
+<body>
+
+<!-- LOADING -->
+<div class="loading-overlay" id="loading-overlay">
+  <div class="spinner"></div>
+  <div class="loading-text">Conectando ao sistema...</div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<!-- LOGIN -->
+<div id="login-screen" style="display:none">
+  <div class="login-box">
+    <div class="login-logo"><img src="data:image/png;base64,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" style="height:52px;width:auto;object-fit:contain" alt="CROW"></div>
+    <div class="login-sub">Sistema de Vendas Externas</div>
+    <label>Usuário</label>
+    <input type="text" id="login-user" placeholder="usuário ou e-mail" autocomplete="username">
+    <label>Senha</label>
+    <div style="position:relative">
+      <input type="password" id="login-pass" placeholder="••••••••" autocomplete="current-password" style="width:100%;padding-right:40px;box-sizing:border-box">
+      <button type="button" onclick="toggleSenhaLogin()" id="btn-toggle-senha"
+        style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:16px;padding:4px;color:var(--muted)">👁️</button>
+    </div>
+    <button class="btn-login" onclick="fazerLogin()">Entrar</button>
+    <div class="login-error" id="login-error"></div>
+    <div style="text-align:center;margin-top:14px">
+      <a href="#" onclick="esqueciSenha();return false" style="font-size:12px;color:var(--muted);text-decoration:underline">Esqueci minha senha</a>
+    </div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <div class="topbar">
+    <div class="topbar-logo"><img src="data:image/png;base64,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" style="height:36px;width:auto;object-fit:contain" alt="CROW"></div>
+    <div class="topbar-user">
+      <span id="topbar-nome"></span>
+      <span class="admin-badge" id="topbar-admin" style="display:none">Admin</span>
+      <div class="user-badge" id="topbar-inicial">U</div>
+      <button class="btn-sair" onclick="sair()">Sair</button>
+    </div>
+  </div>
+  <div class="nav-tabs">
+    <div class="nav-tab active" data-tab="painel" onclick="showTab('painel',this)">Painel</div>
+
+    <div class="nav-group">
+      <div class="nav-tab nav-group-trigger" onclick="toggleNavGroup(this,event)">Vendas ▾</div>
+      <div class="nav-group-menu">
+        <div class="nav-tab" data-tab="pedidos" onclick="showTab('pedidos',this)">Pedidos</div>
+        <div class="nav-tab" data-tab="orcamentos" onclick="showTab('orcamentos',this)">Orçamentos</div>
+        <div class="nav-tab" data-tab="clientes" onclick="showTab('clientes',this)">Clientes</div>
+      </div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-tab nav-group-trigger" onclick="toggleNavGroup(this,event)">Catálogo ▾</div>
+      <div class="nav-group-menu">
+        <div class="nav-tab" data-tab="produtos" onclick="showTab('produtos',this)">Produtos</div>
+        <div class="nav-tab" data-tab="promocoes" onclick="showTab('promocoes',this)">🏷️ Promoções</div>
+        <div class="nav-tab" data-tab="catalogo" onclick="showTab('catalogo',this)">📚 Catálogo</div>
+      </div>
+    </div>
+
+    <div class="nav-group admin-only">
+      <div class="nav-tab nav-group-trigger" onclick="toggleNavGroup(this,event)">Operações ▾</div>
+      <div class="nav-group-menu">
+        <div class="nav-tab" data-tab="separacao" onclick="showTab('separacao',this)">📦 Separação</div>
+        <div class="nav-tab" data-tab="producao" onclick="showTab('producao',this)">🏭 Ordens de Produção</div>
+        <div class="nav-tab" data-tab="garantias" onclick="showTab('garantias',this)">🛡️ Garantias</div>
+      </div>
+    </div>
+
+    <div class="nav-group admin-only">
+      <div class="nav-tab nav-group-trigger" onclick="toggleNavGroup(this,event)">Compras ▾</div>
+      <div class="nav-group-menu">
+        <div class="nav-tab" data-tab="compras" onclick="showTab('compras',this)">🛒 Pedidos de Compra</div>
+        <div class="nav-tab" data-tab="fornecedores" onclick="showTab('fornecedores',this)">🚚 Fornecedores</div>
+        <div class="nav-tab" data-tab="estoque" onclick="showTab('estoque',this)">📊 Estoque</div>
+      </div>
+    </div>
+
+    <div class="nav-group admin-only">
+      <div class="nav-tab nav-group-trigger" onclick="toggleNavGroup(this,event)">Admin ▾</div>
+      <div class="nav-group-menu">
+        <div class="nav-tab" data-tab="vendedores" onclick="showTab('vendedores',this)">👤 Usuários</div>
+        <div class="nav-tab" data-tab="importar" onclick="showTab('importar',this)">Importar Dados</div>
+      </div>
+    </div>
+  </div>
+  <div class="content">
+
+    <!-- PAINEL -->
+    <div id="tab-painel">
+      <div class="dashboard-cards" id="dash-cards"></div>
+      <div class="section-header"><div class="section-title">Pedidos Recentes</div></div>
+      <div id="dash-pedidos-wrap"></div>
+    </div>
+
+    <!-- PEDIDOS -->
+    <div id="tab-pedidos" style="display:none">
+      <div class="section-header">
+        <div class="section-title">Meus Pedidos</div>
+        <button class="btn btn-primary" onclick="abrirModalPedido()">+ Novo Pedido</button>
+      </div>
+      <div class="filtros-bar" id="filtros-pedidos-bar">
+        <button class="filtros-toggle" onclick="toggleFiltros('filtros-pedidos-inner')">
+          <span>🔍 Filtros</span><span id="filtros-pedidos-arrow">▼</span>
+        </button>
+        <div class="filtros-inner" id="filtros-pedidos-inner">
+          <div class="filtro-group">
+            <label>Data início</label>
+            <input type="date" id="f-data-ini">
+          </div>
+          <div class="filtro-group">
+            <label>Data fim</label>
+            <input type="date" id="f-data-fim">
+          </div>
+          <div class="filtro-group">
+            <label>Cliente</label>
+            <input type="text" id="f-cliente" placeholder="Nome do cliente...">
+          </div>
+          <div class="filtro-group">
+            <label>Produto</label>
+            <input type="text" id="f-produto" placeholder="Nome ou código...">
+          </div>
+          <div class="filtro-group admin-only" id="f-vendedor-wrap" style="display:none">
+            <label>Vendedor</label>
+            <input type="text" id="f-vendedor" list="lista-vendedores-datalist" placeholder="Digite ou selecione..." oninput="renderPedidos()">
+            <datalist id="lista-vendedores-datalist"></datalist>
+          </div>
+          <div class="filtro-group">
+            <label>Situação</label>
+            <select id="f-status">
+              <option value="ativos">Aguard. Aprovação + Aprovado + Em Separação</option>
+              <option value="">Todos os status</option>
+              <option value="AA">Aguard. Aprovação</option>
+              <option value="AP">Aprovado</option>
+              <option value="EX">Em Separação</option>
+              <option value="CC">Concluído</option>
+              <option value="Cancelado">Cancelado</option>
+            </select>
+          </div>
+          <div class="filtros-btns">
+            <button class="btn btn-secondary btn-sm" onclick="renderPedidos()">Filtrar</button>
+            <button class="btn btn-outline btn-sm" onclick="limparFiltrosPedidos()">Limpar</button>
+            <button id="btn-exportar-w3" class="btn btn-secondary btn-sm" onclick="exportarPedidosW3()" style="display:none;background:#1C4C2A;color:#fff;border:none;margin-left:4px">⬇ Exportar W3</button>
+          </div>
+        </div>
+      </div>
+      <div class="resumo-pedidos" id="resumo-pedidos"></div>
+      <div id="pedidos-lista"></div>
+      <div class="pagination" id="pedidos-pag"></div>
+    </div>
+
+    <!-- ORÇAMENTOS -->
+    <div id="tab-orcamentos" style="display:none">
+      <div class="section-header">
+        <div class="section-title">Orçamentos</div>
+        <button class="btn btn-primary" onclick="abrirModalOrcamento()">+ Novo Orçamento</button>
+      </div>
+      <div class="filtros-bar">
+        <button class="filtros-toggle" onclick="toggleFiltros('filtros-orc-inner')">
+          <span>🔍 Filtros</span><span id="filtros-orc-arrow">▼</span>
+        </button>
+        <div class="filtros-inner" id="filtros-orc-inner">
+          <div class="filtro-group">
+            <label>Data início</label>
+            <input type="date" id="fo-data-ini">
+          </div>
+          <div class="filtro-group">
+            <label>Data fim</label>
+            <input type="date" id="fo-data-fim">
+          </div>
+          <div class="filtro-group">
+            <label>Cliente</label>
+            <input type="text" id="fo-cliente" placeholder="Nome do cliente...">
+          </div>
+          <div class="filtro-group">
+            <label>Produto</label>
+            <input type="text" id="fo-produto" placeholder="Nome ou código...">
+          </div>
+          <div class="filtro-group admin-only" id="fo-vendedor-wrap" style="display:none">
+            <label>Vendedor</label>
+            <input type="text" id="fo-vendedor" list="lista-vendedores-datalist-orc" placeholder="Digite ou selecione..." oninput="renderOrcamentos()">
+            <datalist id="lista-vendedores-datalist-orc"></datalist>
+          </div>
+          <div class="filtros-btns">
+            <button class="btn btn-secondary btn-sm" onclick="renderOrcamentos()">Filtrar</button>
+            <button class="btn btn-outline btn-sm" onclick="limparFiltrosOrcamentos()">Limpar</button>
+          </div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <div id="orcamentos-table"></div>
+      </div>
+      <div class="pagination" id="orcamentos-pag"></div>
+    </div>
+
+    <!-- CLIENTES -->
+    <div id="tab-clientes" style="display:none">
+      <div class="section-header">
+        <div class="section-title">Clientes</div>
+        <button class="btn btn-primary admin-only" onclick="abrirModalCliente()" id="btn-novo-cliente" style="display:none">+ Novo Cliente</button>
+      </div>
+      <div class="filtros-bar">
+        <button class="filtros-toggle" onclick="toggleFiltros('filtros-clientes-inner')">
+          <span>🔍 Filtros</span><span id="filtros-clientes-arrow">▼</span>
+        </button>
+        <div class="filtros-inner open" id="filtros-clientes-inner">
+          <div class="filtro-group">
+            <label>Nome</label>
+            <input type="text" id="cliente-f-nome" placeholder="Nome do cliente..." oninput="renderClientes()">
+          </div>
+          <div class="filtro-group">
+            <label>CNPJ/CPF</label>
+            <input type="text" id="cliente-f-cnpj" placeholder="Documento..." oninput="renderClientes()">
+          </div>
+          <div class="filtro-group">
+            <label>Endereço</label>
+            <input type="text" id="cliente-f-endereco" placeholder="Rua, bairro..." oninput="renderClientes()">
+          </div>
+          <div class="filtro-group">
+            <label>Cidade</label>
+            <input type="text" id="cliente-f-cidade" placeholder="Cidade..." oninput="renderClientes()">
+          </div>
+          <div class="filtro-group">
+            <label>Estado (UF)</label>
+            <input type="text" id="cliente-f-uf" placeholder="ex: MG" maxlength="2" oninput="renderClientes()">
+          </div>
+          <div class="filtro-group admin-only" id="cliente-f-vendedor-wrap" style="display:none">
+            <label>Vendedor</label>
+            <input type="text" id="cliente-f-vendedor" list="lista-vendedores-datalist-cliente" placeholder="Digite ou selecione..." oninput="renderClientes()">
+            <datalist id="lista-vendedores-datalist-cliente"></datalist>
+          </div>
+          <div class="filtro-group">
+            <label>Cadastrado a partir de</label>
+            <input type="date" id="cliente-f-data-ini" onchange="renderClientes()">
+          </div>
+          <div class="filtro-group">
+            <label>Cadastrado até</label>
+            <input type="date" id="cliente-f-data-fim" onchange="renderClientes()">
+          </div>
+          <div class="filtro-group">
+            <label>Situação W3</label>
+            <select id="cliente-f-w3" onchange="renderClientes()">
+              <option value="">Todos</option>
+              <option value="pendente">⚠️ Pendente no W3</option>
+              <option value="ok">✅ Cadastrado no W3</option>
+            </select>
+          </div>
+          <div class="filtros-btns">
+            <button class="btn btn-secondary btn-sm" onclick="renderClientes()">Filtrar</button>
+            <button class="btn btn-outline btn-sm" onclick="limparFiltrosClientes()">Limpar</button>
+          </div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <div id="clientes-table"></div>
+      </div>
+      <div class="pagination" id="clientes-pag"></div>
+    </div>
+
+    <!-- PRODUTOS -->
+    <div id="tab-produtos" style="display:none">
+      <div class="section-header">
+        <div class="section-title">Produtos &amp; Insumos</div>
+        <div class="search-box" style="align-items:center;gap:8px;flex-wrap:wrap">
+          <div id="btn-tabela-prod-wrap"></div>
+          <button class="btn btn-outline btn-sm" onclick="forcarAtualizacaoFotos()" title="Força recarregar todas as fotos, útil após trocar imagens no Cloudinary">🔄 Atualizar Fotos</button>
+          <input type="text" class="search-input" id="search-produtos" placeholder="Buscar produto..." oninput="renderProdutos()">
+          <select id="filter-estoque" onchange="renderProdutos()" class="search-input" style="width:auto">
+            <option value="todos">Todos</option>
+            <option value="disponivel">Com estoque</option>
+            <option value="zero">Sem estoque</option>
+          </select>
+          <select id="filter-fornecedor-produto" onchange="renderProdutos()" class="search-input" style="width:auto">
+            <option value="">Todos os fornecedores</option>
+          </select>
+          <button class="btn btn-primary admin-only" onclick="abrirModalNovoItem()">+ Novo Insumo</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <div id="produtos-table"></div>
+      </div>
+      <div class="pagination" id="produtos-pag"></div>
+    </div>
+
+    <!-- VENDEDORES (admin) -->
+    <div id="tab-vendedores" style="display:none">
+      <div class="section-header">
+        <div class="section-title">👤 Usuários</div>
+        <button class="btn btn-primary" onclick="abrirModalVendedor()">+ Novo Usuário</button>
+      </div>
+      <div class="table-wrap">
+        <table><thead><tr><th>Nome</th><th>Usuário</th><th>Telefone</th><th>Status</th><th></th></tr></thead>
+        <tbody id="vendedores-table"></tbody></table>
+      </div>
+    </div>
+
+    <!-- IMPORTAR (admin) -->
+    <div id="tab-importar" style="display:none">
+      <div class="section-title" style="margin-bottom:24px">Importar Dados</div>
+      <div class="table-wrap" style="padding:24px;margin-bottom:20px;border:2px solid #dc2626">
+        <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">🗑️ Apagar Pedidos Importados do W3</div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
+          Apaga em massa todos os pedidos que vieram de importação do W3 (<strong>codigo_w3</strong> preenchido). Pedidos digitados manualmente pelos vendedores <strong>não são afetados</strong>.
+        </div>
+        <button class="btn btn-primary btn-sm" style="background:#dc2626" onclick="apagarPedidosW3EmMassa()">🗑️ Apagar Pedidos Importados</button>
+        <div id="apagar-pedidos-w3-result" style="margin-top:12px;font-size:13px"></div>
+      </div>
+      <div class="table-wrap" style="padding:24px;margin-bottom:20px;border:2px solid #16a34a">
+        <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">💾 Backup do Sistema</div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
+          O sistema faz um <strong>backup automático diário</strong> de tudo (produtos, clientes, pedidos, compras, fornecedores, usuários) toda vez que um administrador acessa, guardando os últimos 14 dias dentro do próprio Firebase.<br>
+          Para ter uma cópia <strong>fora</strong> do Firebase (proteção contra qualquer problema na conta do Firebase também), baixe um backup manual sempre que quiser — recomendado antes de qualquer importação grande.
+        </div>
+        <div id="backup-status" style="font-size:12px;color:var(--muted);margin-bottom:12px"></div>
+        <button class="btn btn-primary btn-sm" style="background:#16a34a" onclick="baixarBackupCompleto()">💾 Baixar Backup Completo Agora</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px">
+        <div class="table-wrap" style="padding:24px">
+          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">Clientes</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:16px">CSV exportado do W3</div>
+          <input type="file" id="import-clientes-file" accept=".csv" style="font-size:13px;margin-bottom:12px;display:block">
+          <button class="btn btn-primary btn-sm" onclick="importarClientes()">Importar Clientes</button>
+          <div id="import-clientes-result" style="margin-top:12px;font-size:13px"></div>
+        </div>
+        <div class="table-wrap" style="padding:24px">
+          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">👤 Vincular Clientes por Vendedor</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:16px">CSV de clientes do W3, filtrado por vendedor. Atualiza o vendedor de clientes já existentes e cadastra os novos.</div>
+          <select id="vincular-vendedor-select" style="width:100%;margin-bottom:10px;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px">
+            <option value="">Selecione o vendedor...</option>
+          </select>
+          <input type="file" id="vincular-clientes-file" accept=".csv" style="font-size:13px;margin-bottom:12px;display:block">
+          <button class="btn btn-primary btn-sm" onclick="vincularClientesPorVendedor()">Vincular Clientes</button>
+          <div id="vincular-clientes-result" style="margin-top:12px;font-size:13px;max-height:200px;overflow-y:auto"></div>
+        </div>
+        <div class="table-wrap" style="padding:24px">
+          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">Tabela de Preços</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:16px">CSV — TABELA_PREÇO_W3.csv</div>
+          <input type="file" id="import-precos-file" accept=".csv" style="font-size:13px;margin-bottom:12px;display:block">
+          <button class="btn btn-primary btn-sm" onclick="importarPrecos()">Importar Preços</button>
+          <div id="import-precos-result" style="margin-top:12px;font-size:13px"></div>
+        </div>
+        <div class="table-wrap" style="padding:24px">
+          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">🏗️ Cadastro Completo de Produtos (Bling)</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:16px">CSV — export "Produtos" do Bling. Cria/recompõe o cadastro inteiro: nome, unidade, preço, custo, estoque mínimo, localização, GTIN e fornecedor padrão. Produtos já cadastrados que NÃO estão nesta planilha não são alterados.</div>
+          <input type="file" id="import-cadastro-produtos-file" accept=".csv" style="font-size:13px;margin-bottom:12px;display:block">
+          <button class="btn btn-primary btn-sm" onclick="importarCadastroCompletoProdutos()">Importar Cadastro Completo</button>
+          <div id="import-cadastro-produtos-result" style="margin-top:12px;font-size:13px;max-height:240px;overflow-y:auto"></div>
+        </div>
+        <div class="table-wrap" style="padding:24px">
+          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">🔄 Recalcular Reservas de Estoque</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
+            Recalcula o campo "Reservado" de todos os produtos com base nos pedidos realmente abertos (Aguard. Aprovação, Aprovado, Em Separação). Use quando o número de reservados estiver inconsistente com os pedidos do sistema.
+          </div>
+          <button class="btn btn-primary btn-sm" style="background:#7c3aed" onclick="recalcularTodasReservas()">🔄 Recalcular Agora</button>
+          <div id="recalcular-reservas-result" style="margin-top:12px;font-size:13px;max-height:200px;overflow-y:auto"></div>
+        </div>
+        <div class="table-wrap" style="padding:24px">
+          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">🔧 Corrigir Códigos de Pedidos</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
+            Percorre todos os pedidos importados do W3 e tenta re-vincular itens que ficaram com código inválido (<strong>"reservado"</strong> ou vazio), cruzando o nome do produto com o cadastro atual.
+          </div>
+          <button class="btn btn-primary btn-sm" style="background:#dc2626" onclick="corrigirCodigosPedidos()">🔧 Corrigir Agora</button>
+          <div id="corrigir-codigos-result" style="margin-top:12px;font-size:13px;max-height:240px;overflow-y:auto"></div>
+        </div>
+        <div class="table-wrap" style="padding:24px">
+          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">🔗 Vincular Itens W3 ao Cadastro</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
+            Mostra todos os itens importados do W3 que não foram reconhecidos no cadastro. Vincule cada nome do W3 ao produto correto — o sistema aprende e aplica automaticamente nas próximas importações.
+          </div>
+          <button class="btn btn-primary btn-sm" style="background:#1565c0" onclick="abrirVinculacaoW3()">🔗 Revisar e Vincular</button>
+          <div id="vinculacao-w3-result" style="margin-top:12px;font-size:13px;max-height:400px;overflow-y:auto"></div>
+        </div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:16px">CSV — relatorio_estoque.csv</div>
+          <input type="file" id="import-estoque-file" accept=".csv" style="font-size:13px;margin-bottom:12px;display:block">
+          <button class="btn btn-primary btn-sm" onclick="importarEstoque()">Importar Estoque</button>
+          <div id="import-estoque-result" style="margin-top:12px;font-size:13px"></div>
+        </div>
+        <div class="table-wrap" style="padding:24px">
+          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">Fotos de Produtos</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:12px">As fotos são carregadas automaticamente do <strong>Cloudinary</strong>.</div>
+          <ol style="font-size:13px;color:var(--muted);padding-left:18px;line-height:1.8">
+            <li>Acesse <a href="https://cloudinary.com" target="_blank" style="color:var(--accent)">cloudinary.com</a> → Media Library</li>
+            <li>Pasta <strong>produtos</strong></li>
+            <li>Upload com nome = código do produto (ex: 7493.png)</li>
+          </ol>
+          <button class="btn btn-outline btn-sm" style="margin-top:10px" onclick="localStorage.removeItem('crow_foto_mapa');localStorage.removeItem('crow_foto_mapa_ts');carregarFotoMapa();toast('✓ Cache de fotos atualizado','success')">🔄 Atualizar fotos</button>
+          <div class="alerta alerta-success" style="margin-top:10px">✓ Cloudinary: <strong>dleujtvtq</strong></div>
+        </div>
+        <div class="table-wrap" style="padding:24px">
+          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">📥 Pedidos de Venda</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:16px">XLS — gerenciarvenda_*.xls (W3) · também aceita CSV</div>
+          <input type="file" id="import-pedidos-file" accept=".xls,.xlsx,.csv" style="font-size:13px;margin-bottom:12px;display:block">
+          <button class="btn btn-primary btn-sm" onclick="importarPedidosW3()">Importar Pedidos</button>
+          <div id="import-pedidos-result" style="margin-top:12px;font-size:13px;max-height:200px;overflow-y:auto"></div>
+        </div>
+        <div class="table-wrap" style="padding:24px">
+          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">✅ Finalizar Pedidos em Massa</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
+            Para pedidos importados que <strong>já foram entregues/faturados de verdade</strong> (não precisam passar por bipagem).
+            Isso dá baixa real no estoque, libera a reserva e marca como <strong>Concluído</strong> — exatamente como se tivesse sido bipado.<br>
+            Cole abaixo o <strong>número do pedido no W3</strong> ou o <strong>número do pedido no sistema</strong> (um por linha — pode misturar os dois tipos).
+          </div>
+          <textarea id="finalizar-massa-codigos" rows="6" placeholder="Ex:&#10;87516&#10;87530&#10;142" style="width:100%;font-size:13px;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px;font-family:monospace"></textarea>
+          <button class="btn btn-primary btn-sm" style="background:#16a34a" onclick="finalizarPedidosEmMassa()">✅ Finalizar Selecionados</button>
+          <div id="finalizar-massa-result" style="margin-top:12px;font-size:13px;max-height:240px;overflow-y:auto"></div>
+        </div>
+        <div class="table-wrap" style="padding:24px">
+          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">📥 Pedidos de Compra</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:16px">CSV — pedidos_compra_*.csv (Bling)</div>
+          <input type="file" id="import-compras-file" accept=".csv" style="font-size:13px;margin-bottom:12px;display:block">
+          <button class="btn btn-primary btn-sm" onclick="importarPedidosCompraCSV()">Importar Pedidos de Compra</button>
+          <div id="import-compras-result" style="margin-top:12px;font-size:13px;max-height:200px;overflow-y:auto"></div>
+        </div>
+        <div class="table-wrap" style="padding:24px">
+          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">🏷️ Promoções do Mês</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:16px">PDF, PNG ou JPG. O vendedor verá na aba Promoções.</div>
+
+          <!-- Upload direto -->
+          <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">📤 Upload direto</div>
+          <input type="file" id="admin-promo-file" accept=".pdf,.png,.jpg,.jpeg" multiple style="font-size:13px;margin-bottom:12px;display:block">
+          <input type="text" id="admin-promo-nome" placeholder="Nome do arquivo (ex: Jornal Junho 2026)" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:8px;box-sizing:border-box">
+          <button class="btn btn-primary btn-sm" onclick="adminUploadPromo()">📤 Enviar arquivo</button>
+          <div id="admin-promo-result" style="margin-top:10px;font-size:13px"></div>
+
+          <!-- Link externo -->
+          <div style="border-top:1px solid var(--border);margin:16px 0"></div>
+          <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🔗 Ou cole um link (Google Drive, Dropbox...)</div>
+          <input type="text" id="admin-promo-link-nome" placeholder="Nome (ex: Jornal Junho 2026)" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:8px;box-sizing:border-box">
+          <input type="url" id="admin-promo-link-url" placeholder="https://drive.google.com/file/d/..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:8px;box-sizing:border-box">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:10px">💡 No Google Drive: botão direito no arquivo → Compartilhar → "Qualquer pessoa com o link" → copie o link</div>
+          <button class="btn btn-secondary btn-sm" onclick="adminSalvarLinkPromo()">💾 Salvar link</button>
+          <div id="admin-promo-link-result" style="margin-top:10px;font-size:13px"></div>
+
+          <div id="admin-promo-lista" style="margin-top:14px;font-size:13px"></div>
+        </div>
+        <div class="table-wrap" style="padding:24px">
+          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">📚 Catálogo de Produtos</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:16px">Cole o link do catálogo (Google Drive, Dropbox, WhatsApp Web, etc.). O vendedor verá na aba Catálogo.</div>
+          <input type="text" id="admin-catalogo-nome" placeholder="Nome (ex: Catálogo 2026)" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:8px">
+          <input type="url" id="admin-catalogo-link" placeholder="https://drive.google.com/..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:12px">
+          <button class="btn btn-primary btn-sm" onclick="adminSalvarLinkCatalogo()">💾 Salvar Link</button>
+          <div id="admin-catalogo-result" style="margin-top:10px;font-size:13px"></div>
+          <div id="admin-catalogo-lista" style="margin-top:14px;font-size:13px"></div>
+        </div>
+        <div class="table-wrap" style="padding:24px">
+          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">💰 Tabela de Preços (Download)</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:16px">PDF, PNG ou JPG. O vendedor verá na aba Produtos.</div>
+
+          <!-- Upload direto -->
+          <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">📤 Upload direto</div>
+          <input type="file" id="admin-tabela-file" accept=".pdf,.png,.jpg,.jpeg" multiple style="font-size:13px;margin-bottom:12px;display:block">
+          <input type="text" id="admin-tabela-nome" placeholder="Nome (ex: Tabela Julho 2026)" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:8px;box-sizing:border-box">
+          <button class="btn btn-primary btn-sm" onclick="adminUploadTabela()">📤 Enviar arquivo</button>
+          <div id="admin-tabela-result" style="margin-top:10px;font-size:13px"></div>
+
+          <!-- Link externo -->
+          <div style="border-top:1px solid var(--border);margin:16px 0"></div>
+          <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🔗 Ou cole um link (Google Drive, Dropbox...)</div>
+          <input type="text" id="admin-tabela-link-nome" placeholder="Nome (ex: Tabela Junho 2026)" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:8px;box-sizing:border-box">
+          <input type="url" id="admin-tabela-link-url" placeholder="https://drive.google.com/file/d/..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:8px;box-sizing:border-box">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:10px">💡 No Google Drive: botão direito no arquivo → Compartilhar → "Qualquer pessoa com o link" → copie o link</div>
+          <button class="btn btn-secondary btn-sm" onclick="adminSalvarLinkTabela()">💾 Salvar link</button>
+          <div id="admin-tabela-link-result" style="margin-top:10px;font-size:13px"></div>
+
+          <div id="admin-tabela-lista" style="margin-top:14px;font-size:13px"></div>
+        </div>
+
+    </div><!-- fim tab-importar -->
+
+    <!-- PROMOÇÕES -->
+    <div id="tab-promocoes" style="display:none">
+      <div class="section-header">
+        <div class="section-title">🏷️ Promoções do Mês</div>
+        <div id="btn-upload-promo-wrap" style="display:none">
+          <button class="btn btn-primary" onclick="document.getElementById('promo-file-input').click()">+ Adicionar Arquivo</button>
+          <input type="file" id="promo-file-input" accept=".pdf,.png,.jpg,.jpeg" multiple style="display:none" onchange="uploadArquivoPromo(this.files)">
+        </div>
+      </div>
+      <div id="promocoes-lista" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px"></div>
+    </div>
+
+    <!-- CATÁLOGO -->
+    <div id="tab-catalogo" style="display:none">
+      <div class="section-header">
+        <div class="section-title">📚 Catálogo & Tabela de Preços</div>
+        <div id="btn-upload-catalogo-wrap" style="display:none">
+          <button class="btn btn-primary" onclick="document.getElementById('catalogo-file-input').click()">+ Adicionar Arquivo</button>
+          <input type="file" id="catalogo-file-input" accept=".pdf,.png,.jpg,.jpeg" style="display:none" onchange="uploadArquivoCatalogo(this.files)">
+        </div>
+      </div>
+      <div id="catalogo-lista" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px"></div>
+    </div>
+
+    <!-- FORNECEDORES -->
+    <div id="tab-fornecedores" style="display:none">
+      <div class="section-header">
+        <div class="section-title">🚚 Fornecedores</div>
+        <div class="search-box">
+          <input type="text" class="search-input" id="search-fornecedores" placeholder="Buscar fornecedor..." oninput="renderFornecedores()">
+          <button class="btn btn-primary" onclick="abrirModalFornecedor()">+ Novo Fornecedor</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <div id="fornecedores-table"></div>
+      </div>
+      <div class="pagination" id="fornecedores-pag"></div>
+    </div>
+
+    <!-- SEPARAÇÃO -->
+    <div id="tab-separacao" style="display:none">
+      <div class="section-header">
+        <div class="section-title">📦 Separação de Pedidos</div>
+      </div>
+      <div id="separacao-lista"></div>
+    </div>
+
+    <!-- PEDIDOS DE COMPRA -->
+    <div id="tab-compras" style="display:none">
+      <div class="section-header">
+        <div class="section-title">🛒 Pedidos de Compra</div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-outline" style="color:#dc2626;border-color:#dc2626" onclick="abrirRevisaoItensSemCadastro()">⚠️ Itens sem Cadastro</button>
+          <button class="btn btn-outline" onclick="exportarComprasExcel()">📊 Exportar Excel</button>
+          <button class="btn btn-primary" onclick="abrirModalNovaCompra()">+ Nova Compra</button>
+        </div>
+      </div>
+      <div class="filtros-bar">
+        <button class="filtros-toggle" onclick="toggleFiltros('filtros-compra-inner')">
+          <span>🔍 Filtros</span><span id="filtros-compra-arrow">▼</span>
+        </button>
+        <div class="filtros-inner" id="filtros-compra-inner">
+          <div class="filtro-group">
+            <label>Data início</label>
+            <input type="date" id="compra-f-data-ini">
+          </div>
+          <div class="filtro-group">
+            <label>Data fim</label>
+            <input type="date" id="compra-f-data-fim">
+          </div>
+          <div class="filtro-group">
+            <label>Fornecedor</label>
+            <input type="text" id="compra-f-fornecedor" placeholder="Nome do fornecedor...">
+          </div>
+          <div class="filtro-group">
+            <label>Nº do Pedido / NF</label>
+            <input type="text" id="compra-f-numero" placeholder="ex: 919...">
+          </div>
+          <div class="filtro-group">
+            <label>Produto</label>
+            <input type="text" id="compra-f-produto" placeholder="Nome ou código...">
+          </div>
+          <div class="filtro-group">
+            <label>Status</label>
+            <select id="compra-f-status">
+              <option value="">Todos os status</option>
+              <option value="negociacao">Em Negociação</option>
+              <option value="separacao">Em Separação</option>
+              <option value="transito">Em Trânsito</option>
+              <option value="recebido">Recebido</option>
+              <option value="concluido">Concluído</option>
+            </select>
+          </div>
+          <div class="filtros-btns">
+            <button class="btn btn-secondary btn-sm" onclick="paginaCompras=1;renderCompras()">Filtrar</button>
+            <button class="btn btn-outline btn-sm" onclick="limparFiltrosCompras()">Limpar</button>
+          </div>
+        </div>
+      </div>
+      <div id="compras-lista"></div>
+      <div class="pagination" id="compras-pag"></div>
+    </div>
+
+    <!-- GARANTIAS -->
+    <div id="tab-garantias" style="display:none">
+      <div class="section-header">
+        <div class="section-title">🛡️ Garantias com Fornecedor</div>
+        <button class="btn btn-primary" onclick="abrirRelatorioGarantias()">📄 Gerar Relatório</button>
+      </div>
+      <div class="dashboard-cards" id="garantias-resumo" style="margin-bottom:16px"></div>
+      <div class="filtros-bar">
+        <button class="filtros-toggle" onclick="toggleFiltros('filtros-garantia-inner')">
+          <span>🔍 Filtros</span><span id="filtros-garantia-arrow">▼</span>
+        </button>
+        <div class="filtros-inner" id="filtros-garantia-inner">
+          <div class="filtro-group">
+            <label>Data início</label>
+            <input type="date" id="garantia-f-data-ini">
+          </div>
+          <div class="filtro-group">
+            <label>Data fim</label>
+            <input type="date" id="garantia-f-data-fim">
+          </div>
+          <div class="filtro-group">
+            <label>Fornecedor</label>
+            <input type="text" id="garantia-f-fornecedor" placeholder="Nome do fornecedor...">
+          </div>
+          <div class="filtro-group">
+            <label>Código do insumo</label>
+            <input type="text" id="garantia-f-codigo" placeholder="ex: M0123">
+          </div>
+          <div class="filtro-group">
+            <label>Status</label>
+            <select id="garantia-f-status">
+              <option value="">Todos</option>
+              <option value="pendente">Pendente</option>
+              <option value="aguardando_envio">Aguardando Envio</option>
+              <option value="enviado">Enviado</option>
+              <option value="finalizado">Finalizado</option>
+              <option value="cancelado">Cancelado</option>
+            </select>
+          </div>
+          <div class="filtros-btns">
+            <button class="btn btn-secondary btn-sm" onclick="paginaGarantias=1;renderGarantias()">Filtrar</button>
+            <button class="btn btn-outline btn-sm" onclick="limparFiltrosGarantias()">Limpar</button>
+          </div>
+        </div>
+      </div>
+      <div id="garantias-lista"></div>
+      <div class="pagination" id="garantias-pag"></div>
+    </div>
+
+    <!-- ESTOQUE -->
+    <div id="tab-estoque" style="display:none">
+      <div class="section-header">
+        <div class="section-title">📊 Movimentação de Estoque</div>
+        <div class="search-box">
+          <button class="btn btn-outline btn-sm" id="btn-toggle-estoque-view" onclick="toggleEstoqueView()">🔍 Analisar Movimentações</button>
+          <button class="btn btn-primary" onclick="abrirModalMovimentoEstoque()">+ Lançar Movimento</button>
+        </div>
+      </div>
+
+      <!-- VISÃO 1: Lista de produtos com estoque atual -->
+      <div id="estoque-view-produtos">
+        <div class="search-box" style="margin-bottom:14px">
+          <input type="text" class="search-input" id="search-estoque" placeholder="Buscar produto..." oninput="renderEstoque()">
+        </div>
+        <div id="estoque-lista"></div>
+        <div class="pagination" id="estoque-pag"></div>
+      </div>
+
+      <!-- VISÃO 2: Análise de movimentações (entradas/saídas) com filtros -->
+      <div id="estoque-view-movimentos" style="display:none">
+        <div class="filtros-bar">
+          <button class="filtros-toggle" onclick="toggleFiltros('filtros-mov-inner')">
+            <span>🔍 Filtros</span><span id="filtros-mov-arrow">▼</span>
+          </button>
+          <div class="filtros-inner open" id="filtros-mov-inner">
+            <div class="filtro-group">
+              <label>Data início</label>
+              <input type="date" id="mov-f-data-ini">
+            </div>
+            <div class="filtro-group">
+              <label>Data fim</label>
+              <input type="date" id="mov-f-data-fim">
+            </div>
+            <div class="filtro-group">
+              <label>Código do produto</label>
+              <input type="text" id="mov-f-codigo" placeholder="ex: 9200">
+            </div>
+            <div class="filtro-group">
+              <label>Tipo</label>
+              <select id="mov-f-tipo">
+                <option value="">Entradas e Saídas</option>
+                <option value="entrada">Apenas Entradas</option>
+                <option value="saida">Apenas Saídas</option>
+              </select>
+            </div>
+            <div class="filtros-btns">
+              <button class="btn btn-secondary btn-sm" onclick="renderMovimentosEstoque()">Filtrar</button>
+              <button class="btn btn-outline btn-sm" onclick="limparFiltrosMovimentos()">Limpar</button>
+            </div>
+          </div>
+        </div>
+        <div class="dashboard-cards" id="mov-resumo" style="margin-bottom:16px"></div>
+        <div id="movimentos-lista"></div>
+        <div class="pagination" id="movimentos-pag"></div>
+      </div>
+    </div>
+
+    <!-- PRODUÇÃO -->
+    <div id="tab-producao" style="display:none">
+      <div class="section-header">
+        <div class="section-title">🏭 Ordens de Produção</div>
+        <button class="btn btn-primary" onclick="abrirModalOP()">+ Nova OP</button>
+      </div>
+      <div class="filtros-bar">
+        <button class="filtros-toggle" onclick="toggleFiltros('filtros-op-inner')">🔍 Filtros <span id="filtros-op-seta">▼</span></button>
+        <div class="filtros-inner" id="filtros-op-inner">
+          <div class="filtro-group">
+            <label>Data Início</label>
+            <input type="date" id="op-f-data-ini">
+          </div>
+          <div class="filtro-group">
+            <label>Data Fim</label>
+            <input type="date" id="op-f-data-fim">
+          </div>
+          <div class="filtro-group">
+            <label>Status</label>
+            <select id="filtro-status-op">
+              <option value="">Todos status</option>
+              <option value="pendente">Pendente</option>
+              <option value="em_producao">Em Produção</option>
+              <option value="concluida">Concluída</option>
+            </select>
+          </div>
+          <div class="filtro-group">
+            <label>Responsável</label>
+            <select id="op-f-responsavel">
+              <option value="">Todos</option>
+              <option value="ANDRIENSON">ANDRIENSON</option>
+              <option value="ISMAEL">ISMAEL</option>
+              <option value="MATEUS">MATEUS</option>
+            </select>
+          </div>
+          <div class="filtro-group">
+            <label>Produto</label>
+            <input type="text" id="op-f-produto" placeholder="Nome ou código...">
+          </div>
+          <div class="filtros-btns">
+            <button class="btn btn-primary" onclick="paginaProducao=1;renderProducao()">Filtrar</button>
+            <button class="btn btn-outline" onclick="limparFiltrosOP()">Limpar</button>
+          </div>
+        </div>
+      </div>
+      <div class="dashboard-cards" id="producao-resumo" style="margin-bottom:16px"></div>
+      <div id="producao-lista"></div>
+      <div class="pagination" id="producao-pag"></div>
+    </div>
+
+  </div><!-- content -->
+</div><!-- app -->
+
+<!-- MODAL PEDIDO / ORÇAMENTO -->
+<div class="modal-overlay" id="modal-pedido">
+  <div class="modal" style="max-width:820px">
+    <button class="modal-close" onclick="fecharModal('modal-pedido')">×</button>
+    <div class="modal-title" id="modal-pedido-titulo">Novo Pedido</div>
+    <div id="step-cliente-ped">
+      <div class="form-row single">
+        <div class="form-group">
+          <label>Buscar Cliente</label>
+          <input type="text" id="pedido-busca-cliente" placeholder="Digite nome ou CNPJ..." oninput="buscarClientePedido()" autocomplete="off">
+        </div>
+      </div>
+      <div id="pedido-lista-clientes" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;display:none;background:var(--card)"></div>
+      <div id="pedido-cliente-selecionado"></div>
+    </div>
+    <div id="step-itens-ped" style="display:none">
+      <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:10px;flex-wrap:wrap">
+        <div class="form-group" style="flex:1;min-width:200px">
+          <label>Adicionar Produto</label>
+          <input type="text" id="pedido-busca-produto" placeholder="Código ou nome do produto..." oninput="buscarProdutoPedido()" autocomplete="off">
+        </div>
+      </div>
+      <div id="pedido-lista-produtos" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;display:none;background:var(--card);margin-bottom:12px"></div>
+      <div class="item-row item-row-header">
+        <span>Produto</span><span>Qtd</span><span>Preço Unit.</span><span>Desc.%</span><span>Subtotal</span><span></span>
+      </div>
+      <div id="itens-lista"></div>
+      <!-- Desconto geral -->
+      <div style="display:flex;align-items:center;gap:12px;margin:12px 0;flex-wrap:wrap">
+        <div class="form-group" style="flex:0 0 auto">
+          <label>Desconto geral no pedido (%)</label>
+          <input type="number" id="desc-geral" min="0" max="100" step="0.1" value="0" style="width:120px" oninput="atualizarTotais()">
+        </div>
+        <div style="font-size:13px;color:var(--muted);padding-top:20px">O desconto geral é aplicado sobre o total após descontos por item.</div>
+      </div>
+      <div class="totais-box" id="totais-box">
+        <div class="totais-item"><span>Itens</span><strong id="tot-itens">0</strong></div>
+        <div class="totais-item"><span>Subtotal</span><strong id="tot-subtotal">R$ 0,00</strong></div>
+        <div class="totais-item"><span>Desconto</span><strong id="tot-desconto" style="color:#f87171">- R$ 0,00</strong></div>
+        <div class="totais-item highlight"><span>Total Final</span><strong id="tot-valor">R$ 0,00</strong></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Forma de Pagamento</label>
+          <select id="pedido-forma" onchange="atualizarCondicoes()">
+            <option value="">Selecione...</option>
+            <option>BOLETO</option><option>CHEQUE</option><option>CREDITO EM CONTA</option><option>DINHEIRO</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Condição de Pagamento</label>
+          <select id="pedido-condicao" onchange="calcularParcelas()">
+            <option value="">Selecione...</option>
+          </select>
+        </div>
+      </div>
+      <div id="boleto-info" style="display:none;margin-bottom:12px">
+        <div class="alerta alerta-warning"><strong>Dados bancários para boleto:</strong><br>BRADESCO — Ag. 1835 / C/C 6261-8<br>ITAÚ — Ag. 0084 / C/C 99573-7</div>
+      </div>
+      <div id="alerta-parcela" style="display:none"></div>
+      <!-- Grade de parcelas -->
+      <div id="parcelas-container" style="display:none;margin-bottom:16px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--text)">Parcelas:</div>
+        <div class="parcelas-grid" id="parcelas-grid"></div>
+      </div>
+      <div class="form-row single">
+        <div class="form-group">
+          <label>Observações</label>
+          <textarea id="pedido-obs" rows="2" placeholder="Observações do pedido..."></textarea>
+        </div>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-outline" onclick="fecharModal('modal-pedido')">Cancelar</button>
+      <button class="btn btn-warning" id="btn-salvar-orcamento" onclick="salvarComoOrcamento()" style="display:none">Salvar como Orçamento</button>
+      <button class="btn btn-primary" id="btn-confirmar-pedido" onclick="confirmarPedido()">Confirmar Pedido</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL CLIENTE -->
+<div class="modal-overlay" id="modal-cliente">
+  <div class="modal">
+    <button class="modal-close" onclick="fecharModal('modal-cliente')">×</button>
+    <div class="modal-title" id="modal-cliente-titulo">Cadastro de Cliente</div>
+    <input type="hidden" id="cli-codigo-edicao" value="">
+    <div class="form-row">
+      <div class="form-group">
+        <label>CNPJ / CPF *</label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="cli-cpf" placeholder="00.000.000/0001-00" style="flex:1">
+          <button class="btn btn-secondary btn-sm" onclick="buscarCNPJ()" title="Buscar dados na Receita Federal">🔍 CNPJ</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Inscrição Estadual</label>
+        <input type="text" id="cli-ie" placeholder="000.000.000/0000 ou ISENTO">
+      </div>
+    </div>
+    <div class="form-row single">
+      <div class="form-group">
+        <label>Nome / Razão Social *</label>
+        <input type="text" id="cli-nome" placeholder="Nome completo ou razão social">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Telefone</label>
+        <input type="text" id="cli-tel" placeholder="(31) 99999-9999">
+      </div>
+      <div class="form-group">
+        <label>E-mail</label>
+        <input type="email" id="cli-email" placeholder="email@empresa.com">
+      </div>
+    </div>
+    <div class="form-row single">
+      <div class="form-group">
+        <label>Endereço (Rua, Nº, Bairro)</label>
+        <input type="text" id="cli-end" placeholder="Rua das Flores, 123, Centro">
+      </div>
+    </div>
+    <div class="form-row single">
+      <div class="form-group">
+        <label>⚠️ Alerta ao Vender (aparece destacado ao iniciar pedido/orçamento)</label>
+        <input type="text" id="cli-alerta" placeholder="ex: Garantia liberada para envio, Cliente com restrição de crédito...">
+      </div>
+    </div>
+    <div class="form-row triple">
+      <div class="form-group" style="grid-column:span 2">
+        <label>Cidade</label>
+        <input type="text" id="cli-cidade" placeholder="Belo Horizonte">
+      </div>
+      <div class="form-group">
+        <label>UF</label>
+        <select id="cli-uf">
+          <option value="">UF</option>
+          <option>AC</option><option>AL</option><option>AM</option><option>AP</option><option>BA</option><option>CE</option><option>DF</option><option>ES</option><option>GO</option><option>MA</option><option>MG</option><option>MS</option><option>MT</option><option>PA</option><option>PB</option><option>PE</option><option>PI</option><option>PR</option><option>RJ</option><option>RN</option><option>RO</option><option>RR</option><option>RS</option><option>SC</option><option>SE</option><option>SP</option><option>TO</option>
+        </select>
+      </div>
+    </div>
+    <div id="cnpj-loading" style="display:none" class="alerta alerta-info">🔍 Buscando dados na Receita Federal...</div>
+    <div class="form-row" id="cli-vendedor-row" style="display:none">
+      <div class="form-group">
+        <label>Vendedor Responsável</label>
+        <select id="cli-vendedor-id"><option value="">Sem vendedor específico</option></select>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-outline" onclick="fecharModal('modal-cliente')">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarCliente()">Salvar Cliente</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL VENDEDOR -->
+<div class="modal-overlay" id="modal-vendedor">
+  <div class="modal" style="max-width:560px">
+    <button class="modal-close" onclick="fecharModal('modal-vendedor')">×</button>
+    <div class="modal-title" id="modal-vendedor-titulo">Cadastrar Usuário</div>
+    <input type="hidden" id="vend-id">
+    <div class="form-row single"><div class="form-group"><label>Nome Completo *</label><input type="text" id="vend-nome"></div></div>
+    <div class="form-row">
+      <div class="form-group"><label>Usuário (login) *</label><input type="text" id="vend-user"></div>
+      <div class="form-group"><label id="vend-pass-label">Senha *</label><input type="password" id="vend-pass"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Telefone</label><input type="text" id="vend-tel"></div>
+      <div class="form-group"><label>E-mail</label><input type="email" id="vend-email"></div>
+    </div>
+    <div class="form-row single">
+      <div class="form-group">
+        <label>Tipo de Usuário *</label>
+        <select id="vend-tipo" onchange="atualizarVisibilidadePermissoes()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px">
+          <option value="admin">Administrador (acesso completo a tudo)</option>
+          <option value="vendedor">Vendedor (só vê/edita os próprios pedidos, orçamentos e clientes)</option>
+          <option value="personalizado">Personalizado (eu escolho o que ele vê e edita)</option>
+        </select>
+      </div>
+    </div>
+    <div id="vend-permissoes-wrap" style="display:none;margin-top:6px;border:1px solid var(--border);border-radius:10px;padding:12px;max-height:280px;overflow-y:auto">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Marque o que esse usuário pode <strong>ver</strong> e/ou <strong>editar</strong> em cada área do sistema. "Editar" sem "Ver" não faz sentido — marcando Editar, o Ver é marcado automaticamente.</div>
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <thead><tr style="text-align:left;color:var(--muted)"><th style="padding:4px 6px">Área</th><th style="padding:4px 6px;text-align:center">Ver</th><th style="padding:4px 6px;text-align:center">Editar</th></tr></thead>
+        <tbody id="vend-permissoes-tbody"></tbody>
+      </table>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-outline" onclick="fecharModal('modal-vendedor')">Cancelar</button>
+      <button class="btn btn-primary" id="vend-btn-salvar" onclick="salvarVendedor()">Cadastrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Mantido o id antigo "vend-admin" como checkbox oculto para compatibilidade, calculado a partir do tipo selecionado -->
+<input type="checkbox" id="vend-admin" style="display:none">
+
+
+
+<!-- MODAL INSUMO -->
+<div class="modal-overlay" id="modal-insumo">
+  <div class="modal" style="max-width:560px">
+    <button class="modal-close" onclick="fecharModal('modal-insumo')">×</button>
+    <div class="modal-title" id="modal-insumo-titulo">Novo Insumo</div>
+    <input type="hidden" id="insumo-key">
+    <div class="form-row">
+      <div class="form-group"><label>Código *</label><input type="text" id="insumo-codigo" placeholder="ex: M0123"></div>
+      <div class="form-group"><label>Unidade</label>
+        <select id="insumo-unidade">
+          <option value="UN">UN</option><option value="KG">KG</option><option value="M">M</option>
+          <option value="PC">PÇ</option><option value="CX">CX</option><option value="L">L</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row single"><div class="form-group"><label>Descrição *</label><input type="text" id="insumo-nome"></div></div>
+    <div class="form-row">
+      <div class="form-group"><label>Estoque Atual</label><input type="number" id="insumo-estoque" step="0.001" value="0"></div>
+      <div class="form-group"><label>Estoque Mínimo</label><input type="number" id="insumo-estoque-min" step="0.001" value="0"></div>
+    </div>
+    <div class="form-row single">
+      <div class="form-group">
+        <label>Fornecedor</label>
+        <select id="insumo-fornecedor"><option value="">Selecione...</option></select>
+      </div>
+    </div>
+    <div class="form-row single"><div class="form-group"><label>Preço de Custo (R$)</label><input type="number" id="insumo-custo" step="0.01" value="0"></div></div>
+    <div class="form-row single"><div class="form-group"><label>Localização no Estoque</label><input type="text" id="insumo-localizacao" placeholder="ex: Corredor A, Prateleira 3"></div></div>
+    <div class="form-actions">
+      <button class="btn btn-outline" onclick="fecharModal('modal-insumo')">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarInsumo()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL FORNECEDOR -->
+<div class="modal-overlay" id="modal-fornecedor">
+  <div class="modal" style="max-width:560px">
+    <button class="modal-close" onclick="fecharModal('modal-fornecedor')">×</button>
+    <div class="modal-title" id="modal-fornecedor-titulo">Novo Fornecedor</div>
+    <input type="hidden" id="fornecedor-key">
+    <div class="form-row single"><div class="form-group"><label>Nome/Razão Social *</label><input type="text" id="fornecedor-nome"></div></div>
+    <div class="form-row">
+      <div class="form-group"><label>CNPJ/CPF</label><input type="text" id="fornecedor-cnpj"></div>
+      <div class="form-group"><label>Telefone</label><input type="text" id="fornecedor-telefone"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>E-mail</label><input type="email" id="fornecedor-email"></div>
+      <div class="form-group"><label>Contato</label><input type="text" id="fornecedor-contato" placeholder="Nome do vendedor/representante"></div>
+    </div>
+    <div class="form-row single"><div class="form-group"><label>Observações</label><input type="text" id="fornecedor-obs"></div></div>
+    <div class="form-actions">
+      <button class="btn btn-outline" onclick="fecharModal('modal-fornecedor')">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarFornecedor()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL DETALHE/EDIÇÃO PRODUTO -->
+<div class="modal-overlay" id="modal-produto-detalhe">
+  <div class="modal" style="max-width:680px">
+    <button class="modal-close" onclick="fecharModal('modal-produto-detalhe')">×</button>
+    <div id="produto-detalhe-conteudo"></div>
+  </div>
+</div>
+
+<!-- MODAL LANÇAR MOVIMENTO DE ESTOQUE -->
+<div class="modal-overlay" id="modal-movimento-estoque">
+  <div class="modal" style="max-width:560px">
+    <button class="modal-close" onclick="fecharModal('modal-movimento-estoque')">×</button>
+    <div class="modal-title">Lançar Movimento de Estoque</div>
+    <div class="form-row single">
+      <div class="form-group">
+        <label>Buscar Produto</label>
+        <input type="text" id="mov-busca-produto" placeholder="Digite nome ou código..." oninput="buscarProdutoMovimento()" autocomplete="off">
+      </div>
+    </div>
+    <div id="mov-lista-produtos" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;display:none;background:var(--card);margin-bottom:14px"></div>
+    <div id="mov-produto-selecionado"></div>
+    <div id="mov-form-resto" style="display:none">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Tipo de Movimento</label>
+          <select id="mov-tipo" onchange="atualizarLabelMovimento()">
+            <option value="entrada">Entrada (+)</option>
+            <option value="saida">Saída (-)</option>
+            <option value="balanco">Balanço (ajuste para valor exato)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label id="mov-qtd-label">Quantidade</label>
+          <input type="number" id="mov-qtd" min="0" step="0.01" value="0">
+        </div>
+      </div>
+      <div class="form-row single">
+        <div class="form-group"><label>Motivo / Observação</label><input type="text" id="mov-obs" placeholder="ex: Conferência física, avaria, devolução..."></div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-outline" onclick="fecharModal('modal-movimento-estoque')">Cancelar</button>
+        <button class="btn btn-primary" onclick="confirmarMovimentoEstoque()">💾 Confirmar Movimento</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL HISTÓRICO DE MOVIMENTAÇÃO DO ITEM -->
+<div class="modal-overlay" id="modal-historico-estoque">
+  <div class="modal" style="max-width:640px">
+    <button class="modal-close" onclick="fecharModal('modal-historico-estoque')">×</button>
+    <div id="historico-estoque-conteudo"></div>
+  </div>
+</div>
+
+<!-- MODAL SELECIONAR FORNECEDOR DO ITEM -->
+<div class="modal-overlay" id="modal-selecionar-fornecedor">
+  <div class="modal" style="max-width:480px">
+    <button class="modal-close" onclick="fecharModal('modal-selecionar-fornecedor')">×</button>
+    <div class="modal-title">🚚 Selecionar Fornecedor</div>
+    <input type="text" id="sel-fornecedor-busca" placeholder="Buscar fornecedor..." oninput="renderListaSelecionarFornecedor()" style="width:100%;margin-bottom:12px">
+    <div id="sel-fornecedor-lista" style="max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:8px"></div>
+  </div>
+</div>
+
+<!-- MODAL REVISÃO DE ITENS SEM CADASTRO (compras importadas) -->
+<div class="modal-overlay" id="modal-revisao-sem-cadastro">
+  <div class="modal" style="max-width:760px">
+    <button class="modal-close" onclick="fecharModal('modal-revisao-sem-cadastro')">×</button>
+    <div class="modal-title">⚠️ Itens sem Cadastro nos Pedidos de Compra</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px">
+      Estes itens vieram de importações de CSV mas não foram encontrados no cadastro de produtos/insumos pelo código. Clique em "Vincular" para corrigir cada um.
+    </div>
+    <div id="revisao-sem-cadastro-lista" style="max-height:60vh;overflow-y:auto"></div>
+  </div>
+</div>
+
+<!-- MODAL PEDIDO DE COMPRA -->
+<div class="modal-overlay" id="modal-compra">
+  <div class="modal" style="max-width:1100px">
+    <button class="modal-close" onclick="fecharModal('modal-compra')">×</button>
+    <div class="modal-title" id="modal-compra-titulo">Novo Pedido de Compra</div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label>Fornecedor *</label>
+        <input type="text" id="compra-fornecedor" list="compra-fornecedor-datalist" placeholder="Digite ou selecione..." oninput="mostrarAvisoObsFornecedorCompra()">
+        <datalist id="compra-fornecedor-datalist"></datalist>
+      </div>
+      <div class="form-group"><label>Nº da Nota Fiscal</label><input type="text" id="compra-nf"></div>
+      <div class="form-group"><label>Data</label><input type="date" id="compra-data"></div>
+    </div>
+    <div id="compra-fornecedor-aviso-obs" style="display:none;margin:-4px 0 12px;padding:10px 14px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;font-size:13px;color:#92400e"></div>
+    <div class="form-row">
+      <div class="form-group"><label>Valor do Frete (R$)</label><input type="number" step="0.01" id="compra-frete" value="0" oninput="recalcularCompra()"></div>
+      <div class="form-group"><label>Desconto (R$)</label><input type="number" step="0.01" id="compra-desconto" value="0" oninput="recalcularCompra()"></div>
+      <div class="form-group"><label>Status</label>
+        <select id="compra-status">
+          <option value="negociacao">Em Negociação</option>
+          <option value="separacao">Em Separação</option>
+          <option value="transito">Em Trânsito</option>
+          <option value="recebido">Recebido</option>
+          <option value="concluido">Concluído</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Condição de Pagamento</label>
+        <input type="text" id="compra-condicao" placeholder="ex: 30/60/90 ou À VISTA" oninput="atualizarPreviewParcelasCompra()">
+      </div>
+    </div>
+    <div class="form-row single"><div class="form-group"><label>Observações</label><textarea id="compra-obs" rows="2" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px"></textarea></div></div>
+    <div id="compra-parcelas-preview"></div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px">
+      <div style="font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase">Itens da Compra</div>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="compra-busca-item" placeholder="Buscar item por nome ou código..." oninput="buscarItemCompra()" autocomplete="off" style="width:280px">
+      </div>
+    </div>
+    <div id="compra-lista-itens-busca" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;display:none;background:var(--card);margin-bottom:10px"></div>
+
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px">
+        <thead><tr style="background:var(--primary);color:rgba(255,255,255,.85)">
+          <th style="padding:6px">Cód. Fornec.</th>
+          <th style="padding:6px">Nosso Código</th>
+          <th style="padding:6px;text-align:left">Descrição</th>
+          <th style="padding:6px">Qtd</th>
+          <th style="padding:6px">Preço Unit.</th>
+          <th style="padding:6px">IPI %</th>
+          <th style="padding:6px">Valor IPI</th>
+          <th style="padding:6px">ST %</th>
+          <th style="padding:6px">Valor ST</th>
+          <th style="padding:6px">Rateio Frete</th>
+          <th style="padding:6px">Custo Final Unit.</th>
+          <th style="padding:6px"></th>
+        </tr></thead>
+        <tbody id="compra-itens-tbody"></tbody>
+        <tfoot><tr style="font-weight:700;border-top:2px solid var(--border)">
+          <td colspan="3" style="padding:8px;text-align:right">TOTAL:</td>
+          <td id="compra-total-qtd" style="padding:8px;text-align:center"></td>
+          <td id="compra-total-bruto" style="padding:8px;text-align:center"></td>
+          <td></td>
+          <td id="compra-total-ipi" style="padding:8px;text-align:center"></td>
+          <td></td>
+          <td id="compra-total-st" style="padding:8px;text-align:center"></td>
+          <td id="compra-total-frete" style="padding:8px;text-align:center"></td>
+          <td id="compra-total-final" style="padding:8px;text-align:center;color:var(--success)"></td>
+          <td></td>
+        </tr>
+        <tr style="font-weight:700">
+          <td colspan="9" style="padding:8px;text-align:right;color:#dc2626">DESCONTO:</td>
+          <td id="compra-total-desconto" style="padding:8px;text-align:center;color:#dc2626"></td>
+          <td></td>
+        </tr>
+        <tr style="font-weight:700">
+          <td colspan="9" style="padding:8px;text-align:right">TOTAL COM DESCONTO:</td>
+          <td id="compra-total-liquido" style="padding:8px;text-align:center;color:var(--success);font-size:14px"></td>
+          <td></td>
+        </tr></tfoot>
+      </table>
+    </div>
+    <div class="form-actions" style="margin-top:18px">
+      <button class="btn btn-outline" onclick="fecharModal('modal-compra')">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarPedidoCompra()">💾 Salvar Pedido de Compra</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL DETALHE PEDIDO DE COMPRA -->
+<div class="modal-overlay" id="modal-compra-detalhe">
+  <div class="modal" style="max-width:900px">
+    <button class="modal-close" onclick="fecharModal('modal-compra-detalhe')">×</button>
+    <div id="compra-detalhe-conteudo"></div>
+  </div>
+</div>
+
+<!-- MODAL REGISTRAR DEFEITO (GARANTIA) -->
+<div class="modal-overlay" id="modal-defeito">
+  <div class="modal" style="max-width:560px">
+    <button class="modal-close" onclick="fecharModal('modal-defeito')">×</button>
+    <div class="modal-title">⚠️ Registrar Peça com Defeito</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:16px">
+      A peça será retirada do estoque e entra na lista de Garantias para cobrança posterior ao fornecedor.
+    </div>
+    <div class="form-row single">
+      <div class="form-group">
+        <label>Código do Insumo</label>
+        <input type="text" id="defeito-busca-insumo" placeholder="Digite o código ou nome do insumo..." oninput="buscarInsumoDefeito()" autocomplete="off">
+      </div>
+    </div>
+    <div id="defeito-lista-busca" style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;display:none;background:var(--card);margin-bottom:10px"></div>
+    <div id="defeito-insumo-selecionado"></div>
+    <div id="defeito-form-resto" style="display:none">
+      <div class="form-row">
+        <div class="form-group"><label>Quantidade com Defeito</label><input type="number" id="defeito-qtd" min="1" value="1"></div>
+        <div class="form-group"><label>OP relacionada</label><input type="text" id="defeito-op" disabled></div>
+      </div>
+      <div class="form-row single">
+        <div class="form-group"><label>Motivo / Observação</label><input type="text" id="defeito-motivo" placeholder="ex: vazamento no corpo, rosca trincada..."></div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-outline" onclick="fecharModal('modal-defeito')">Cancelar</button>
+        <button class="btn btn-primary" style="background:#d97706;border-color:#d97706" onclick="confirmarRegistroDefeito()">⚠️ Registrar Defeito</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL RELATÓRIO DE GARANTIAS -->
+<div class="modal-overlay" id="modal-relatorio-garantias">
+  <div class="modal" style="max-width:700px">
+    <button class="modal-close" onclick="fecharModal('modal-relatorio-garantias')">×</button>
+    <div id="relatorio-garantias-conteudo"></div>
+  </div>
+</div>
+
+<!-- MODAL TRABALHO DE SEPARAÇÃO -->
+<div class="modal-overlay" id="modal-separacao">
+  <div class="modal" style="max-width:720px">
+    <button class="modal-close" onclick="fecharModal('modal-separacao')">×</button>
+    <div id="separacao-conteudo"></div>
+  </div>
+</div>
+
+<!-- MODAL GERAR OP DA SEPARAÇÃO -->
+<div class="modal-overlay" id="modal-op-separacao">
+  <div class="modal" style="max-width:620px">
+    <button class="modal-close" onclick="fecharModal('modal-op-separacao')">×</button>
+    <div id="op-separacao-conteudo"></div>
+  </div>
+</div>
+
+<!-- MODAL ETIQUETA DE ENVIO -->
+<div class="modal-overlay" id="modal-reservas-item">
+  <div class="modal" style="max-width:560px">
+    <button class="modal-close" onclick="fecharModal('modal-reservas-item')">×</button>
+    <div id="reservas-item-conteudo"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-etiqueta">
+  <div class="modal" style="max-width:520px">
+    <button class="modal-close" onclick="fecharModal('modal-etiqueta')">×</button>
+    <div id="etiqueta-conteudo"></div>
+  </div>
+</div>
+
+<!-- MODAL NOVA OP -->
+<div class="modal-overlay" id="modal-op">
+  <div class="modal" style="max-width:640px">
+    <button class="modal-close" onclick="fecharModal('modal-op')">×</button>
+    <div class="modal-title">Nova Ordem de Produção</div>
+    <div class="form-row single">
+      <div class="form-group">
+        <label>Buscar Produto a Produzir</label>
+        <input type="text" id="op-busca-produto" placeholder="Digite nome ou código..." oninput="buscarProdutoOP()" autocomplete="off">
+      </div>
+    </div>
+    <div id="op-lista-produtos" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;display:none;background:var(--card);margin-bottom:14px"></div>
+    <div id="op-produto-selecionado"></div>
+    <div id="op-receita-preview" style="display:none"></div>
+    <div class="form-row" id="op-qtd-row" style="display:none">
+      <div class="form-group"><label>Quantidade a Produzir</label><input type="number" id="op-qtd" value="1" min="1" oninput="atualizarPreviewReceitaOP()"></div>
+      <div class="form-group"><label>Pedido de Origem (opcional)</label><input type="text" id="op-pedido-origem" placeholder="ex: #145"></div>
+    </div>
+    <div class="form-row single" id="op-urgente-row" style="display:none">
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none">
+          <input type="checkbox" id="op-urgente" style="width:20px;height:20px;accent-color:#dc2626;cursor:pointer">
+          <span>🔴 <strong>Urgente</strong> — sobe para o topo da fila e fica destacada para os montadores</span>
+        </label>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-outline" onclick="fecharModal('modal-op')">Cancelar</button>
+      <button class="btn btn-primary" id="btn-criar-op" onclick="criarOP()" style="display:none">Criar OP</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL DETALHES OP -->
+<div class="modal-overlay" id="modal-op-detalhe">
+  <div class="modal" style="max-width:600px">
+    <button class="modal-close" onclick="fecharModal('modal-op-detalhe')">×</button>
+    <div id="op-detalhe-conteudo"></div>
+  </div>
+</div>
+
+<!-- MODAL QUANTIDADE DE ETIQUETAS AO INICIAR OP -->
+<div class="modal-overlay" id="modal-etiquetas-op">
+  <div class="modal" style="max-width:420px">
+    <button class="modal-close" onclick="fecharModal('modal-etiquetas-op')">×</button>
+    <div class="modal-title">🏷️ Imprimir Etiquetas do Item</div>
+    <div id="etiquetas-op-info" style="font-size:13px;color:var(--muted);margin-bottom:14px"></div>
+    <div class="form-row single">
+      <div class="form-group">
+        <label>Quantidade de etiquetas a imprimir</label>
+        <input type="number" id="etiquetas-op-qtd" min="0" value="0">
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-outline" onclick="fecharModal('modal-etiquetas-op')">Pular</button>
+      <button class="btn btn-primary" onclick="confirmarImpressaoEtiquetasOP()">🖨️ Imprimir</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL VER PEDIDO -->
+<div class="modal-overlay" id="modal-ver-pedido">
+  <div class="modal" style="max-width:750px">
+    <button class="modal-close" onclick="fecharModal('modal-ver-pedido')">×</button>
+    <div id="ver-pedido-conteudo"></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
