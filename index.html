@@ -7887,13 +7887,15 @@ async function detectarDuplicados(){
   const pedidosDuplicados = Object.entries(porCodigoW3).filter(([,l])=>l.length>1);
 
   // 2. Pedidos com itens duplicados dentro deles
+  // IMPORTANTE: Firebase pode armazenar arrays como objetos {0:{...}, 1:{...}}
+  // Por isso usamos Object.values() em vez de assumir que é array com .length
   const pedidosComItensDup = [];
   for(const [id, p] of Object.entries(todos)){
-    if(!(p.itens?.length > 1)) continue;
+    const itensArr = p.itens ? Object.values(p.itens) : [];
+    if(itensArr.length <= 1) continue;
     const chaves = new Set();
     let temDup = false;
-    for(const item of p.itens){
-      // Usa código se válido, senão nome — qualquer combinação que identifique o item
+    for(const item of itensArr){
       const cod = (item.codigo && item.codigo !== 'reservado' && item.codigo !== '') ? item.codigo.trim().toUpperCase() : null;
       const nom = (item.nome||'').trim().toUpperCase();
       const chave = cod || nom;
@@ -7901,7 +7903,7 @@ async function detectarDuplicados(){
       if(chaves.has(chave)){ temDup = true; break; }
       chaves.add(chave);
     }
-    if(temDup) pedidosComItensDup.push({ id, p });
+    if(temDup) pedidosComItensDup.push({ id, p, itensArr });
   }
 
   const updates = {};
@@ -7914,9 +7916,9 @@ async function detectarDuplicados(){
     apagar.forEach(p=>{ updates['pedidos/'+p.id] = null; removidosPedidos++; });
   }
 
-  for(const { id, p } of pedidosComItensDup){
+  for(const { id, p, itensArr } of pedidosComItensDup){
     const itensMap = {};
-    for(const item of p.itens){
+    for(const item of itensArr){
       const cod = (item.codigo && item.codigo !== 'reservado' && item.codigo !== '') ? item.codigo.trim().toUpperCase() : null;
       const nom = (item.nome||'').trim().toUpperCase();
       const chave = cod || nom;
@@ -7924,7 +7926,7 @@ async function detectarDuplicados(){
       if(!itensMap[chave]) itensMap[chave] = { ...item };
     }
     const itensLimpos = Object.values(itensMap);
-    if(itensLimpos.length < p.itens.length){
+    if(itensLimpos.length < itensArr.length){
       updates['pedidos/'+id+'/itens'] = itensLimpos;
       const novoSubtotal = itensLimpos.reduce((s,i)=>s+(Number(i.qtd||0)*Number(i.preco||0)),0);
       updates['pedidos/'+id+'/subtotal'] = novoSubtotal;
