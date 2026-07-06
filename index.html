@@ -1302,6 +1302,7 @@ tbody td{padding:11px 16px;font-size:14px}
         <select id="vend-tipo" onchange="atualizarVisibilidadePermissoes()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px">
           <option value="admin">Administrador (acesso completo a tudo)</option>
           <option value="vendedor">Vendedor (só vê/edita os próprios pedidos, orçamentos e clientes)</option>
+          <option value="expedicao">Expedição (pedidos, estoque e etiquetas — sem valores financeiros)</option>
           <option value="personalizado">Personalizado (eu escolho o que ele vê e edita)</option>
         </select>
       </div>
@@ -1757,13 +1758,22 @@ const MODULOS_PERMISSAO = [
 ];
 // Módulos que um "vendedor" comum sempre vê (filtrado aos próprios registros nas telas)
 const MODULOS_VENDEDOR_PADRAO = ['pedidos','orcamentos','clientes','produtos','promocoes','catalogo'];
+const MODULOS_SEPARACAO_EXTRA = ['pedidos','catalogo','estoque']; // Expedição: foco em separação e etiquetas
+
+// Retorna true se o usuário logado é do tipo Expedição
+function ehExpedicao(){
+  if(!usuarioLogado) return false;
+  return usuarioLogado.tipo === 'expedicao';
+}
 
 // Pode VER o módulo (aparece no menu / acessa a tela)?
 function podeVer(modulo){
   if(!usuarioLogado) return false;
   if(usuarioLogado.admin) return true;
+  if(ehExpedicao())
+    return MODULOS_SEPARACAO_EXTRA.includes(modulo);
   if(usuarioLogado.tipo==='personalizado') return !!usuarioLogado.permissoes?.[modulo]?.ver;
-  return MODULOS_VENDEDOR_PADRAO.includes(modulo); // vendedor padrão (compatibilidade com cadastros antigos)
+  return MODULOS_VENDEDOR_PADRAO.includes(modulo);
 }
 // Pode EDITAR/criar/aprovar/excluir dentro do módulo?
 function temPermissaoEditar(modulo){
@@ -2089,6 +2099,11 @@ async function iniciarApp(){
     verificarBackupAutomatico(); // dispara em segundo plano, não trava o login
     carregarMapeamentoW3();      // carrega mapeamentos W3→produto em segundo plano
   }
+  // Migração automática: thomaz/adesio sem tipo definido → tipo expedicao
+  if(!usuarioLogado.tipo && !usuarioLogado.admin && ['thomaz','adesio'].includes((usuarioLogado.usuario||'').toLowerCase())){
+    db.ref('usuarios/'+usuarioLogado.id+'/tipo').set('expedicao');
+    usuarioLogado.tipo = 'expedicao';
+  }
   if(temPermissaoEditar('clientes')){
     document.querySelectorAll('.admin-only[id="btn-novo-cliente"], #f-vendedor-wrap, #fo-vendedor-wrap, #cliente-f-vendedor-wrap').forEach(el=>{
       const tag = el.tagName.toLowerCase();
@@ -2244,7 +2259,7 @@ async function renderPainel(){
     }
   } catch(e){}
 
-  const ocultarValoresPainel = ['thomaz','adesio'].includes((usuarioLogado?.usuario||'').toLowerCase());
+  const ocultarValoresPainel = ehExpedicao();
   document.getElementById('dash-cards').innerHTML = ocultarValoresPainel ? `
     <div class="dash-card"><div class="dash-card-label">Pedidos Hoje</div><div class="dash-card-value accent">${pedidosHoje}</div></div>
   ` : `
@@ -2383,7 +2398,7 @@ async function renderPedidos(){
     return p.status!=='Cancelado'&&d.getMonth()===mesAtual&&d.getFullYear()===anoAtual;
   }).reduce((s,p)=>s+(p.total||0),0);
   // Usuários sem permissão de ver valores financeiros
-  const ocultarValores = ['thomaz','adesio'].includes((usuarioLogado?.usuario||'').toLowerCase());
+  const ocultarValores = ehExpedicao();
 
   document.getElementById('resumo-pedidos').innerHTML = ocultarValores ? '' : `
     <div class="resumo-card"><span>Pedidos no filtro</span><strong>${pedidos.length}</strong></div>
@@ -2453,7 +2468,7 @@ async function verPedido(id){
       <span style="font-size:13px;color:var(--muted)">${p.cliente_cpf||''} · ${p.cliente_cidade||''}/${p.cliente_uf||''}</span>
     </div>
     ${(() => {
-      const ocultarVal = usuarioLogado && ['thomaz','adesio'].includes((usuarioLogado.usuario||'').toLowerCase());
+      const ocultarVal = usuarioLogado && ehExpedicao();
       return `
     <div class="item-row item-row-header"><span>Produto</span><span>Qtd</span>${!ocultarVal?'<span>Preço Unit.</span><span>Desc.%</span><span>Subtotal</span>':''}<span></span></div>
     ${(p.itens||[]).map(i=>`
@@ -2465,7 +2480,7 @@ async function verPedido(id){
       </div>`).join('')}`;
     })()}
     <div class="totais-box" style="margin-top:12px">
-      ${usuarioLogado && !['thomaz','adesio'].includes((usuarioLogado.usuario||'').toLowerCase()) ? `
+      ${usuarioLogado && !ehExpedicao() ? `
       <div class="totais-item"><span>Subtotal</span><strong>${fmtMoeda(p.subtotal||p.total)}</strong></div>
       <div class="totais-item"><span>Desconto</span><strong style="color:#f87171">- ${fmtMoeda(p.desconto_total||0)}</strong></div>
       <div class="totais-item highlight"><span>Total Final</span><strong>${fmtMoeda(p.total)}</strong></div>
@@ -2501,7 +2516,7 @@ async function verPedido(id){
     <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
       ${!bloqueado&&p.status==='AA'?`<button class="btn btn-outline btn-sm" onclick="editarPedido('${id}')">✏️ Editar</button>`:''}
       ${usuarioLogado.admin&&p.status==='AA'?`<button class="btn btn-primary btn-sm" onclick="aprovarPedido('${id}')">✅ Aprovar Pedido</button>`:''}
-      ${(usuarioLogado.admin||['thomaz','adesio'].includes((usuarioLogado.usuario||'').toLowerCase()))&&(p.status==='EX'||p.status==='CC')?`<button class="btn btn-outline btn-sm" style="color:#7c3aed;border-color:#7c3aed" onclick="fecharModal('modal-ver-pedido');abrirModalEtiqueta('${id}')">🏷️ Imprimir Etiqueta</button>`:''}
+      ${(usuarioLogado.admin||ehExpedicao())&&(p.status==='EX'||p.status==='CC')?`<button class="btn btn-outline btn-sm" style="color:#7c3aed;border-color:#7c3aed" onclick="fecharModal('modal-ver-pedido');abrirModalEtiqueta('${id}')">🏷️ Imprimir Etiqueta</button>`:''}
       ${usuarioLogado.admin&&p.status==='CC'?`<button class="btn btn-outline btn-sm" style="color:#dc2626;border-color:#dc2626" onclick="cancelarBipagemPedido('${id}')">↺ Cancelar Bipagem</button>`:''}
       <button class="btn btn-outline btn-sm" onclick="clonarPedido('${id}')">📑 Clonar Pedido</button>
       <button class="btn btn-outline btn-sm" onclick="imprimirCapaPedidoVenda('${id}')">🖨️ Imprimir Pedido</button>
