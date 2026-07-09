@@ -791,6 +791,14 @@ tbody td{padding:11px 16px;font-size:14px}
           <div id="import-cep-result" style="margin-top:12px;font-size:13px"></div>
         </div>
         <div class="table-wrap" style="padding:24px">
+          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">🔧 Corrigir Estoques com Decimal (bug CSV antigo)</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
+            Importações feitas antes da correção do parser podiam gravar quantidades com decimal (ex: <strong>19.864</strong> em vez de <strong>19864</strong>). Esta ferramenta detecta todos os itens afetados e corrige arredondando para o inteiro mais próximo.
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="diagnosticarEstoquesDecimais()">🔍 Verificar e Corrigir</button>
+          <div id="fix-decimal-result" style="margin-top:12px;font-size:13px"></div>
+        </div>
+        <div class="table-wrap" style="padding:24px">
           <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">Fotos de Produtos</div>
           <div style="font-size:13px;color:var(--muted);margin-bottom:12px">As fotos são carregadas automaticamente do <strong>Cloudinary</strong>.</div>
           <ol style="font-size:13px;color:var(--muted);padding-left:18px;line-height:1.8">
@@ -2839,6 +2847,7 @@ async function verPedido(id){
   document.getElementById('ver-pedido-conteudo').innerHTML += `
     <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
       ${!bloqueado&&p.status!=='Cancelado'?`<button class="btn btn-outline btn-sm" onclick="editarPedido('${id}')">✏️ Editar</button>`:''}
+      ${usuarioLogado.admin&&p.status==='Cancelado'?`<button class="btn btn-outline btn-sm" style="color:#16a34a;border-color:#16a34a" onclick="reativarPedido('${id}')">↩️ Reativar Pedido</button>`:''}
       ${usuarioLogado.admin?`<button class="btn btn-outline btn-sm" onclick="abrirCorrigirVendedorPedido('${id}')">🔧 Corrigir Vendedor</button>`:''}
       ${usuarioLogado.admin&&p.status==='AA'?`<button class="btn btn-primary btn-sm" onclick="aprovarPedido('${id}')">✅ Aprovar Pedido</button>`:''}
       ${(usuarioLogado.admin||ehExpedicao())&&(p.status==='EX'||p.status==='CC')?`<button class="btn btn-outline btn-sm" style="color:#7c3aed;border-color:#7c3aed" onclick="fecharModal('modal-ver-pedido');abrirModalEtiqueta('${id}')">🏷️ Imprimir Etiqueta</button>`:''}
@@ -3067,11 +3076,48 @@ async function exportarPedidosW3(){
   }
 }
 
+async function reativarPedido(id){
+  const snap = await db.ref('pedidos/'+id).once('value');
+  const p = snap.val(); if(!p) return;
+
+  const statusAnterior = p.status_antes_cancelamento || 'AA';
+  const labelStatus = { AA:'Aguardando Aprovação', AP:'Aprovado', EX:'Em Separação/Expedição', CC:'Conferido/Concluído' };
+
+  if(!confirm(`Reativar o Pedido #${p.numero}?\n\nEle voltará para o status: "${labelStatus[statusAnterior]||statusAnterior}".\nA reserva de estoque dos itens será restaurada automaticamente.`)) return;
+
+  try {
+    // Restaura o status anterior (ou AA se não tiver registro)
+    await db.ref('pedidos/'+id+'/status').set(statusAnterior);
+
+    // Restaura a reserva de estoque (que foi liberada no cancelamento)
+    await reservarEstoquePedido(p.itens||[]);
+
+    // Registra no histórico
+    const historico = p.historico_edicoes || [];
+    historico.push({
+      ts: Date.now(),
+      usuario_nome: usuarioLogado.nome,
+      usuario_tipo: 'admin',
+      alteracoes: [`Pedido reativado — status restaurado para "${labelStatus[statusAnterior]||statusAnterior}". Reserva de estoque restaurada.`]
+    });
+    await db.ref('pedidos/'+id+'/historico_edicoes').set(historico);
+
+    toast(`✅ Pedido #${p.numero} reativado!`,'success');
+    fecharModal('modal-ver-pedido');
+    renderPedidos();
+  } catch(e){
+    toast('Erro ao reativar: '+e.message,'error');
+  }
+}
+
 async function cancelarPedido(id){
   if(!confirm('Cancelar este pedido?')) return;
   const snap = await db.ref('pedidos/'+id).once('value');
   const p = snap.val();
-  await db.ref('pedidos/'+id+'/status').set('Cancelado');
+  await db.ref('pedidos/'+id).update({
+    status: 'Cancelado',
+    status_antes_cancelamento: p?.status || 'AA'
+  });
   // Libera a reserva de estoque, já que o pedido não vai mais sair (exceto se já tinha sido bipado/concluído)
   if(p && p.status !== 'CC' && p.itens){
     await liberarReservaEstoquePedido(p.itens);
@@ -10136,6 +10182,81 @@ function importarEstoque(){
     } catch(err){ document.getElementById('import-estoque-result').innerHTML=`<span style="color:var(--accent)">Erro: ${err.message}</span>`; }
   };
   reader.readAsText(file,'latin1');
+}
+
+// Detecta e corrige estoques com valor decimal causados pelo bug do parser CSV antigo
+// (ex: "19.864" lido como 19.864 em vez de 19864). Arredonda para o inteiro mais próximo.
+async function diagnosticarEstoquesDecimais(){
+  const el = document.getElementById('fix-decimal-result');
+  el.innerHTML = '<span style="color:var(--accent)">⏳ Verificando Firebase...</span>';
+
+  const [snapProd, snapIns] = await Promise.all([
+    db.ref('produtos').once('value'),
+    db.ref('insumos').once('value')
+  ]);
+
+  const updates = {};
+  const afetados = [];
+
+  // Produtos vendáveis — campo: quantidade
+  const prods = snapProd.val() || {};
+  for(const [key, p] of Object.entries(prods)){
+    const v = p.quantidade;
+    if(v !== undefined && !Number.isInteger(v)){
+      const correto = Math.round(v);
+      updates[`produtos/${key}/quantidade`] = correto;
+      afetados.push({ tipo:'Produto', codigo: p.codigo||key, nome:p.nome, errado:v, correto });
+    }
+  }
+
+  // Insumos — campo: estoque_atual
+  const insumos = snapIns.val() || {};
+  for(const [key, i] of Object.entries(insumos)){
+    const v = i.estoque_atual;
+    if(v !== undefined && !Number.isInteger(v)){
+      const correto = Math.round(v);
+      updates[`insumos/${key}/estoque_atual`] = correto;
+      afetados.push({ tipo:'Insumo', codigo: i.codigo||key, nome:i.nome, errado:v, correto });
+    }
+  }
+
+  if(!afetados.length){
+    el.innerHTML = '<span style="color:var(--success)">✅ Nenhum valor decimal encontrado — estoques estão corretos.</span>';
+    return;
+  }
+
+  await db.ref().update(updates);
+
+  // Atualiza em memória também
+  afetados.forEach(a=>{
+    if(a.tipo==='Produto'){
+      const p = PRODUTOS_DB.find(x=>x.codigo===a.codigo);
+      if(p) p.quantidade = a.correto;
+    } else {
+      const i = INSUMOS_DB.find(x=>x.codigo===a.codigo);
+      if(i) i.estoque_atual = a.correto;
+    }
+  });
+
+  el.innerHTML = `
+    <div style="color:var(--success);font-weight:700;margin-bottom:8px">✅ ${afetados.length} item(ns) corrigido(s):</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:#f0f0f0">
+        <th style="padding:4px 8px;text-align:left">Tipo</th>
+        <th style="padding:4px 8px;text-align:left">Código</th>
+        <th style="padding:4px 8px;text-align:left">Nome</th>
+        <th style="padding:4px 8px;text-align:right">Errado</th>
+        <th style="padding:4px 8px;text-align:right">Correto</th>
+      </tr></thead>
+      <tbody>${afetados.map(a=>`<tr style="border-bottom:1px solid #eee">
+        <td style="padding:4px 8px">${a.tipo}</td>
+        <td style="padding:4px 8px">${a.codigo}</td>
+        <td style="padding:4px 8px">${a.nome||'—'}</td>
+        <td style="padding:4px 8px;text-align:right;color:#dc2626">${a.errado}</td>
+        <td style="padding:4px 8px;text-align:right;color:var(--success);font-weight:700">${a.correto}</td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+  toast(`✓ ${afetados.length} estoque(s) corrigido(s)`,'success');
 }
 
 function importarCepClientes(){
