@@ -3114,15 +3114,46 @@ async function cancelarPedido(id){
   if(!confirm('Cancelar este pedido?')) return;
   const snap = await db.ref('pedidos/'+id).once('value');
   const p = snap.val();
+
+  // Se o pedido já foi bipado (CC), pergunta se deve estornar os itens ao estoque
+  let estornarEstoque = false;
+  if(p?.status === 'CC'){
+    estornarEstoque = confirm(
+      `⚠️ Este pedido já foi bipado e o estoque foi baixado.\n\n` +
+      `Deseja estornar os itens de volta ao estoque?\n\n` +
+      `✅ OK → Devolve ao estoque (mercadoria ainda está no depósito)\n` +
+      `❌ Cancelar → Não devolve (mercadoria já foi enviada)`
+    );
+  }
+
   await db.ref('pedidos/'+id).update({
     status: 'Cancelado',
     status_antes_cancelamento: p?.status || 'AA'
   });
-  // Libera a reserva de estoque, já que o pedido não vai mais sair (exceto se já tinha sido bipado/concluído)
+
+  // Libera a reserva (só se não estava bipado — bipado já não tem reserva)
   if(p && p.status !== 'CC' && p.itens){
     await liberarReservaEstoquePedido(p.itens);
   }
-  toast('Pedido cancelado');
+
+  // Estorna ao estoque se solicitado
+  if(estornarEstoque && p?.itens){
+    for(const item of p.itens){
+      const prodSnap = await db.ref('produtos/'+item.codigo).once('value');
+      if(prodSnap.exists()){
+        const estoqueAtual = Number(prodSnap.val().quantidade||0);
+        const novoEstoque = estoqueAtual + item.qtd;
+        await db.ref('produtos/'+item.codigo+'/quantidade').set(novoEstoque);
+        const prodMem = PRODUTOS_DB.find(x=>x.codigo===item.codigo);
+        if(prodMem) prodMem.quantidade = novoEstoque;
+        await registrarMovimentoEstoque(item.codigo, item.nome, 'entrada', item.qtd,
+          `Estorno — cancelamento do Pedido #${p.numero} (${p.cliente_nome})`, 'pedido', id);
+      }
+    }
+    toast(`✅ Pedido cancelado e ${p.itens.length} item(ns) estornado(s) ao estoque.`,'success');
+  } else {
+    toast('Pedido cancelado');
+  }
   renderPedidos();
 }
 
