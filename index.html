@@ -4141,9 +4141,14 @@ function atualizarBotaoExportarOPs(){
 }
 
 function toggleSelecaoTodosOPs(checked){
+  // Seleciona/desmarca TODAS as OPs do filtro atual (todas as páginas, não só a visível)
+  filtradoOPsAtual.forEach(op=>{
+    if(checked) opsSelecionadasExportar.add(op.key);
+    else opsSelecionadasExportar.delete(op.key);
+  });
+  // Atualiza visualmente os checkboxes da página atual
   document.querySelectorAll('.check-exportar-op').forEach(c=>{
     c.checked = checked;
-    if(checked) opsSelecionadasExportar.add(c.dataset.key); else opsSelecionadasExportar.delete(c.dataset.key);
   });
   atualizarBotaoExportarOPs();
 }
