@@ -682,6 +682,27 @@ tbody td{padding:11px 16px;font-size:14px}
         <button class="btn btn-primary btn-sm" style="background:#d97706" onclick="detectarDuplicados()">🔍 Verificar e Remover Duplicados</button>
         <div id="duplicados-result" style="margin-top:12px;font-size:13px;max-height:200px;overflow-y:auto"></div>
       </div>
+      <div class="table-wrap" style="padding:24px;margin-bottom:20px;border:2px solid #f59e0b">
+        <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">🧹 Limpar Importação Errada do W3</div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
+          Remove pedidos importados do W3 em um período específico. Útil quando você importou pedidos errados ou duplicados — apague o período e reimporte certinho.
+        </div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+          <div class="form-group" style="margin:0">
+            <label style="font-size:12px;font-weight:600">Data início</label>
+            <input type="date" id="limpar-w3-ini" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label style="font-size:12px;font-weight:600">Data fim</label>
+            <input type="date" id="limpar-w3-fim" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px">
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-sm" style="background:#f59e0b;color:#fff" onclick="limparPedidosW3PorPeriodo()">🔍 Verificar e Remover do Período</button>
+          <button class="btn btn-sm" style="background:#f59e0b;color:#fff" onclick="dedupliarPedidosW3Julho()">🗑️ Remover Duplicatas (por código W3)</button>
+        </div>
+        <div id="limpar-w3-result" style="margin-top:12px;font-size:13px"></div>
+      </div>
       <div class="table-wrap" style="padding:24px;margin-bottom:20px;border:2px solid #dc2626">
         <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">🗑️ Apagar Pedidos Importados do W3</div>
         <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
@@ -8803,6 +8824,143 @@ async function detectarDuplicados(){
   }
   resultEl.innerHTML = html;
   toast('✅ Verificação concluída','success');
+}
+
+// ── Limpeza de importação errada do W3 ──
+
+async function limparPedidosW3PorPeriodo(){
+  const el = document.getElementById('limpar-w3-result');
+  const ini = document.getElementById('limpar-w3-ini').value;
+  const fim = document.getElementById('limpar-w3-fim').value;
+  if(!ini || !fim){ toast('Preencha a data início e fim','error'); return; }
+
+  el.innerHTML = '<span style="color:var(--accent)">⏳ Verificando pedidos do período...</span>';
+
+  const dIni = new Date(ini+'T00:00:00');
+  const dFim = new Date(fim+'T23:59:59');
+
+  const snap = await db.ref('pedidos').once('value');
+  const todos = snap.val() || {};
+
+  const paraApagar = [];
+  for(const [id, p] of Object.entries(todos)){
+    if(!p.codigo_w3) continue; // só pedidos importados do W3
+    const dataPedido = new Date(p.data);
+    if(dataPedido >= dIni && dataPedido <= dFim){
+      paraApagar.push({ id, numero: p.numero, cliente: p.cliente_nome, data: p.data, status: p.status, itens: p.itens });
+    }
+  }
+
+  if(!paraApagar.length){
+    el.innerHTML = '<span style="color:var(--success)">✅ Nenhum pedido W3 encontrado no período selecionado.</span>';
+    return;
+  }
+
+  paraApagar.sort((a,b)=>a.numero-b.numero);
+  const preview = paraApagar.slice(0,15).map(p=>`#${p.numero} — ${p.cliente} (${new Date(p.data).toLocaleDateString('pt-BR')}) [${p.status}]`).join('\n');
+  const mais = paraApagar.length > 15 ? `\n...e mais ${paraApagar.length-15}` : '';
+
+  if(!confirm(`Serão apagados ${paraApagar.length} pedido(s) do W3 entre ${new Date(ini+'T00:00:00').toLocaleDateString('pt-BR')} e ${new Date(fim+'T00:00:00').toLocaleDateString('pt-BR')}:\n\n${preview}${mais}\n\nIsso não afeta pedidos digitados manualmente. Confirmar?`)) return;
+
+  const updates = {};
+  for(const p of paraApagar){
+    // Libera reserva de estoque se o pedido não estava concluído
+    if(p.itens && p.status !== 'CC'){
+      await liberarReservaEstoquePedido(p.itens);
+    }
+    updates['pedidos/'+p.id] = null;
+  }
+  await db.ref().update(updates);
+
+  el.innerHTML = `<span style="color:var(--success)">✅ ${paraApagar.length} pedido(s) do W3 removidos do período. Pode reimportar agora.</span>`;
+  toast(`✓ ${paraApagar.length} pedidos removidos`,'success');
+}
+
+async function limparPedidosHistoricoW3(){
+  const el = document.getElementById('limpar-w3-result');
+  if(!confirm('Isso vai apagar TODOS os pedidos importados do W3 marcados como "— histórico" (jan-jun).\n\nTem certeza?')) return;
+  el.innerHTML = '<span style="color:var(--accent)">⏳ Verificando...</span>';
+
+  const snap = await db.ref('pedidos').once('value');
+  const todos = snap.val() || {};
+  const paraApagar = [];
+
+  for(const [id, p] of Object.entries(todos)){
+    if(p.codigo_w3 && (p.obs||'').includes('— histórico')){
+      paraApagar.push({ id, numero: p.numero, cliente: p.cliente_nome, data: p.data });
+    }
+  }
+
+  if(!paraApagar.length){
+    el.innerHTML = '<span style="color:var(--success)">✅ Nenhum pedido histórico encontrado.</span>';
+    return;
+  }
+
+  // Confirma com a lista antes de apagar
+  const lista = paraApagar.slice(0,10).map(p=>`#${p.numero} — ${p.cliente} (${new Date(p.data).toLocaleDateString('pt-BR')})`).join('\n');
+  const mais = paraApagar.length > 10 ? `\n...e mais ${paraApagar.length-10}` : '';
+  if(!confirm(`Serão apagados ${paraApagar.length} pedidos:\n\n${lista}${mais}\n\nConfirmar?`)) return;
+
+  const updates = {};
+  for(const { id, numero } of paraApagar){
+    // Libera reserva antes de apagar (pedidos históricos são CC, então reserva já está zerada — mas por segurança)
+    const pSnap = await db.ref('pedidos/'+id).once('value');
+    const p = pSnap.val();
+    if(p?.itens && p.status !== 'CC') await liberarReservaEstoquePedido(p.itens);
+    updates['pedidos/'+id] = null;
+  }
+  await db.ref().update(updates);
+
+  el.innerHTML = `<span style="color:var(--success)">✅ ${paraApagar.length} pedido(s) histórico(s) removidos.</span>`;
+  toast(`✓ ${paraApagar.length} pedidos históricos removidos`,'success');
+}
+
+async function dedupliarPedidosW3Julho(){
+  const el = document.getElementById('limpar-w3-result');
+  el.innerHTML = '<span style="color:var(--accent)">⏳ Verificando duplicatas...</span>';
+
+  const snap = await db.ref('pedidos').once('value');
+  const todos = snap.val() || {};
+
+  // Agrupa por codigo_w3
+  const porW3 = {};
+  for(const [id, p] of Object.entries(todos)){
+    if(!p.codigo_w3) continue;
+    const chave = String(p.codigo_w3);
+    if(!porW3[chave]) porW3[chave] = [];
+    porW3[chave].push({ id, numero: p.numero, status: p.status, ts: p.ts_cadastro||0, cliente: p.cliente_nome, data: p.data });
+  }
+
+  const duplicatas = Object.entries(porW3).filter(([,lista]) => lista.length > 1);
+
+  if(!duplicatas.length){
+    el.innerHTML = '<span style="color:var(--success)">✅ Nenhuma duplicata encontrada.</span>';
+    return;
+  }
+
+  // Para cada grupo duplicado, mantém o mais recente (maior ts_cadastro) e apaga os demais
+  const paraApagar = [];
+  for(const [codigoW3, lista] of duplicatas){
+    lista.sort((a,b) => b.ts - a.ts); // mais recente primeiro
+    const [manter, ...apagar] = lista;
+    paraApagar.push(...apagar.map(p => ({ ...p, codigoW3, manter: manter.numero })));
+  }
+
+  const lista = paraApagar.slice(0,10).map(p=>`Pedido Crow #${p.numero} (W3 #${p.codigoW3}) — mantém #${p.manter}`).join('\n');
+  const mais = paraApagar.length > 10 ? `\n...e mais ${paraApagar.length-10}` : '';
+  if(!confirm(`Serão apagadas ${paraApagar.length} duplicata(s):\n\n${lista}${mais}\n\nO mais recente de cada par é mantido. Confirmar?`)) return;
+
+  const updates = {};
+  for(const { id, status, numero } of paraApagar){
+    const pSnap = await db.ref('pedidos/'+id).once('value');
+    const p = pSnap.val();
+    if(p?.itens && status !== 'CC') await liberarReservaEstoquePedido(p.itens);
+    updates['pedidos/'+id] = null;
+  }
+  await db.ref().update(updates);
+
+  el.innerHTML = `<span style="color:var(--success)">✅ ${paraApagar.length} duplicata(s) removidas. ${duplicatas.length} pedido(s) do W3 mantidos (o mais recente de cada).</span>`;
+  toast(`✓ ${paraApagar.length} duplicatas removidas`,'success');
 }
 
 async function apagarPedidosW3EmMassa(){
