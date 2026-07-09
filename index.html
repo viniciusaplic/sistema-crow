@@ -698,6 +698,7 @@ tbody td{padding:11px 16px;font-size:14px}
           </div>
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-sm" style="background:#0B3B21;color:#fff" onclick="exportarPedidosW3PorPeriodoExcel()">📥 Exportar Excel do Período</button>
           <button class="btn btn-sm" style="background:#f59e0b;color:#fff" onclick="limparPedidosW3PorPeriodo()">🔍 Verificar e Remover do Período</button>
           <button class="btn btn-sm" style="background:#f59e0b;color:#fff" onclick="dedupliarPedidosW3Julho()">🗑️ Remover Duplicatas (por código W3)</button>
         </div>
@@ -8827,6 +8828,87 @@ async function detectarDuplicados(){
 }
 
 // ── Limpeza de importação errada do W3 ──
+
+async function exportarPedidosW3PorPeriodoExcel(){
+  const el = document.getElementById('limpar-w3-result');
+  const ini = document.getElementById('limpar-w3-ini').value;
+  const fim = document.getElementById('limpar-w3-fim').value;
+  if(!ini || !fim){ toast('Preencha a data início e fim','error'); return; }
+
+  el.innerHTML = '<span style="color:var(--accent)">⏳ Carregando pedidos...</span>';
+
+  const dIni = new Date(ini+'T00:00:00');
+  const dFim = new Date(fim+'T23:59:59');
+
+  const snap = await db.ref('pedidos').once('value');
+  const todos = snap.val() || {};
+
+  const pedidos = [];
+  for(const [id, p] of Object.entries(todos)){
+    if(!p.codigo_w3) continue;
+    const dataPedido = new Date(p.data);
+    if(dataPedido >= dIni && dataPedido <= dFim) pedidos.push({ id, ...p });
+  }
+
+  if(!pedidos.length){
+    el.innerHTML = '<span style="color:var(--muted)">Nenhum pedido W3 encontrado no período.</span>';
+    return;
+  }
+
+  pedidos.sort((a,b)=>a.numero-b.numero);
+
+  const STATUS = { AA:'Aguardando Aprovação', AP:'Aprovado', EX:'Em Separação', CC:'Concluído/Bipado', Cancelado:'Cancelado' };
+
+  const wb = XLSX.utils.book_new();
+
+  // ABA 1 — resumo por pedido
+  const resumo = pedidos.map(p=>({
+    'Pedido Crow': p.numero,
+    'Código W3':   p.codigo_w3,
+    'Data':        new Date(p.data).toLocaleDateString('pt-BR'),
+    'Cliente':     p.cliente_nome,
+    'Vendedor':    p.vendedor_nome||'—',
+    'Status':      STATUS[p.status]||p.status,
+    'Total (R$)':  Number(p.total||0),
+    'Bipado':      p.ts_fim_bipagem ? 'Sim' : 'Não',
+    'Início Bipagem': p.ts_inicio_bipagem ? new Date(p.ts_inicio_bipagem).toLocaleString('pt-BR') : '—',
+    'Fim Bipagem':    p.ts_fim_bipagem    ? new Date(p.ts_fim_bipagem).toLocaleString('pt-BR')    : '—',
+    'Conferente':  p.bipado_por||'—',
+    'Obs':         p.obs||''
+  }));
+  const ws1 = XLSX.utils.json_to_sheet(resumo);
+  XLSX.utils.book_append_sheet(wb, ws1, 'Pedidos');
+
+  // ABA 2 — itens detalhados (um item por linha)
+  const itens = [];
+  for(const p of pedidos){
+    for(const item of (p.itens||[])){
+      itens.push({
+        'Pedido Crow':  p.numero,
+        'Código W3':    p.codigo_w3,
+        'Data':         new Date(p.data).toLocaleDateString('pt-BR'),
+        'Cliente':      p.cliente_nome,
+        'Status':       STATUS[p.status]||p.status,
+        'Bipado':       p.ts_fim_bipagem ? 'Sim' : 'Não',
+        'Fim Bipagem':  p.ts_fim_bipagem ? new Date(p.ts_fim_bipagem).toLocaleString('pt-BR') : '—',
+        'Código Item':  item.codigo||'—',
+        'Produto':      item.nome,
+        'Qtd':          item.qtd,
+        'Preço Unit.':  Number(item.preco||0),
+        'Desc. Item %': item.desconto_item||0,
+        'Subtotal':     item.qtd * (item.preco||0) * (1-(item.desconto_item||0)/100)
+      });
+    }
+  }
+  const ws2 = XLSX.utils.json_to_sheet(itens);
+  XLSX.utils.book_append_sheet(wb, ws2, 'Itens');
+
+  const hoje = new Date().toISOString().split('T')[0];
+  XLSX.writeFile(wb, `pedidos_w3_${ini}_a_${fim}_${hoje}.xlsx`);
+
+  el.innerHTML = `<span style="color:var(--success)">✅ Excel gerado com ${pedidos.length} pedido(s) e ${itens.length} item(ns). Confira antes de remover.</span>`;
+  toast(`✓ Excel gerado — ${pedidos.length} pedidos`,'success');
+}
 
 async function limparPedidosW3PorPeriodo(){
   const el = document.getElementById('limpar-w3-result');
