@@ -3182,12 +3182,16 @@ function trocarCliente(){
   document.getElementById('step-itens-ped').style.display='none';
 }
 
-function buscarProdutoPedido(){
+async function buscarProdutoPedido(){
   const q = document.getElementById('pedido-busca-produto').value.toLowerCase();
   const lista = document.getElementById('pedido-lista-produtos');
   if(q.length<2){ lista.style.display='none'; return; }
   const res = PRODUTOS_DB.filter(p=>!p.inativo && ((p.nome||'').toLowerCase().includes(q)||(p.codigo||'').toLowerCase().includes(q))).slice(0,8);
   if(!res.length){ lista.style.display='none'; return; }
+
+  // Garante que receitas e insumos estejam carregados para calcular capacidade de produção
+  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
+  if(!INSUMOS_DB.length) await carregarInsumosFirebase();
 
   // Buscar histórico de preços deste cliente para os produtos encontrados
   const clienteCod = pedidoAtual.cliente?.codigo;
@@ -3207,8 +3211,33 @@ function buscarProdutoPedido(){
   lista.innerHTML = res.map(p=>{
     const estqFisico = Number(p.quantidade||0);
     const reservado = Number(p.reservado||0);
-    const estq = estqFisico - reservado;
-    const est = estq>5?`<span class="estoque-ok">✓ ${estq} disp.</span>`:estq>0?`<span class="estoque-low">⚠ ${estq} disp.</span>`:`<span class="estoque-zero">Sem estoque disp.</span>`;
+    const dispFisico = estqFisico - reservado;
+
+    // Capacidade de produção baseada no insumo gargalo da receita
+    let capacidadeProducao = 0;
+    let gargalhoTooltip = '';
+    const receita = RECEITAS_DB[p.codigo];
+    if(receita?.itens?.length){
+      let minCap = Infinity;
+      let gargalho = null;
+      for(const ri of receita.itens){
+        const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
+        const estoqueInsumo = Number(insumo?.estoque_atual||0);
+        const cap = ri.qtd > 0 ? Math.floor(estoqueInsumo / ri.qtd) : Infinity;
+        if(cap < minCap){ minCap = cap; gargalho = { codigo: ri.codigo, nome: ri.nome, estoque: estoqueInsumo }; }
+      }
+      capacidadeProducao = minCap === Infinity ? 0 : minCap;
+      if(gargalho) gargalhoTooltip = `Gargalo: ${gargalho.codigo} (${gargalho.estoque} un)`;
+    }
+
+    const estqTotal = dispFisico + capacidadeProducao;
+    let est;
+    if(receita?.itens?.length){
+      const cor = estqTotal > 5 ? 'var(--success)' : estqTotal > 0 ? '#d97706' : '#dc2626';
+      est = `<span style="color:${cor};font-weight:700" title="${dispFisico} físico + ${capacidadeProducao} prod.${gargalhoTooltip?' | '+gargalhoTooltip:''}">✓ ${estqTotal} disp.</span>`;
+    } else {
+      est = dispFisico>5?`<span class="estoque-ok">✓ ${dispFisico} disp.</span>`:dispFisico>0?`<span class="estoque-low">⚠ ${dispFisico} disp.</span>`:`<span class="estoque-zero">Sem estoque disp.</span>`;
+    }
     const foto = fotoImg(p.codigo, 70, 'flex-shrink:0;border-radius:8px');
     const hist = historicoPrecos[p.codigo];
     const ultimoPreco = hist
@@ -7038,9 +7067,23 @@ async function toggleInativoCliente(codigo){
 }
 
 // ══ PRODUTOS ══
+// Gera o texto do tooltip do campo estoque na listagem de produtos —
+// para vendáveis com receita, inclui a capacidade de produção e o gargalho
+function tituloEstoque(p, estq, reservado, disponivel, estMin, critico, capacidadeProducao, gargalhoInfo){
+  let t = `Estoque físico: ${estq} | Reservado: ${reservado} | Disponível físico: ${disponivel} | Mínimo: ${estMin}`;
+  if(critico) t += ' ⚠ ABAIXO DO MÍNIMO';
+  if(capacidadeProducao !== null){
+    t += ` | Capacidade de produção (insumos): ${capacidadeProducao} un`;
+    if(gargalhoInfo) t += ` | ${gargalhoInfo}`;
+    t += ` | TOTAL disponível p/ venda: ${disponivel + capacidadeProducao} un`;
+  }
+  return t;
+}
+
 async function renderProdutos(){
   if(!INSUMOS_DB.length) await carregarInsumosFirebase();
   if(!FORNECEDORES_DB.length) await carregarFornecedoresFirebase();
+  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
 
   const selFornecedor = document.getElementById('filter-fornecedor-produto');
   if(selFornecedor && selFornecedor.options.length<=1){
@@ -7082,10 +7125,47 @@ async function renderProdutos(){
   const pagina=filtrado.slice(inicio,inicio+POR_PAGINA);
   const linhas = pagina.map(p=>{
     const estq=Number(p.quantidade||0);
+    const reservado=Number(p.reservado||0);
+    const disponivel=estq-reservado;
     const estMin=Number(p.estoque_minimo||0);
+
+    // Capacidade máxima de produção baseada no insumo gargalo da receita
+    let capacidadeProducao = null;
+    let gargalhoInfo = '';
+    if(p._tipo==='vendavel'){
+      const receita = RECEITAS_DB[p.codigo];
+      if(receita?.itens?.length){
+        let minCap = Infinity;
+        let gargalho = null;
+        for(const ri of receita.itens){
+          const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
+          const estoqueInsumo = Number(insumo?.estoque_atual||0);
+          const cap = ri.qtd > 0 ? Math.floor(estoqueInsumo / ri.qtd) : Infinity;
+          if(cap < minCap){ minCap = cap; gargalho = { nome: ri.nome, codigo: ri.codigo, estoque: estoqueInsumo, qtdReceita: ri.qtd }; }
+        }
+        capacidadeProducao = minCap === Infinity ? 0 : minCap;
+        if(gargalho) gargalhoInfo = `Gargalo: ${gargalho.codigo} — ${gargalho.nome} (${gargalho.estoque} un em estoque, usa ${gargalho.qtdReceita}/un)`;
+      }
+    }
+
+    // Disponível para venda = estoque físico disponível + capacidade de produção
+    const disponivelParaVenda = disponivel + (capacidadeProducao !== null ? capacidadeProducao : 0);
+
     const critico = estq <= estMin;
-    const est=critico?`<span class="estoque-low">⚠ ${estq}</span>`:estq>5?`<span class="estoque-ok">✓ ${estq}</span>`:estq>0?`<span class="estoque-low">⚠ ${estq}</span>`:`<span class="estoque-zero">Sem estoque</span>`;
-    const tituloEstoque = `Estoque físico: ${estq} | Reservado (vendido): ${Number(p.reservado||0)} | Disponível: ${estq-Number(p.reservado||0)} | Estoque mínimo: ${estMin}${critico?' ⚠ ABAIXO DO MÍNIMO':''}`;
+    let est;
+    if(p._tipo==='vendavel' && capacidadeProducao !== null){
+      const corTotal = disponivelParaVenda > 0 ? 'var(--success)' : '#dc2626';
+      est = `<span title="${tituloEstoque(p,estq,reservado,disponivel,estMin,critico,capacidadeProducao,gargalhoInfo)}">
+        <span style="font-weight:700;color:${corTotal}">${disponivelParaVenda}</span>
+        <span style="font-size:10px;color:var(--muted)"> (${disponivel} físico + ${capacidadeProducao} prod.)</span>
+      </span>`;
+    } else {
+      est = critico?`<span class="estoque-low" title="${tituloEstoque(p,estq,reservado,disponivel,estMin,critico,null,'')}" >⚠ ${estq}</span>`:
+            estq>5?`<span class="estoque-ok" title="${tituloEstoque(p,estq,reservado,disponivel,estMin,critico,null,'')}">✓ ${estq}</span>`:
+            estq>0?`<span class="estoque-low" title="${tituloEstoque(p,estq,reservado,disponivel,estMin,critico,null,'')}">⚠ ${estq}</span>`:
+            `<span class="estoque-zero">Sem estoque</span>`;
+    }
+
     const foto=p._tipo==='vendavel'?`<div onclick="event.stopPropagation();ampliarFoto('${p.codigo}')" style="cursor:pointer">${fotoImg(p.codigo,40)}</div>`:`<div style="width:40px;height:40px;border-radius:8px;background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:16px">🧩</div>`;
     const tipoLabel = p._tipo==='insumo' ? '<span class="badge" style="background:#ede9fe;color:#7c3aed;font-size:10px">INSUMO</span>' : '';
     const onclickFn = p._tipo==='insumo' ? `abrirDetalheItem('${p.codigo}','insumo')` : `abrirDetalheItem('${p.codigo}','vendavel')`;
@@ -7096,7 +7176,7 @@ async function renderProdutos(){
       <td><span class="badge badge-gray">${p.unidade}</span></td>
       <td><strong>${p._tipo==='vendavel'?fmtMoeda(p.preco_venda):'—'}</strong></td>
       <td style="color:var(--muted)">${p._tipo==='vendavel'?fmtMoeda(p.preco_minimo):'—'}</td>
-      <td onclick="event.stopPropagation();abrirHistoricoEstoque('${p.codigo}')" style="cursor:pointer" title="${tituloEstoque}">${est} <span style="font-size:10px;color:var(--accent)">📋</span></td>
+      <td onclick="event.stopPropagation();abrirHistoricoEstoque('${p.codigo}')" style="cursor:pointer">${est} <span style="font-size:10px;color:var(--accent)">📋</span></td>
       <td style="white-space:nowrap" onclick="event.stopPropagation()">
         <button class="btn btn-outline btn-sm" style="padding:4px 8px;font-size:11px" onclick="imprimirEtiquetaEstoque('${p.codigo}','${p._tipo}')" title="Etiqueta de Estoque (prateleira)">🏷️ Estoque</button>
         <button class="btn btn-outline btn-sm" style="padding:4px 8px;font-size:11px" onclick="imprimirEtiquetaProduto('${p.codigo}','${p._tipo}')" title="Etiqueta de Produto (embalagem)">🏷️ Produto</button>
