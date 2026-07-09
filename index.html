@@ -4079,6 +4079,7 @@ async function renderProducao(){
     return b.ts_criacao - a.ts_criacao;
   });
 
+  filtradoOPsAtual = filtrado; // salva para o botão de exportar Excel do filtro
   const total = filtrado.length, inicio=(paginaProducao-1)*POR_PAGINA;
   const pagina = filtrado.slice(inicio, inicio+POR_PAGINA);
 
@@ -4117,6 +4118,7 @@ async function renderProducao(){
 }
 
 let opsSelecionadasExportar = new Set();
+let filtradoOPsAtual = []; // todas as OPs do filtro atual (todas as páginas), para exportação
 
 function toggleSelecaoOP(key, checked){
   if(checked) opsSelecionadasExportar.add(key); else opsSelecionadasExportar.delete(key);
@@ -4125,7 +4127,11 @@ function toggleSelecaoOP(key, checked){
 
 function atualizarBotaoExportarOPs(){
   const btn = document.getElementById('btn-exportar-ops');
-  if(btn) btn.textContent = `📥 Exportar Excel (${opsSelecionadasExportar.size})`;
+  const nSel = opsSelecionadasExportar.size;
+  const nFiltro = filtradoOPsAtual.length;
+  if(btn) btn.textContent = nSel > 0
+    ? `📥 Exportar Excel (${nSel} selecionadas)`
+    : `📥 Exportar Excel (${nFiltro} filtradas)`;
   const chkTodos = document.getElementById('op-sel-todos');
   if(chkTodos){
     const todosVisiveis = Array.from(document.querySelectorAll('.check-exportar-op')).map(c=>c.dataset.key);
@@ -4143,23 +4149,29 @@ function toggleSelecaoTodosOPs(checked){
 }
 
 function exportarOPsSelecionadasExcel(){
-  if(!opsSelecionadasExportar.size){ toast('Marque ao menos uma OP para exportar','error'); return; }
+  // Se tem OPs marcadas individualmente, exporta só elas; senão exporta todas do filtro atual
+  const opsParaExportar = opsSelecionadasExportar.size > 0
+    ? OPS_DB.filter(op=>opsSelecionadasExportar.has(op.key))
+    : filtradoOPsAtual;
+
+  if(!opsParaExportar.length){ toast('Nenhuma OP para exportar','error'); return; }
+
   const statusLabel = { pendente:'Pendente', em_producao:'Em Produção', concluida:'Concluída' };
-  const dados = OPS_DB.filter(op=>opsSelecionadasExportar.has(op.key)).map(op=>({
-    'OP':          op.numero || op.key.slice(-5),
-    'Produto':     op.produto_nome,
-    'Código':      op.produto_codigo,
-    'Status':      statusLabel[op.status] || op.status,
-    'Urgente':     op.urgente ? 'Sim' : 'Não',
+  const dados = opsParaExportar.map(op=>({
+    'OP':             op.numero || op.key.slice(-5),
+    'Produto':        op.produto_nome,
+    'Código':         op.produto_codigo,
+    'Status':         statusLabel[op.status] || op.status,
+    'Urgente':        op.urgente ? 'Sim' : 'Não',
     'Qtd Solicitada': op.qtd_solicitada || 0,
     'Qtd Produzida':  op.qtd_produzida || 0,
-    '% Conclusão': op.qtd_solicitada ? Math.round((op.qtd_produzida||0)/op.qtd_solicitada*100)+'%' : '0%',
-    'Responsável':   op.responsavel_producao || '—',
-    'Pedido Origem': op.pedido_origem || '—',
-    'Criada em':   new Date(op.ts_criacao).toLocaleDateString('pt-BR'),
-    'Observações': op.obs || ''
+    '% Conclusão':    op.qtd_solicitada ? Math.round((op.qtd_produzida||0)/op.qtd_solicitada*100)+'%' : '0%',
+    'Responsável':    op.responsavel_producao || '—',
+    'Pedido Origem':  op.pedido_origem || '—',
+    'Criada em':      new Date(op.ts_criacao).toLocaleDateString('pt-BR'),
+    'Observações':    op.obs || ''
   }));
-  dados.sort((a,b)=>a['OP']-b['OP']);
+  dados.sort((a,b)=>Number(a['OP'])-Number(b['OP']));
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(dados);
   XLSX.utils.book_append_sheet(wb, ws, 'Ordens de Produção');
