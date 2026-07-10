@@ -5280,15 +5280,24 @@ async function abrirHistoricoEstoque(codigo){
   const dados = snap.val() || {};
   const movimentos = Object.values(dados).sort((a,b)=>b.ts-a.ts);
 
+  // Verifica quais origens ainda existem no Firebase (evita mostrar link "Ver pedido" para pedidos deletados)
+  const origensValidas = new Set();
+  const pedidoIds = [...new Set(movimentos.filter(m=>m.origem_tipo==='pedido'&&m.origem_id).map(m=>m.origem_id))];
+  await Promise.all(pedidoIds.map(async pid=>{
+    const s = await db.ref('pedidos/'+pid).once('value');
+    if(s.exists()) origensValidas.add(pid);
+  }));
+
   document.getElementById('historico-estoque-conteudo').innerHTML = `
     <div class="modal-title">📋 Histórico — ${nomeExibir}</div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:16px">${codigo} · Estoque atual: <strong>${estoqueExibir||0}</strong></div>
     <div style="max-height:50vh;overflow-y:auto;border:1px solid var(--border);border-radius:10px">
       ${movimentos.length ? movimentos.map(m=>{
-        const temOrigem = m.origem_tipo && m.origem_id;
-        const onclickAttr = temOrigem ? `onclick="abrirOrigemMovimento('${m.origem_tipo}','${m.origem_id}')" style="cursor:pointer"` : '';
+        const origemExiste = m.origem_tipo && m.origem_id &&
+          (m.origem_tipo !== 'pedido' || origensValidas.has(m.origem_id));
+        const onclickAttr = origemExiste ? `onclick="abrirOrigemMovimento('${m.origem_tipo}','${m.origem_id}')" style="cursor:pointer"` : '';
         const linkLabel = m.origem_tipo === 'pedido' ? '🧾 Ver pedido' : m.origem_tipo === 'op' ? '🏭 Ver OP' : m.origem_tipo === 'compra' ? '🛒 Ver compra' : '';
-        return `<div ${onclickAttr} style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);${temOrigem?'cursor:pointer':''}" ${temOrigem?`onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''"`:''}>
+        return `<div ${onclickAttr} style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);${origemExiste?'cursor:pointer':''}" ${origemExiste?`onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''"`:''}>
           <div>
             <div style="font-size:13px;font-weight:600;color:${m.tipo==='entrada'?'var(--success)':'#dc2626'}">
               ${m.tipo==='entrada'?'⬆️ Entrada':'⬇️ Saída'} de ${m.qtd}
@@ -5296,7 +5305,7 @@ async function abrirHistoricoEstoque(codigo){
             <div style="font-size:12px;color:var(--muted)">${m.motivo||''}</div>
             <div style="font-size:11px;color:var(--muted)">${new Date(m.ts).toLocaleString('pt-BR')} · ${m.usuario||''}</div>
           </div>
-          ${temOrigem ? `<div style="font-size:12px;color:var(--accent);font-weight:600;white-space:nowrap">${linkLabel} →</div>` : ''}
+          ${origemExiste ? `<div style="font-size:12px;color:var(--accent);font-weight:600;white-space:nowrap">${linkLabel} →</div>` : ''}
         </div>`;
       }).join('') : '<div style="text-align:center;color:var(--muted);padding:24px;font-size:13px">Nenhuma movimentação registrada ainda</div>'}
     </div>
