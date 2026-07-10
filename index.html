@@ -5305,12 +5305,10 @@ async function abrirHistoricoEstoque(codigo){
 }
 
 async function abrirOrigemMovimento(tipo, id){
-  console.log('abrirOrigemMovimento:', tipo, id, typeof id);
   fecharModal('modal-historico-estoque');
   await new Promise(r=>setTimeout(r, 150));
   if(tipo === 'pedido'){
     const snapDireto = await db.ref('pedidos/'+id).once('value');
-    console.log('snapDireto exists:', snapDireto.exists(), 'val:', snapDireto.val());
     if(snapDireto.exists()){
       await verPedido(id);
     } else if(/^\d+$/.test(String(id))){
@@ -5319,10 +5317,10 @@ async function abrirOrigemMovimento(tipo, id){
         const firebaseId = Object.keys(snapTodos.val())[0];
         await verPedido(firebaseId);
       } else {
-        toast('Pedido não encontrado (pode ter sido removido)','error');
+        toast('Pedido não encontrado — pode ter sido removido do sistema','error');
       }
     } else {
-      toast('Pedido não encontrado','error');
+      toast('Pedido não encontrado — pode ter sido removido do sistema','error');
     }
   } else if(tipo === 'op'){
     await verDetalheOP(id);
