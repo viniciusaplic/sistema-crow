@@ -1031,7 +1031,10 @@ tbody td{padding:11px 16px;font-size:14px}
     <div id="tab-garantias" style="display:none">
       <div class="section-header">
         <div class="section-title">🛡️ Garantias com Fornecedor</div>
-        <button class="btn btn-primary" onclick="abrirRelatorioGarantias()">📄 Gerar Relatório</button>
+        <div class="search-box">
+          <button class="btn btn-outline btn-sm" onclick="abrirNovaGarantiaManual()">+ Nova Garantia</button>
+          <button class="btn btn-primary" onclick="abrirRelatorioGarantias()">📄 Gerar Relatório</button>
+        </div>
       </div>
       <div class="dashboard-cards" id="garantias-resumo" style="margin-bottom:16px"></div>
       <div class="filtros-bar">
@@ -1680,8 +1683,8 @@ tbody td{padding:11px 16px;font-size:14px}
 <div class="modal-overlay" id="modal-defeito">
   <div class="modal" style="max-width:560px">
     <button class="modal-close" onclick="fecharModal('modal-defeito')">×</button>
-    <div class="modal-title">⚠️ Registrar Peça com Defeito</div>
-    <div style="font-size:13px;color:var(--muted);margin-bottom:16px">
+    <div class="modal-title" id="modal-defeito-titulo">⚠️ Registrar Peça com Defeito</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:16px" id="modal-defeito-desc">
       A peça será retirada do estoque e entra na lista de Garantias para cobrança posterior ao fornecedor.
     </div>
     <div class="form-row single">
@@ -1698,12 +1701,42 @@ tbody td{padding:11px 16px;font-size:14px}
         <div class="form-group"><label>OP relacionada</label><input type="text" id="defeito-op" disabled></div>
       </div>
       <div class="form-row single">
+        <div class="form-group">
+          <label>Fornecedor responsável</label>
+          <input type="text" id="defeito-fornecedor" placeholder="Nome do fornecedor..." list="defeito-fornecedores-list">
+          <datalist id="defeito-fornecedores-list"></datalist>
+        </div>
+      </div>
+      <div class="form-row single">
         <div class="form-group"><label>Motivo / Observação</label><input type="text" id="defeito-motivo" placeholder="ex: vazamento no corpo, rosca trincada..."></div>
       </div>
       <div class="form-actions">
         <button class="btn btn-outline" onclick="fecharModal('modal-defeito')">Cancelar</button>
         <button class="btn btn-primary" style="background:#d97706;border-color:#d97706" onclick="confirmarRegistroDefeito()">⚠️ Registrar Defeito</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL EDITAR FORNECEDOR GARANTIA -->
+<div class="modal-overlay" id="modal-editar-garantia-fornecedor">
+  <div class="modal" style="max-width:420px">
+    <button class="modal-close" onclick="fecharModal('modal-editar-garantia-fornecedor')">×</button>
+    <div class="modal-title">✏️ Editar Garantia</div>
+    <input type="hidden" id="editar-garantia-id">
+    <div id="editar-garantia-info" style="font-size:13px;color:var(--muted);margin-bottom:14px"></div>
+    <div class="form-row single"><div class="form-group">
+      <label>Fornecedor responsável</label>
+      <input type="text" id="editar-garantia-fornecedor" list="editar-garantia-fornecedores-list" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px">
+      <datalist id="editar-garantia-fornecedores-list"></datalist>
+    </div></div>
+    <div class="form-row single"><div class="form-group">
+      <label>Motivo / Observação</label>
+      <input type="text" id="editar-garantia-motivo" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px">
+    </div></div>
+    <div class="form-actions">
+      <button class="btn btn-outline" onclick="fecharModal('modal-editar-garantia-fornecedor')">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarEdicaoGarantia()">Salvar</button>
     </div>
   </div>
 </div>
@@ -6289,15 +6322,23 @@ async function abrirModalDefeito(opKey, opNumero){
   if(!INSUMOS_DB.length) await carregarInsumosFirebase();
   if(!FORNECEDORES_DB.length) await carregarFornecedoresFirebase();
 
-  opContextoDefeito = { key: opKey, numero: opNumero };
+  opContextoDefeito = opKey ? { key: opKey, numero: opNumero } : { key: null, numero: null };
   insumoDefeitoSelecionado = null;
+
+  const ehManual = !opKey;
+  document.getElementById('modal-defeito-titulo').textContent = ehManual ? '🛡️ Nova Garantia (produto retornado)' : '⚠️ Registrar Peça com Defeito';
+  document.getElementById('modal-defeito-desc').textContent = ehManual
+    ? 'Registra um produto retornado pelo cliente com defeito. A peça é retirada do estoque e entra na lista de Garantias para cobrança ao fornecedor.'
+    : 'A peça será retirada do estoque e entra na lista de Garantias para cobrança posterior ao fornecedor.';
+  document.getElementById('defeito-op').value = ehManual ? 'Lançamento manual' : '#'+opNumero;
   document.getElementById('defeito-busca-insumo').value = '';
   document.getElementById('defeito-lista-busca').style.display = 'none';
   document.getElementById('defeito-insumo-selecionado').innerHTML = '';
   document.getElementById('defeito-form-resto').style.display = 'none';
   document.getElementById('defeito-qtd').value = 1;
-  document.getElementById('defeito-op').value = '#' + opNumero;
   document.getElementById('defeito-motivo').value = '';
+  document.getElementById('defeito-fornecedor').value = '';
+  preencherDatalistFornecedores('defeito-fornecedores-list');
   abrirModal('modal-defeito');
 }
 
@@ -6325,14 +6366,16 @@ function selecionarInsumoDefeito(codigo){
   document.getElementById('defeito-busca-insumo').value = '';
   document.getElementById('defeito-lista-busca').style.display = 'none';
 
-  // Identifica o fornecedor padrão (ou o único cadastrado) para já sugerir na garantia
+  // Identifica o fornecedor padrão e preenche o campo editável
   const fornecedorPadrao = (i.fornecedores||[]).find(f=>f.padrao) || (i.fornecedores||[])[0];
-  const fornecedorTexto = fornecedorPadrao ? fornecedorPadrao.nome : (i.fornecedor || 'Não cadastrado');
+  const fornecedorTexto = fornecedorPadrao ? fornecedorPadrao.nome : (i.fornecedor || '');
+  document.getElementById('defeito-fornecedor').value = fornecedorTexto;
+  preencherDatalistFornecedores('defeito-fornecedores-list');
 
   document.getElementById('defeito-insumo-selecionado').innerHTML = `
     <div style="background:var(--bg);border-radius:8px;padding:12px 14px;margin-bottom:14px">
       <strong>${i.codigo}</strong> — ${i.nome}<br>
-      <span style="font-size:12px;color:var(--muted)">Estoque atual: <strong>${i.estoque_atual||0}</strong> · Fornecedor: <strong>${fornecedorTexto}</strong></span>
+      <span style="font-size:12px;color:var(--muted)">Estoque atual: <strong>${i.estoque_atual||0}</strong></span>
       <button onclick="insumoDefeitoSelecionado=null;document.getElementById('defeito-insumo-selecionado').innerHTML='';document.getElementById('defeito-form-resto').style.display='none'"
         style="float:right;background:none;border:none;cursor:pointer;color:var(--muted)">✕ trocar</button>
     </div>`;
@@ -6345,10 +6388,10 @@ async function confirmarRegistroDefeito(){
   const qtd = Number(document.getElementById('defeito-qtd').value) || 0;
   if(qtd <= 0){ toast('Quantidade inválida','error'); return; }
   const motivo = document.getElementById('defeito-motivo').value.trim();
+  const fornecedorNome = document.getElementById('defeito-fornecedor').value.trim() || 'Não identificado';
 
   const i = insumoDefeitoSelecionado;
-  const fornecedorPadrao = (i.fornecedores||[]).find(f=>f.padrao) || (i.fornecedores||[])[0];
-  const fornecedorNome = fornecedorPadrao ? fornecedorPadrao.nome : (i.fornecedor || 'Não identificado');
+  const ehManual = !opContextoDefeito?.key;
 
   // Dá baixa no estoque do insumo defeituoso
   const estoqueAtual = Number(i.estoque_atual||0);
@@ -6356,7 +6399,9 @@ async function confirmarRegistroDefeito(){
   const key = i.key || ('ins_'+i.codigo);
   await db.ref('insumos/'+key+'/estoque_atual').set(novoEstoque);
   i.estoque_atual = novoEstoque;
-  await registrarMovimentoEstoque(i.codigo, i.nome, 'saida', qtd, `Defeito identificado na produção — OP #${opContextoDefeito.numero}`, 'op', opContextoDefeito.key);
+  await registrarMovimentoEstoque(i.codigo, i.nome, 'saida', qtd,
+    ehManual ? `Defeito — produto retornado (garantia manual)` : `Defeito identificado na produção — OP #${opContextoDefeito.numero}`,
+    ehManual ? null : 'op', ehManual ? null : opContextoDefeito.key);
 
   // Registra na lista de garantias
   const garantiaKey = db.ref('garantias').push().key;
@@ -6365,16 +6410,49 @@ async function confirmarRegistroDefeito(){
     nome: i.nome,
     fornecedor: fornecedorNome,
     qtd, motivo,
-    op_numero: opContextoDefeito.numero,
-    op_key: opContextoDefeito.key,
+    op_numero: ehManual ? null : opContextoDefeito.numero,
+    op_key: ehManual ? null : opContextoDefeito.key,
+    manual: ehManual || false,
     status: 'pendente',
     registrado_por: usuarioLogado.nome,
     ts: Date.now()
   });
 
   fecharModal('modal-defeito');
-  toast(`✓ Defeito registrado! ${qtd}x ${i.nome} retirado(s) do estoque.`,'success');
+  toast(`✓ Garantia registrada! ${qtd}x ${i.nome} retirado(s) do estoque.`,'success');
+  renderGarantias();
 }
+
+// ── Edição de garantia existente (fornecedor + motivo) ──
+async function abrirEditarGarantia(id){
+  if(!temPermissaoEditar('garantias')){ toast('Acesso restrito','error'); return; }
+  if(!FORNECEDORES_DB.length) await carregarFornecedoresFirebase();
+  const g = GARANTIAS_CACHE.find(x=>x.id===id);
+  if(!g) return;
+  document.getElementById('editar-garantia-id').value = id;
+  document.getElementById('editar-garantia-info').textContent = `${g.codigo} — ${g.nome} · Qtd: ${g.qtd}`;
+  document.getElementById('editar-garantia-fornecedor').value = g.fornecedor||'';
+  document.getElementById('editar-garantia-motivo').value = g.motivo||'';
+  const dl = document.getElementById('editar-garantia-fornecedores-list');
+  dl.innerHTML = FORNECEDORES_DB.map(f=>`<option value="${f.nome}">`).join('');
+  abrirModal('modal-editar-garantia-fornecedor');
+}
+
+async function salvarEdicaoGarantia(){
+  const id = document.getElementById('editar-garantia-id').value;
+  const fornecedor = document.getElementById('editar-garantia-fornecedor').value.trim();
+  const motivo = document.getElementById('editar-garantia-motivo').value.trim();
+  if(!fornecedor){ toast('Informe o fornecedor','error'); return; }
+  await db.ref('garantias/'+id).update({ fornecedor, motivo });
+  const g = GARANTIAS_CACHE.find(x=>x.id===id);
+  if(g){ g.fornecedor = fornecedor; g.motivo = motivo; }
+  fecharModal('modal-editar-garantia-fornecedor');
+  toast('✓ Garantia atualizada','success');
+  renderGarantias();
+}
+
+// Abre modal de lançamento manual — alias para compatibilidade
+function abrirNovaGarantiaManual(){ abrirModalDefeito(null, null); }
 
 const STATUS_GARANTIA = {
   pendente: {label:'Pendente', cor:'#d97706', bg:'#fef3c7'},
@@ -6443,7 +6521,7 @@ async function renderGarantias(){
             <option value="enviado" ${g.status==='enviado'?'disabled':''}>Enviado</option>
             <option value="finalizado" ${g.status==='finalizado'?'disabled':''}>Finalizado</option>
           </select>
-          <button class="btn btn-outline btn-sm" onclick="abrirEdicaoGarantia('${g.id}')">✏️ Editar</button>
+          <button class="btn btn-outline btn-sm" onclick="abrirEditarGarantia('${g.id}')">✏️ Editar</button>
           <button class="btn btn-outline btn-sm" style="color:#dc2626;border-color:#dc2626" onclick="cancelarGarantia('${g.id}')">🗑️ Cancelar</button>
         </div>` : ''
       }
