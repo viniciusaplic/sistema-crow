@@ -6325,6 +6325,13 @@ async function marcarCompraRecebida(id){
 // ══ GARANTIAS — PEÇAS COM DEFEITO ══
 // ══════════════════════════════════════════════
 
+// Preenche a datalist de fornecedores no modal de defeito/garantia
+function preencherDatalistFornecedores(datalistId){
+  const dl = document.getElementById(datalistId);
+  if(!dl) return;
+  dl.innerHTML = FORNECEDORES_DB.map(f=>`<option value="${f.nome}">`).join('');
+}
+
 async function abrirModalDefeito(opKey, opNumero){
   if(!temPermissaoEditar('garantias')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   if(!INSUMOS_DB.length) await carregarInsumosFirebase();
