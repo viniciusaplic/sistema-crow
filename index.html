@@ -5308,12 +5308,11 @@ async function abrirOrigemMovimento(tipo, id){
   fecharModal('modal-historico-estoque');
   await new Promise(r=>setTimeout(r, 150));
   if(tipo === 'pedido'){
-    // Tenta abrir pelo ID direto; se não encontrar, busca pelo número do pedido
     const snapDireto = await db.ref('pedidos/'+id).once('value');
     if(snapDireto.exists()){
       await verPedido(id);
-    } else {
-      // origem_id pode ser o número do pedido — busca em todos os pedidos
+    } else if(/^\d+$/.test(String(id))){
+      // origem_id é numérico — pode ser o número do pedido
       const snapTodos = await db.ref('pedidos').orderByChild('numero').equalTo(Number(id)).once('value');
       if(snapTodos.exists()){
         const firebaseId = Object.keys(snapTodos.val())[0];
@@ -5321,6 +5320,8 @@ async function abrirOrigemMovimento(tipo, id){
       } else {
         toast('Pedido não encontrado (pode ter sido removido)','error');
       }
+    } else {
+      toast('Pedido não encontrado','error');
     }
   } else if(tipo === 'op'){
     await verDetalheOP(id);
