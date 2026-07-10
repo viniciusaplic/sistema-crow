@@ -9,6 +9,7 @@
 <!-- html2canvas para gerar imagem do pedido -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <!-- Firebase -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
@@ -7440,10 +7441,19 @@ function renderModalProduto(codigo){
           </div>
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             <thead><tr style="background:var(--bg)">
-              <th style="padding:6px;text-align:left">Código</th><th style="padding:6px;text-align:left">Insumo</th>
-              <th style="padding:6px">Qtd. por unid.</th>${isAdmin?'<th style="padding:6px"></th>':''}
+              <th style="padding:6px;text-align:left">Código</th>
+              <th style="padding:6px;text-align:left">Insumo</th>
+              <th style="padding:6px;text-align:center">Qtd. por unid.</th>
+              <th style="padding:6px;text-align:center">Estoque atual</th>
+              <th style="padding:6px;text-align:center" title="Quantas unidades do produto acabado este insumo permite produzir">Produz</th>
+              ${isAdmin?'<th style="padding:6px"></th>':''}
             </tr></thead>
-            <tbody>${receita.itens.map((item,idx)=>`
+            <tbody>${receita.itens.map((item,idx)=>{
+              const insumo = INSUMOS_DB.find(i=>i.codigo===item.codigo);
+              const estoqueAtual = Number(insumo?.estoque_atual||0);
+              const produz = item.qtd > 0 ? Math.floor(estoqueAtual / item.qtd) : '—';
+              const corProduz = produz === 0 ? '#dc2626' : produz < 10 ? '#d97706' : '#16a34a';
+              return `
               <tr style="border-bottom:1px solid var(--border)">
                 <td style="padding:6px"><strong>${item.codigo}</strong></td>
                 <td style="padding:6px">${item.nome}</td>
@@ -7452,8 +7462,10 @@ function renderModalProduto(codigo){
                     ? `<input type="number" step="0.001" value="${item.qtd}" style="width:70px;padding:4px;border:1px solid var(--border);border-radius:4px;text-align:center" onchange="editarQtdComposicao('${codigo}',${idx},this.value)">`
                     : item.qtd}
                 </td>
+                <td style="padding:6px;text-align:center;font-weight:700;color:${estoqueAtual===0?'#dc2626':'#1a1a2e'}">${estoqueAtual.toLocaleString('pt-BR')}</td>
+                <td style="padding:6px;text-align:center;font-weight:700;color:${corProduz}" title="Estoque ${estoqueAtual} ÷ ${item.qtd}/un = ${produz} un possíveis">${typeof produz==='number'?produz.toLocaleString('pt-BR'):produz} un</td>
                 ${isAdmin ? `<td style="padding:6px;text-align:center"><button class="btn btn-sm" style="background:#fef2f2;color:#dc2626;border:none;padding:4px 8px" onclick="removerItemComposicao('${codigo}',${idx})">🗑️</button></td>` : ''}
-              </tr>`).join('')}
+              </tr>`;}).join('')}
             </tbody>
           </table>
         </div>`;
@@ -11140,99 +11152,116 @@ const ALTURA_ALVO_PAGINA_IMG = 850; // px (na escala do div, antes do scale:2 do
 async function gerarImagemPedido(id){
   const snap=await db.ref('pedidos/'+id).once('value');
   const p=snap.val(); if(!p) return;
-  toast('⏳ Gerando imagem(ns)...','');
+  toast('⏳ Gerando PDF...','');
 
   const itens = p.itens||[];
 
-  // Mede a altura real de cada linha de item (varia conforme o nome do produto quebra em 1-3 linhas)
+  // Mede a altura real de cada linha
   const medidor = document.createElement('div');
   medidor.style.cssText = 'position:fixed;left:-9999px;top:0;width:480px;font-family:Arial,sans-serif;font-size:11.5px';
   medidor.innerHTML = `<table style="width:100%;border-collapse:collapse"><tbody>${itens.map((i,idx)=>montarLinhaItemHTML(i,idx)).join('')}</tbody></table>`;
   document.body.appendChild(medidor);
-  const trs = medidor.querySelectorAll('tbody > tr');
-  const alturas = Array.from(trs).map(tr=>tr.getBoundingClientRect().height || 40);
+  const alturas = Array.from(medidor.querySelectorAll('tbody > tr')).map(tr=>tr.getBoundingClientRect().height||40);
   document.body.removeChild(medidor);
 
-  // Agrupa os itens em páginas com base na altura acumulada (cabeçalho já ocupa ~230px de cada página)
-  const ALTURA_CABECALHO = 230;
+  // Divide em páginas
+  const ALTURA_CABECALHO = 230, ALTURA_ALVO = 850;
   const paginasItens = [];
   let paginaAtual = [], alturaAtual = ALTURA_CABECALHO;
-  itens.forEach((item, idx) => {
-    const h = alturas[idx] || 40;
-    if(alturaAtual + h > ALTURA_ALVO_PAGINA_IMG && paginaAtual.length){
-      paginasItens.push(paginaAtual);
-      paginaAtual = [];
-      alturaAtual = ALTURA_CABECALHO;
-    }
-    paginaAtual.push(item);
-    alturaAtual += h;
+  itens.forEach((item,idx)=>{
+    const h = alturas[idx]||40;
+    if(alturaAtual+h > ALTURA_ALVO && paginaAtual.length){ paginasItens.push(paginaAtual); paginaAtual=[]; alturaAtual=ALTURA_CABECALHO; }
+    paginaAtual.push(item); alturaAtual+=h;
   });
-  paginasItens.push(paginaAtual); // sempre inclui a última (mesmo pedido sem itens)
-
-  const totalPaginas = paginasItens.length;
-  const imagens = [];
+  paginasItens.push(paginaAtual);
 
   try {
-    for(let pg=0; pg<totalPaginas; pg++){
-      const itensPagina = paginasItens[pg];
-      const ehUltima = pg === totalPaginas-1;
-      const subtitulo = totalPaginas>1 ? `Página ${pg+1}/${totalPaginas}` : '';
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
+    const PW = 210, PH = 297; // A4 mm
 
-      const itensTr = itensPagina.map((i,idx)=>montarLinhaItemHTML(i,idx)).join('');
+    for(let pg=0; pg<paginasItens.length; pg++){
+      const ehUltima = pg === paginasItens.length-1;
+      const subtitulo = paginasItens.length>1 ? `Página ${pg+1}/${paginasItens.length}` : '';
+
+      const itensTr = paginasItens[pg].map((i,idx)=>montarLinhaItemHTML(i,idx)).join('');
       const conteudo = `
         ${montarCabecalhoSlipHTML(p, subtitulo)}
         <table style="width:100%;border-collapse:collapse">
-          <thead>
-            <tr style="background:#f0f0f0">
-              <th style="text-align:left;padding:5px 14px;font-size:9px;color:#555;border-bottom:1px solid #ccc">Produto</th>
-              <th style="text-align:center;padding:5px 8px;font-size:9px;color:#555;border-bottom:1px solid #ccc">Qtd</th>
-              <th style="text-align:right;padding:5px 8px;font-size:9px;color:#555;border-bottom:1px solid #ccc">Unit.</th>
-              <th style="text-align:center;padding:5px 8px;font-size:9px;color:#555;border-bottom:1px solid #ccc">Desc.</th>
-              <th style="text-align:right;padding:5px 14px;font-size:9px;color:#555;border-bottom:1px solid #ccc">Subtotal</th>
-            </tr>
-          </thead>
+          <thead><tr style="background:#f0f0f0">
+            <th style="text-align:left;padding:5px 14px;font-size:9px;color:#555;border-bottom:1px solid #ccc">Produto</th>
+            <th style="text-align:center;padding:5px 8px;font-size:9px;color:#555;border-bottom:1px solid #ccc">Qtd</th>
+            <th style="text-align:right;padding:5px 8px;font-size:9px;color:#555;border-bottom:1px solid #ccc">Unit.</th>
+            <th style="text-align:center;padding:5px 8px;font-size:9px;color:#555;border-bottom:1px solid #ccc">Desc.</th>
+            <th style="text-align:right;padding:5px 14px;font-size:9px;color:#555;border-bottom:1px solid #ccc">Subtotal</th>
+          </tr></thead>
           <tbody>${itensTr}</tbody>
         </table>
-        ${ehUltima ? montarRodapeSlipHTML(p) : `<div style="padding:8px 14px;font-size:10px;color:#999;text-align:center;border-top:1px solid #eee">▸ continua na próxima imagem...</div>`}
+        ${ehUltima ? montarRodapeSlipHTML(p) : '<div style="padding:8px 14px;font-size:10px;color:#999;text-align:center;border-top:1px solid #eee">▸ continua...</div>'}
       `;
 
-      const div=document.createElement('div');
-      div.style.cssText='position:fixed;left:-9999px;top:0;width:480px;background:#fff;font-family:Arial,sans-serif;color:#1a1a1a;font-size:11.5px;box-sizing:border-box;z-index:-1';
+      const div = document.createElement('div');
+      div.style.cssText = 'position:fixed;left:-9999px;top:0;width:595px;background:#fff;font-family:Arial,sans-serif;color:#1a1a1a;font-size:11.5px;box-sizing:border-box;z-index:-1';
       div.innerHTML = conteudo;
       document.body.appendChild(div);
       const canvas = await html2canvas(div,{scale:2,useCORS:true,backgroundColor:'#ffffff',logging:false});
       document.body.removeChild(div);
-      const blob = await new Promise(res=>canvas.toBlob(res,'image/png',0.95));
-      imagens.push(URL.createObjectURL(blob));
+
+      if(pg > 0) pdf.addPage();
+      const imgData = canvas.toDataURL('image/jpeg', 0.92);
+      const canvasW = canvas.width, canvasH = canvas.height;
+      const ratio = PW / (canvasW / 2 * 0.2646); // px → mm (96dpi)
+      const imgH = (canvasH / 2 * 0.2646) * ratio;
+      pdf.addImage(imgData, 'JPEG', 0, 0, PW, Math.min(imgH, PH));
     }
 
-    // Monta o modal com todas as páginas geradas
-    let modal=document.getElementById('modal-whatsapp-img');
+    const pdfBlob = pdf.output('blob');
+    const pdfUrl = URL.createObjectURL(pdfBlob);
+
+    // Modal de download/compartilhamento
+    let modal = document.getElementById('modal-whatsapp-img');
     if(!modal){
-      modal=document.createElement('div');
-      modal.id='modal-whatsapp-img';
-      modal.style.cssText='display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:9999;flex-direction:column;padding:16px;gap:12px;overflow-y:auto';
+      modal = document.createElement('div');
+      modal.id = 'modal-whatsapp-img';
+      modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:9999;flex-direction:column;align-items:center;justify-content:center;padding:24px;gap:16px';
       document.body.appendChild(modal);
     }
-    const paginasHtml = imagens.map((url,idx)=>`
-      <div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:16px">
-        ${totalPaginas>1?`<div style="color:rgba(255,255,255,.7);font-size:12px">Página ${idx+1} de ${totalPaginas}</div>`:''}
-        <img src="${url}" style="max-width:92vw;max-height:70vh;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.5)">
-        <div style="display:flex;gap:10px">
-          <a href="${url}" download="pedido_${p.numero}_pg${idx+1}.png" class="btn btn-primary">⬇️ Baixar PNG</a>
-          <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:700" onclick="compartilharWhatsApp('${url}','${idx+1}')">📲 Compartilhar</button>
-        </div>
-      </div>`).join('');
-    modal.innerHTML=`
+    modal.innerHTML = `
       <button onclick="document.getElementById('modal-whatsapp-img').style.display='none'"
-        style="position:sticky;top:0;align-self:flex-end;background:#fff;border:none;border-radius:50%;width:44px;height:44px;font-size:22px;cursor:pointer;z-index:1">✕</button>
-      <div style="color:#fff;font-size:16px;font-weight:700;text-align:center">✅ ${totalPaginas>1?totalPaginas+' imagens geradas':'Imagem gerada'}!</div>
-      <div style="color:rgba(255,255,255,.6);font-size:13px;text-align:center;margin-bottom:8px">Segure na imagem para salvar, ou use os botões abaixo</div>
-      ${paginasHtml}
+        style="position:fixed;top:16px;right:16px;background:#fff;border:none;border-radius:50%;width:44px;height:44px;font-size:22px;cursor:pointer">✕</button>
+      <div style="color:#fff;font-size:18px;font-weight:700">✅ PDF gerado!</div>
+      <div style="color:rgba(255,255,255,.7);font-size:13px;text-align:center">
+        ${paginasItens.length} página(s) em um único arquivo — pronto para enviar pelo WhatsApp
+      </div>
+      <a href="${pdfUrl}" download="pedido_${p.numero}.pdf"
+        style="background:#1565c0;color:#fff;font-weight:700;padding:14px 32px;border-radius:10px;font-size:15px;text-decoration:none">
+        ⬇️ Baixar PDF — Pedido #${p.numero}
+      </a>
+      <button onclick="compartilharPDF('${pdfUrl}','${p.numero}')"
+        style="background:#25d366;color:#fff;font-weight:700;padding:14px 32px;border-radius:10px;font-size:15px;border:none;cursor:pointer">
+        📲 Compartilhar no WhatsApp
+      </button>
+      <div style="color:rgba(255,255,255,.5);font-size:11px;text-align:center;margin-top:4px">
+        No celular: toque em "Compartilhar", escolha o WhatsApp e selecione o contato
+      </div>
     `;
-    modal.style.display='flex';
+    modal.style.display = 'flex';
+    toast('✅ PDF pronto!','success');
   } catch(e){
-    toast('Erro ao gerar imagem: '+e.message,'error');
+    toast('Erro ao gerar PDF: '+e.message,'error');
+  }
+}
+
+function compartilharPDF(url, numero){
+  if(navigator.share){
+    fetch(url).then(r=>r.blob()).then(blob=>{
+      const file = new File([blob], `pedido_${numero}.pdf`, {type:'application/pdf'});
+      navigator.share({ files:[file], title:`Pedido CROW #${numero}` }).catch(()=>{
+        toast('Não foi possível compartilhar. Use "Baixar PDF" e envie manualmente.','');
+      });
+    });
+  } else {
+    toast('Use "Baixar PDF" e envie pelo WhatsApp manualmente','');
   }
 }
 
