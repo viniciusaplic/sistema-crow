@@ -2790,97 +2790,100 @@ async function salvarCorrecaoVendedor(){
 }
 
 async function verPedido(id){
-  const snap = await db.ref('pedidos/'+id).once('value');
-  const p = snap.val(); if(!p) return;
-  const bloqueado = !podeEditar(p);
-  const tempoRestante = Math.max(0, 60 - Math.floor((Date.now()-new Date(p.data).getTime())/60000));
+  try {
+    const snap = await db.ref('pedidos/'+id).once('value');
+    const p = snap.val(); if(!p) return;
+    const bloqueado = !podeEditar(p);
+    const tempoRestante = Math.max(0, 60 - Math.floor((Date.now()-new Date(p.data).getTime())/60000));
 
-  document.getElementById('ver-pedido-conteudo').innerHTML = `
-    <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:700;margin-bottom:4px">
-      #${p.numero} — ${statusBadge(p.status)}
-      ${p.status==='Orçamento'?'<button class="btn btn-success btn-sm" style="margin-left:12px" onclick="confirmarOrcamento(\''+id+'\')">Confirmar como Pedido</button>':''}
-    </div>
-    <div style="font-size:13px;color:var(--muted);margin-bottom:4px">${fmtData(p.data)} · Vendedor: ${p.vendedor_nome}</div>
-    <div class="edit-lock ${bloqueado?'locked':'can-edit'}" style="margin-bottom:16px">
-      ${bloqueado?'🔒 Bloqueado para edição':(tempoRestante>0?'✏️ Editável por mais '+tempoRestante+' min':'✏️ Editável (prazo normal de 1h já passou — liberado para Admin/Expedição)')}
-    </div>
-    <div style="background:var(--bg);border-radius:10px;padding:14px 18px;margin-bottom:16px">
-      <strong>${p.cliente_nome}</strong><br>
-      <span style="font-size:13px;color:var(--muted)">${p.cliente_cpf||''} · ${p.cliente_cidade||''}/${p.cliente_uf||''}</span>
-    </div>
-    ${(() => {
-      const ocultarVal = usuarioLogado && ehExpedicao();
-      return `
-    <div class="item-row item-row-header"><span>Produto</span><span>Qtd</span>${!ocultarVal?'<span>Preço Unit.</span><span>Desc.%</span><span>Subtotal</span>':''}<span></span></div>
-    ${(p.itens||[]).map(i=>`
-      <div class="item-row">
-        <span><strong style="color:${i.codigo&&i.codigo!=='reservado'?'var(--accent)':'#dc2626'}">${i.codigo&&i.codigo!=='reservado'?i.codigo:'SEM CÓD.'}</strong> — ${i.nome}</span>
-        <span>${i.qtd} ${i.unidade}</span>
-        ${!ocultarVal?`<span>${fmtMoeda(i.preco)}</span><span>${i.desconto_item||0}%</span><span><strong>${fmtMoeda(i.qtd*i.preco*(1-(i.desconto_item||0)/100))}</strong></span>`:''}
-        <span></span>
-      </div>`).join('')}`;
-    })()}
-    <div class="totais-box" style="margin-top:12px">
-      ${usuarioLogado && !ehExpedicao() ? `
-      <div class="totais-item"><span>Subtotal</span><strong>${fmtMoeda(p.subtotal||p.total)}</strong></div>
-      <div class="totais-item"><span>Desconto</span><strong style="color:#f87171">- ${fmtMoeda(p.desconto_total||0)}</strong></div>
-      <div class="totais-item highlight"><span>Total Final</span><strong>${fmtMoeda(p.total)}</strong></div>
-      ` : '<div style="font-size:12px;color:var(--muted)">Valores financeiros não disponíveis para este usuário</div>'}
-    </div>
-    <div style="font-size:14px;margin-top:8px">
-      <strong>Pagamento:</strong> ${p.forma||''} · ${p.condicao||''}
-      ${p.obs?`<br><strong>Obs:</strong> ${p.obs}`:''}
-    </div>
-    ${p.parcelas&&p.parcelas.length?`
-      <div style="margin-top:14px">
-        <div style="font-size:13px;font-weight:600;margin-bottom:8px">Parcelas:</div>
-        <div class="parcelas-grid">${p.parcelas.map((pa,i)=>`
-          <div class="parcela-item ${pa.valor<300&&i>0?'parcela-alert':''}">
-            <div class="parcela-num">${pa.label}</div>
-            <div class="parcela-valor">${fmtMoeda(pa.valor)}</div>
-            <div class="parcela-data">${pa.vencimento}</div>
-          </div>`).join('')}
-        </div>
-      </div>`:''
-    }
-    ${(p.ts_inicio_bipagem || p.ts_fim_bipagem) ? `
-      <div style="margin-top:16px;padding:14px 16px;background:#ede9fe;border-radius:10px;font-size:13px">
-        <div style="font-weight:700;color:#7c3aed;margin-bottom:6px">📷 Conferência por Bipagem</div>
-        ${p.ts_inicio_bipagem ? `<div>Início: <strong>${new Date(p.ts_inicio_bipagem).toLocaleString('pt-BR')}</strong></div>` : ''}
-        ${p.ts_fim_bipagem ? `<div>Fim: <strong>${new Date(p.ts_fim_bipagem).toLocaleString('pt-BR')}</strong>${p.bipado_por?` · Conferente: <strong>${p.bipado_por}</strong>`:''}</div>` : ''}
-        <button class="btn btn-outline btn-sm" style="margin-top:8px;color:#7c3aed;border-color:#7c3aed" onclick="abrirLogBipagem('${id}')">Ver horário item por item</button>
-      </div>` : ''
-    }
-    ${(p.historico_edicoes||[]).length ? `
-      <div style="margin-top:16px;padding:14px 16px;background:var(--bg);border-radius:10px;font-size:13px">
-        <div style="font-weight:700;color:var(--primary);margin-bottom:8px">📝 Histórico de Edições</div>
-        ${p.historico_edicoes.slice().reverse().map(h=>`
-          <div style="padding:8px 0;border-top:1px solid var(--border)">
-            <div style="font-size:12px;color:var(--muted)">
-              <strong>${new Date(h.ts).toLocaleString('pt-BR')}</strong> — editado por <strong>${h.usuario_nome}</strong>${h.usuario_tipo?` (${h.usuario_tipo==='admin'?'Admin':h.usuario_tipo==='expedicao'?'Expedição':'Vendedor'})`:''}
-            </div>
-            <ul style="margin:4px 0 0 18px;padding:0;font-size:12px;color:var(--text)">
-              ${h.alteracoes.map(a=>`<li>${a}</li>`).join('')}
-            </ul>
-          </div>`).join('')}
-      </div>` : ''
-    }
-  `;
-  // Botão WhatsApp
-  document.getElementById('ver-pedido-conteudo').innerHTML += `
-    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
-      ${!bloqueado&&p.status!=='Cancelado'?`<button class="btn btn-outline btn-sm" onclick="editarPedido('${id}')">✏️ Editar</button>`:''}
-      ${usuarioLogado.admin&&p.status==='Cancelado'?`<button class="btn btn-outline btn-sm" style="color:#16a34a;border-color:#16a34a" onclick="reativarPedido('${id}')">↩️ Reativar Pedido</button>`:''}
-      ${usuarioLogado.admin?`<button class="btn btn-outline btn-sm" onclick="abrirCorrigirVendedorPedido('${id}')">🔧 Corrigir Vendedor</button>`:''}
-      ${usuarioLogado.admin&&p.status==='AA'?`<button class="btn btn-primary btn-sm" onclick="aprovarPedido('${id}')">✅ Aprovar Pedido</button>`:''}
-      ${(usuarioLogado.admin||ehExpedicao())&&(p.status==='EX'||p.status==='CC')?`<button class="btn btn-outline btn-sm" style="color:#7c3aed;border-color:#7c3aed" onclick="fecharModal('modal-ver-pedido');abrirModalEtiqueta('${id}')">🏷️ Imprimir Etiqueta</button>`:''}
-      ${usuarioLogado.admin&&p.status==='CC'?`<button class="btn btn-outline btn-sm" style="color:#dc2626;border-color:#dc2626" onclick="cancelarBipagemPedido('${id}')">↺ Cancelar Bipagem</button>`:''}
-      <button class="btn btn-outline btn-sm" onclick="clonarPedido('${id}')">📑 Clonar Pedido</button>
-      <button class="btn btn-outline btn-sm" onclick="imprimirCapaPedidoVenda('${id}')">🖨️ Imprimir Pedido</button>
-      <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600" onclick="gerarImagemPedido('${id}')">📲 Gerar Imagem WhatsApp</button>
-    </div>
-  `;
-  abrirModal('modal-ver-pedido');
+    document.getElementById('ver-pedido-conteudo').innerHTML = `
+      <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:700;margin-bottom:4px">
+        #${p.numero} — ${statusBadge(p.status)}
+        ${p.status==='Orçamento'?'<button class="btn btn-success btn-sm" style="margin-left:12px" onclick="confirmarOrcamento(\''+id+'\')">Confirmar como Pedido</button>':''}
+      </div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:4px">${fmtData(p.data)} · Vendedor: ${p.vendedor_nome}</div>
+      <div class="edit-lock ${bloqueado?'locked':'can-edit'}" style="margin-bottom:16px">
+        ${bloqueado?'🔒 Bloqueado para edição':(tempoRestante>0?'✏️ Editável por mais '+tempoRestante+' min':'✏️ Editável (prazo normal de 1h já passou — liberado para Admin/Expedição)')}
+      </div>
+      <div style="background:var(--bg);border-radius:10px;padding:14px 18px;margin-bottom:16px">
+        <strong>${p.cliente_nome}</strong><br>
+        <span style="font-size:13px;color:var(--muted)">${p.cliente_cpf||''} · ${p.cliente_cidade||''}/${p.cliente_uf||''}</span>
+      </div>
+      ${(() => {
+        const ocultarVal = usuarioLogado && ehExpedicao();
+        return `
+      <div class="item-row item-row-header"><span>Produto</span><span>Qtd</span>${!ocultarVal?'<span>Preço Unit.</span><span>Desc.%</span><span>Subtotal</span>':''}<span></span></div>
+      ${(p.itens||[]).map(i=>`
+        <div class="item-row">
+          <span><strong style="color:${i.codigo&&i.codigo!=='reservado'?'var(--accent)':'#dc2626'}">${i.codigo&&i.codigo!=='reservado'?i.codigo:'SEM CÓD.'}</strong> — ${i.nome}</span>
+          <span>${i.qtd} ${i.unidade}</span>
+          ${!ocultarVal?`<span>${fmtMoeda(i.preco)}</span><span>${i.desconto_item||0}%</span><span><strong>${fmtMoeda(i.qtd*i.preco*(1-(i.desconto_item||0)/100))}</strong></span>`:''}
+          <span></span>
+        </div>`).join('')}`;
+      })()}
+      <div class="totais-box" style="margin-top:12px">
+        ${usuarioLogado && !ehExpedicao() ? `
+        <div class="totais-item"><span>Subtotal</span><strong>${fmtMoeda(p.subtotal||p.total)}</strong></div>
+        <div class="totais-item"><span>Desconto</span><strong style="color:#f87171">- ${fmtMoeda(p.desconto_total||0)}</strong></div>
+        <div class="totais-item highlight"><span>Total Final</span><strong>${fmtMoeda(p.total)}</strong></div>
+        ` : '<div style="font-size:12px;color:var(--muted)">Valores financeiros não disponíveis para este usuário</div>'}
+      </div>
+      <div style="font-size:14px;margin-top:8px">
+        <strong>Pagamento:</strong> ${p.forma||''} · ${p.condicao||''}
+        ${p.obs?`<br><strong>Obs:</strong> ${p.obs}`:''}
+      </div>
+      ${p.parcelas&&p.parcelas.length?`
+        <div style="margin-top:14px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:8px">Parcelas:</div>
+          <div class="parcelas-grid">${p.parcelas.map((pa,i)=>`
+            <div class="parcela-item ${pa.valor<300&&i>0?'parcela-alert':''}">
+              <div class="parcela-num">${pa.label}</div>
+              <div class="parcela-valor">${fmtMoeda(pa.valor)}</div>
+              <div class="parcela-data">${pa.vencimento}</div>
+            </div>`).join('')}
+          </div>
+        </div>`:''
+      }
+      ${(p.ts_inicio_bipagem || p.ts_fim_bipagem) ? `
+        <div style="margin-top:16px;padding:14px 16px;background:#ede9fe;border-radius:10px;font-size:13px">
+          <div style="font-weight:700;color:#7c3aed;margin-bottom:6px">📷 Conferência por Bipagem</div>
+          ${p.ts_inicio_bipagem ? `<div>Início: <strong>${new Date(p.ts_inicio_bipagem).toLocaleString('pt-BR')}</strong></div>` : ''}
+          ${p.ts_fim_bipagem ? `<div>Fim: <strong>${new Date(p.ts_fim_bipagem).toLocaleString('pt-BR')}</strong>${p.bipado_por?` · Conferente: <strong>${p.bipado_por}</strong>`:''}</div>` : ''}
+          <button class="btn btn-outline btn-sm" style="margin-top:8px;color:#7c3aed;border-color:#7c3aed" onclick="abrirLogBipagem('${id}')">Ver horário item por item</button>
+        </div>` : ''
+      }
+      ${(p.historico_edicoes||[]).length ? `
+        <div style="margin-top:16px;padding:14px 16px;background:var(--bg);border-radius:10px;font-size:13px">
+          <div style="font-weight:700;color:var(--primary);margin-bottom:8px">📝 Histórico de Edições</div>
+          ${p.historico_edicoes.slice().reverse().map(h=>`
+            <div style="padding:8px 0;border-top:1px solid var(--border)">
+              <div style="font-size:12px;color:var(--muted)">
+                <strong>${new Date(h.ts).toLocaleString('pt-BR')}</strong> — editado por <strong>${h.usuario_nome}</strong>${h.usuario_tipo?` (${h.usuario_tipo==='admin'?'Admin':h.usuario_tipo==='expedicao'?'Expedição':'Vendedor'})`:''}
+              </div>
+              <ul style="margin:4px 0 0 18px;padding:0;font-size:12px;color:var(--text)">
+                ${h.alteracoes.map(a=>`<li>${a}</li>`).join('')}
+              </ul>
+            </div>`).join('')}
+        </div>` : ''
+      }
+    `;
+    // Botão WhatsApp
+    document.getElementById('ver-pedido-conteudo').innerHTML += `
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
+        ${!bloqueado&&p.status!=='Cancelado'?`<button class="btn btn-outline btn-sm" onclick="editarPedido('${id}')">✏️ Editar</button>`:''}
+        ${usuarioLogado.admin&&p.status==='Cancelado'?`<button class="btn btn-outline btn-sm" style="color:#16a34a;border-color:#16a34a" onclick="reativarPedido('${id}')">↩️ Reativar Pedido</button>`:''}
+        ${usuarioLogado.admin?`<button class="btn btn-outline btn-sm" onclick="abrirCorrigirVendedorPedido('${id}')">🔧 Corrigir Vendedor</button>`:''}
+        ${usuarioLogado.admin&&p.status==='AA'?`<button class="btn btn-primary btn-sm" onclick="aprovarPedido('${id}')">✅ Aprovar Pedido</button>`:''}
+        ${(usuarioLogado.admin||ehExpedicao())&&(p.status==='EX'||p.status==='CC')?`<button class="btn btn-outline btn-sm" style="color:#7c3aed;border-color:#7c3aed" onclick="fecharModal('modal-ver-pedido');abrirModalEtiqueta('${id}')">🏷️ Imprimir Etiqueta</button>`:''}
+        ${usuarioLogado.admin&&p.status==='CC'?`<button class="btn btn-outline btn-sm" style="color:#dc2626;border-color:#dc2626" onclick="cancelarBipagemPedido('${id}')">↺ Cancelar Bipagem</button>`:''}
+        <button class="btn btn-outline btn-sm" onclick="clonarPedido('${id}')">📑 Clonar Pedido</button>
+        <button class="btn btn-outline btn-sm" onclick="imprimirCapaPedidoVenda('${id}')">🖨️ Imprimir Pedido</button>
+        <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600" onclick="gerarImagemPedido('${id}')">📲 Gerar Imagem WhatsApp</button>
+      </div>
+    `;
+    abrirModal('modal-ver-pedido');
+
+  } catch(e){ toast('Erro ao carregar pedido: '+e.message,'error'); }
 }
 
 async function abrirLogBipagem(pedidoId){
@@ -2911,11 +2914,14 @@ async function abrirLogBipagem(pedidoId){
 }
 
 async function aprovarPedido(id){
-  if(!temPermissaoEditar('pedidos')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
-  await db.ref('pedidos/'+id+'/status').set('AP');
-  fecharModal('modal-ver-pedido');
-  renderPedidos();
-  toast('✓ Pedido aprovado! Já disponível para separação.','success');
+  try {
+    if(!temPermissaoEditar('pedidos')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+    await db.ref('pedidos/'+id+'/status').set('AP');
+    fecharModal('modal-ver-pedido');
+    renderPedidos();
+    toast('✓ Pedido aprovado! Já disponível para separação.','success');
+
+  } catch(e){ toast('Erro ao aprovar pedido: '+e.message,'error'); }
 }
 
 async function cancelarBipagemPedido(id){
@@ -3134,50 +3140,53 @@ async function reativarPedido(id){
 }
 
 async function cancelarPedido(id){
-  if(!confirm('Cancelar este pedido?')) return;
-  const snap = await db.ref('pedidos/'+id).once('value');
-  const p = snap.val();
+  try {
+    if(!confirm('Cancelar este pedido?')) return;
+    const snap = await db.ref('pedidos/'+id).once('value');
+    const p = snap.val();
 
-  // Se o pedido já foi bipado (CC), pergunta se deve estornar os itens ao estoque
-  let estornarEstoque = false;
-  if(p?.status === 'CC'){
-    estornarEstoque = confirm(
-      `⚠️ Este pedido já foi bipado e o estoque foi baixado.\n\n` +
-      `Deseja estornar os itens de volta ao estoque?\n\n` +
-      `✅ OK → Devolve ao estoque (mercadoria ainda está no depósito)\n` +
-      `❌ Cancelar → Não devolve (mercadoria já foi enviada)`
-    );
-  }
-
-  await db.ref('pedidos/'+id).update({
-    status: 'Cancelado',
-    status_antes_cancelamento: p?.status || 'AA'
-  });
-
-  // Libera a reserva (só se não estava bipado — bipado já não tem reserva)
-  if(p && p.status !== 'CC' && p.itens){
-    await liberarReservaEstoquePedido(p.itens);
-  }
-
-  // Estorna ao estoque se solicitado
-  if(estornarEstoque && p?.itens){
-    for(const item of p.itens){
-      const prodSnap = await db.ref('produtos/'+item.codigo).once('value');
-      if(prodSnap.exists()){
-        const estoqueAtual = Number(prodSnap.val().quantidade||0);
-        const novoEstoque = estoqueAtual + item.qtd;
-        await db.ref('produtos/'+item.codigo+'/quantidade').set(novoEstoque);
-        const prodMem = PRODUTOS_DB.find(x=>x.codigo===item.codigo);
-        if(prodMem) prodMem.quantidade = novoEstoque;
-        await registrarMovimentoEstoque(item.codigo, item.nome, 'entrada', item.qtd,
-          `Estorno — cancelamento do Pedido #${p.numero} (${p.cliente_nome})`, 'pedido', id);
-      }
+    // Se o pedido já foi bipado (CC), pergunta se deve estornar os itens ao estoque
+    let estornarEstoque = false;
+    if(p?.status === 'CC'){
+      estornarEstoque = confirm(
+        `⚠️ Este pedido já foi bipado e o estoque foi baixado.\n\n` +
+        `Deseja estornar os itens de volta ao estoque?\n\n` +
+        `✅ OK → Devolve ao estoque (mercadoria ainda está no depósito)\n` +
+        `❌ Cancelar → Não devolve (mercadoria já foi enviada)`
+      );
     }
-    toast(`✅ Pedido cancelado e ${p.itens.length} item(ns) estornado(s) ao estoque.`,'success');
-  } else {
-    toast('Pedido cancelado');
-  }
-  renderPedidos();
+
+    await db.ref('pedidos/'+id).update({
+      status: 'Cancelado',
+      status_antes_cancelamento: p?.status || 'AA'
+    });
+
+    // Libera a reserva (só se não estava bipado — bipado já não tem reserva)
+    if(p && p.status !== 'CC' && p.itens){
+      await liberarReservaEstoquePedido(p.itens);
+    }
+
+    // Estorna ao estoque se solicitado
+    if(estornarEstoque && p?.itens){
+      for(const item of p.itens){
+        const prodSnap = await db.ref('produtos/'+item.codigo).once('value');
+        if(prodSnap.exists()){
+          const estoqueAtual = Number(prodSnap.val().quantidade||0);
+          const novoEstoque = estoqueAtual + item.qtd;
+          await db.ref('produtos/'+item.codigo+'/quantidade').set(novoEstoque);
+          const prodMem = PRODUTOS_DB.find(x=>x.codigo===item.codigo);
+          if(prodMem) prodMem.quantidade = novoEstoque;
+          await registrarMovimentoEstoque(item.codigo, item.nome, 'entrada', item.qtd,
+            `Estorno — cancelamento do Pedido #${p.numero} (${p.cliente_nome})`, 'pedido', id);
+        }
+      }
+      toast(`✅ Pedido cancelado e ${p.itens.length} item(ns) estornado(s) ao estoque.`,'success');
+    } else {
+      toast('Pedido cancelado');
+    }
+    renderPedidos();
+
+  } catch(e){ toast('Erro ao cancelar pedido: '+e.message,'error'); }
 }
 
 // ══ MODAL PEDIDO ══
@@ -3622,7 +3631,7 @@ async function confirmarPedido(){
       parcelas, status: pedidoOriginal?.status || 'AA',
       historico_edicoes: historicoEdicoes
     };
-    await db.ref('pedidos/'+pedido.id).set(pedido);
+    await db.ref('pedidos/'+pedido.id).update(pedido);
 
     // Reserva de estoque: pedido novo reserva tudo; pedido editado ajusta a diferença
     if(itensAntigos){
@@ -3668,7 +3677,7 @@ async function salvarComoOrcamento(){
       subtotal:sub, desconto_geral:dg, desconto_total:sub-total, total,
       parcelas:[], status:'Orçamento'
     };
-    await db.ref('pedidos/'+orcamento.id).set(orcamento);
+    await db.ref('pedidos/'+orcamento.id).update(orcamento);
     fecharModal('modal-pedido');
     toast(`✓ Orçamento #${numero} salvo!`,'success');
     showTab('orcamentos', document.querySelector('[data-tab="orcamentos"]'));
@@ -3753,115 +3762,121 @@ async function renderOrcamentos(){
 }
 
 async function confirmarOrcamento(id){
-  const snap = await db.ref('pedidos/'+id).once('value');
-  const p = snap.val(); if(!p) return;
-  fecharModal('modal-ver-pedido');
-  // Abrir modal de pedido com dados do orçamento
-  pedidoAtual = {
-    id:id, cliente:{codigo:p.cliente_codigo,nome:p.cliente_nome,cpf_cnpj:p.cliente_cpf,cidade:p.cliente_cidade,uf:p.cliente_uf},
-    itens:JSON.parse(JSON.stringify(p.itens||[])), isOrcamento:false, editando:true, numero:p.numero
-  };
-  document.getElementById('modal-pedido-titulo').textContent='Confirmar Orçamento #'+p.numero+' como Pedido';
-  document.getElementById('btn-salvar-orcamento').style.display='none';
-  document.getElementById('pedido-busca-cliente').value=p.cliente_nome;
-  document.getElementById('pedido-cliente-selecionado').innerHTML=
-    `<div class="alerta alerta-success" style="margin-top:8px">✓ ${p.cliente_nome}</div>`;
-  document.getElementById('step-cliente-ped').style.display='none';
-  document.getElementById('step-itens-ped').style.display='';
-  document.getElementById('desc-geral').value=p.desconto_geral||0;
-  renderItens(); atualizarCondicoes();
-  document.getElementById('pedido-obs').value=p.obs||'';
-  abrirModal('modal-pedido');
+  try {
+    const snap = await db.ref('pedidos/'+id).once('value');
+    const p = snap.val(); if(!p) return;
+    fecharModal('modal-ver-pedido');
+    // Abrir modal de pedido com dados do orçamento
+    pedidoAtual = {
+      id:id, cliente:{codigo:p.cliente_codigo,nome:p.cliente_nome,cpf_cnpj:p.cliente_cpf,cidade:p.cliente_cidade,uf:p.cliente_uf},
+      itens:JSON.parse(JSON.stringify(p.itens||[])), isOrcamento:false, editando:true, numero:p.numero
+    };
+    document.getElementById('modal-pedido-titulo').textContent='Confirmar Orçamento #'+p.numero+' como Pedido';
+    document.getElementById('btn-salvar-orcamento').style.display='none';
+    document.getElementById('pedido-busca-cliente').value=p.cliente_nome;
+    document.getElementById('pedido-cliente-selecionado').innerHTML=
+      `<div class="alerta alerta-success" style="margin-top:8px">✓ ${p.cliente_nome}</div>`;
+    document.getElementById('step-cliente-ped').style.display='none';
+    document.getElementById('step-itens-ped').style.display='';
+    document.getElementById('desc-geral').value=p.desconto_geral||0;
+    renderItens(); atualizarCondicoes();
+    document.getElementById('pedido-obs').value=p.obs||'';
+    abrirModal('modal-pedido');
+
+  } catch(e){ toast('Erro ao confirmar orçamento: '+e.message,'error'); }
 }
 
 // ══ CLIENTES ══
 async function renderClientes(){
-  // Se clientes ainda não carregaram, aguarda até 5 segundos
-  if(!CLIENTES_DB.length){
-    document.getElementById('clientes-table').innerHTML =
-      '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">⏳ Carregando clientes...</td></tr>';
-    await carregarClientesFirebase();
-  }
-
-  // Popula a datalist de vendedores (apenas para admin)
-  if(usuarioLogado.admin){
-    document.getElementById('cliente-f-vendedor-wrap').style.display = 'flex';
-    const datalist = document.getElementById('lista-vendedores-datalist-cliente');
-    if(!datalist.options.length){
-      const snapU = await db.ref('usuarios').once('value');
-      const usuarios = snapU.val() || {};
-      const nomes = Object.values(usuarios).map(u=>u.nome).filter(Boolean).sort();
-      datalist.innerHTML = nomes.map(n=>`<option value="${n}">`).join('') + '<option value="(Sem vendedor)">';
+  try {
+    // Se clientes ainda não carregaram, aguarda até 5 segundos
+    if(!CLIENTES_DB.length){
+      document.getElementById('clientes-table').innerHTML =
+        '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">⏳ Carregando clientes...</td></tr>';
+      await carregarClientesFirebase();
     }
-  }
 
-  const fNome = (document.getElementById('cliente-f-nome')?.value||'').toLowerCase().trim();
-  const fCnpj = (document.getElementById('cliente-f-cnpj')?.value||'').replace(/\D/g,'').trim();
-  const fEndereco = (document.getElementById('cliente-f-endereco')?.value||'').toLowerCase().trim();
-  const fCidade = (document.getElementById('cliente-f-cidade')?.value||'').toLowerCase().trim();
-  const fUf = (document.getElementById('cliente-f-uf')?.value||'').toLowerCase().trim();
-  const fVendedor = (document.getElementById('cliente-f-vendedor')?.value||'').toLowerCase().trim();
-  const fDataIni = document.getElementById('cliente-f-data-ini')?.value;
-  const fDataFim = document.getElementById('cliente-f-data-fim')?.value;
-  const fW3 = document.getElementById('cliente-f-w3')?.value || '';
-
-  let base = CLIENTES_DB;
-  if(!vejaTudoDoModulo('clientes')){
-    base = base.filter(c => c.vendedor_id === usuarioLogado.id);
-  }
-
-  const filtrado = base.filter(c=>{
-    if(fNome && !(c.nome||'').toLowerCase().includes(fNome)) return false;
-    if(fCnpj && !(c.cpf_cnpj||'').replace(/\D/g,'').includes(fCnpj)) return false;
-    if(fEndereco && !(c.endereco||c.end||'').toLowerCase().includes(fEndereco)) return false;
-    if(fCidade && !(c.cidade||'').toLowerCase().includes(fCidade)) return false;
-    if(fUf && (c.uf||'').toLowerCase() !== fUf) return false;
-    if(fVendedor){
-      if(fVendedor === '(sem vendedor)'){ if(c.vendedor_id) return false; }
-      else if(!(c.vendedor_nome||'').toLowerCase().includes(fVendedor)) return false;
+    // Popula a datalist de vendedores (apenas para admin)
+    if(usuarioLogado.admin){
+      document.getElementById('cliente-f-vendedor-wrap').style.display = 'flex';
+      const datalist = document.getElementById('lista-vendedores-datalist-cliente');
+      if(!datalist.options.length){
+        const snapU = await db.ref('usuarios').once('value');
+        const usuarios = snapU.val() || {};
+        const nomes = Object.values(usuarios).map(u=>u.nome).filter(Boolean).sort();
+        datalist.innerHTML = nomes.map(n=>`<option value="${n}">`).join('') + '<option value="(Sem vendedor)">';
+      }
     }
-    if(fDataIni || fDataFim){
-      if(!c.ts_cadastro) return false;
-      const dataCliente = new Date(c.ts_cadastro).toISOString().split('T')[0];
-      if(fDataIni && dataCliente < fDataIni) return false;
-      if(fDataFim && dataCliente > fDataFim) return false;
-    }
-    if(fW3 === 'pendente' && !c.pendente_w3) return false;
-    if(fW3 === 'ok' && c.pendente_w3) return false;
-    return true;
-  });
 
-  const total=filtrado.length, inicio=(paginaClientes-1)*POR_PAGINA;
-  const pagina=filtrado.slice(inicio,inicio+POR_PAGINA);
-  document.getElementById('clientes-table').innerHTML = pagina.map(c=>{
-    const end = c.endereco||c.end||'';
-    const endCompleto = [end, c.cidade, c.uf, c.cep].filter(Boolean).join(', ');
-    const mapsUrl = endCompleto ? 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(endCompleto) : '';
-    const tel = c.telefone||'';
-    const telLink = tel ? `<a href="tel:${tel.replace(/\D/g,'')}" style="color:var(--accent);text-decoration:none">${tel}</a>` : '—';
-    const semVendedorBadge = !c.vendedor_id ? '<span class="badge" style="background:#fef3c7;color:#92400e">Sem vendedor</span>' : '';
-    const w3Badge = c.pendente_w3 ? '<span class="badge" style="background:#fef2f2;color:#dc2626">⚠️ Pendente no W3</span>' : '';
-    return `<div class="cliente-card" style="${c.inativo?'opacity:.6':''}${c.pendente_w3?';border-left:3px solid #dc2626':''}">
-      <div class="cliente-card-nome">${c.nome} ${c.inativo?'<span class="badge badge-gray">Inativo</span>':''} ${semVendedorBadge} ${w3Badge}</div>
-      <div class="cliente-card-info">📄 CNPJ/CPF: <span>${c.cpf_cnpj||'—'}</span></div>
-      <div class="cliente-card-info">📞 Tel: <span>${telLink}</span></div>
-      ${c.email?`<div class="cliente-card-info">✉️ <span>${c.email}</span></div>`:''}
-      <div class="cliente-card-info">📍 <span>${c.cidade||''}/${c.uf||''}</span>
-        ${end?` — <span style="font-size:12px">${end}</span>`:''}
-      </div>
-      ${vejaTudoDoModulo('clientes')?`<div class="cliente-card-info">👤 Vendedor: <span>${c.vendedor_nome||'—'}</span></div>`:''}
-      ${c.ts_cadastro?`<div class="cliente-card-info" style="font-size:11px">📅 Cadastrado em ${new Date(c.ts_cadastro).toLocaleDateString('pt-BR')}</div>`:''}
-      ${c.alerta?`<div style="background:#fef3c7;color:#92400e;border-radius:6px;padding:6px 10px;margin-top:6px;font-size:12px">⚠️ ${c.alerta}</div>`:''}
-      <div class="cliente-card-actions">
-        ${mapsUrl?`<a href="${mapsUrl}" target="_blank" class="btn-maps">📍 Abrir no Maps</a>`:''}
-        <button class="btn btn-outline btn-sm" onclick="verHistoricoCliente('${c.codigo}')">Histórico</button>
-        ${temPermissaoEditar('clientes')?`<button class="btn btn-outline btn-sm" onclick="abrirModalCliente(null,'${c.codigo}')">✏️ Editar</button>`:''}
-        ${c.pendente_w3&&temPermissaoEditar('clientes')?`<button class="btn btn-outline btn-sm" style="color:#16a34a;border-color:#16a34a" onclick="marcarClienteW3Ok('${c.codigo}')">✅ Cadastrado no W3</button>`:''}        ${temPermissaoEditar('clientes')?`<button class="btn btn-outline btn-sm" onclick="clonarCliente('${c.codigo}')">📑 Clonar</button>`:''}
-        ${temPermissaoEditar('clientes')?`<button class="btn btn-outline btn-sm" style="${c.inativo?'':'color:#dc2626;border-color:#dc2626'}" onclick="toggleInativoCliente('${c.codigo}')">${c.inativo?'✅ Reativar':'🚫 Inativar'}</button>`:''}
-      </div>
-    </div>`;
-  }).join('')||'<div style="text-align:center;color:var(--muted);padding:24px">Nenhum cliente encontrado</div>';
-  renderPaginacao('clientes-pag',total,paginaClientes,n=>{ paginaClientes=n; renderClientes(); });
+    const fNome = (document.getElementById('cliente-f-nome')?.value||'').toLowerCase().trim();
+    const fCnpj = (document.getElementById('cliente-f-cnpj')?.value||'').replace(/\D/g,'').trim();
+    const fEndereco = (document.getElementById('cliente-f-endereco')?.value||'').toLowerCase().trim();
+    const fCidade = (document.getElementById('cliente-f-cidade')?.value||'').toLowerCase().trim();
+    const fUf = (document.getElementById('cliente-f-uf')?.value||'').toLowerCase().trim();
+    const fVendedor = (document.getElementById('cliente-f-vendedor')?.value||'').toLowerCase().trim();
+    const fDataIni = document.getElementById('cliente-f-data-ini')?.value;
+    const fDataFim = document.getElementById('cliente-f-data-fim')?.value;
+    const fW3 = document.getElementById('cliente-f-w3')?.value || '';
+
+    let base = CLIENTES_DB;
+    if(!vejaTudoDoModulo('clientes')){
+      base = base.filter(c => c.vendedor_id === usuarioLogado.id);
+    }
+
+    const filtrado = base.filter(c=>{
+      if(fNome && !(c.nome||'').toLowerCase().includes(fNome)) return false;
+      if(fCnpj && !(c.cpf_cnpj||'').replace(/\D/g,'').includes(fCnpj)) return false;
+      if(fEndereco && !(c.endereco||c.end||'').toLowerCase().includes(fEndereco)) return false;
+      if(fCidade && !(c.cidade||'').toLowerCase().includes(fCidade)) return false;
+      if(fUf && (c.uf||'').toLowerCase() !== fUf) return false;
+      if(fVendedor){
+        if(fVendedor === '(sem vendedor)'){ if(c.vendedor_id) return false; }
+        else if(!(c.vendedor_nome||'').toLowerCase().includes(fVendedor)) return false;
+      }
+      if(fDataIni || fDataFim){
+        if(!c.ts_cadastro) return false;
+        const dataCliente = new Date(c.ts_cadastro).toISOString().split('T')[0];
+        if(fDataIni && dataCliente < fDataIni) return false;
+        if(fDataFim && dataCliente > fDataFim) return false;
+      }
+      if(fW3 === 'pendente' && !c.pendente_w3) return false;
+      if(fW3 === 'ok' && c.pendente_w3) return false;
+      return true;
+    });
+
+    const total=filtrado.length, inicio=(paginaClientes-1)*POR_PAGINA;
+    const pagina=filtrado.slice(inicio,inicio+POR_PAGINA);
+    document.getElementById('clientes-table').innerHTML = pagina.map(c=>{
+      const end = c.endereco||c.end||'';
+      const endCompleto = [end, c.cidade, c.uf, c.cep].filter(Boolean).join(', ');
+      const mapsUrl = endCompleto ? 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(endCompleto) : '';
+      const tel = c.telefone||'';
+      const telLink = tel ? `<a href="tel:${tel.replace(/\D/g,'')}" style="color:var(--accent);text-decoration:none">${tel}</a>` : '—';
+      const semVendedorBadge = !c.vendedor_id ? '<span class="badge" style="background:#fef3c7;color:#92400e">Sem vendedor</span>' : '';
+      const w3Badge = c.pendente_w3 ? '<span class="badge" style="background:#fef2f2;color:#dc2626">⚠️ Pendente no W3</span>' : '';
+      return `<div class="cliente-card" style="${c.inativo?'opacity:.6':''}${c.pendente_w3?';border-left:3px solid #dc2626':''}">
+        <div class="cliente-card-nome">${c.nome} ${c.inativo?'<span class="badge badge-gray">Inativo</span>':''} ${semVendedorBadge} ${w3Badge}</div>
+        <div class="cliente-card-info">📄 CNPJ/CPF: <span>${c.cpf_cnpj||'—'}</span></div>
+        <div class="cliente-card-info">📞 Tel: <span>${telLink}</span></div>
+        ${c.email?`<div class="cliente-card-info">✉️ <span>${c.email}</span></div>`:''}
+        <div class="cliente-card-info">📍 <span>${c.cidade||''}/${c.uf||''}</span>
+          ${end?` — <span style="font-size:12px">${end}</span>`:''}
+        </div>
+        ${vejaTudoDoModulo('clientes')?`<div class="cliente-card-info">👤 Vendedor: <span>${c.vendedor_nome||'—'}</span></div>`:''}
+        ${c.ts_cadastro?`<div class="cliente-card-info" style="font-size:11px">📅 Cadastrado em ${new Date(c.ts_cadastro).toLocaleDateString('pt-BR')}</div>`:''}
+        ${c.alerta?`<div style="background:#fef3c7;color:#92400e;border-radius:6px;padding:6px 10px;margin-top:6px;font-size:12px">⚠️ ${c.alerta}</div>`:''}
+        <div class="cliente-card-actions">
+          ${mapsUrl?`<a href="${mapsUrl}" target="_blank" class="btn-maps">📍 Abrir no Maps</a>`:''}
+          <button class="btn btn-outline btn-sm" onclick="verHistoricoCliente('${c.codigo}')">Histórico</button>
+          ${temPermissaoEditar('clientes')?`<button class="btn btn-outline btn-sm" onclick="abrirModalCliente(null,'${c.codigo}')">✏️ Editar</button>`:''}
+          ${c.pendente_w3&&temPermissaoEditar('clientes')?`<button class="btn btn-outline btn-sm" style="color:#16a34a;border-color:#16a34a" onclick="marcarClienteW3Ok('${c.codigo}')">✅ Cadastrado no W3</button>`:''}        ${temPermissaoEditar('clientes')?`<button class="btn btn-outline btn-sm" onclick="clonarCliente('${c.codigo}')">📑 Clonar</button>`:''}
+          ${temPermissaoEditar('clientes')?`<button class="btn btn-outline btn-sm" style="${c.inativo?'':'color:#dc2626;border-color:#dc2626'}" onclick="toggleInativoCliente('${c.codigo}')">${c.inativo?'✅ Reativar':'🚫 Inativar'}</button>`:''}
+        </div>
+      </div>`;
+    }).join('')||'<div style="text-align:center;color:var(--muted);padding:24px">Nenhum cliente encontrado</div>';
+    renderPaginacao('clientes-pag',total,paginaClientes,n=>{ paginaClientes=n; renderClientes(); });
+
+  } catch(e){ toast('Erro ao carregar clientes: '+e.message,'error'); }
 }
 
 function limparFiltrosClientes(){
@@ -4348,7 +4363,8 @@ function abrirModalOP(){
   abrirModal('modal-op');
 }
 
-function buscarProdutoOP(){
+async function buscarProdutoOP(){
+  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
   const q = document.getElementById('op-busca-produto').value.toLowerCase();
   const lista = document.getElementById('op-lista-produtos');
   if(q.length<2){ lista.style.display='none'; return; }
@@ -4375,6 +4391,8 @@ function buscarProdutoOP(){
 }
 
 async function selecionarProdutoOP(codigo){
+  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
+  if(!INSUMOS_DB.length) await carregarInsumosFirebase();
   const p = PRODUTOS_DB.find(x=>x.codigo===codigo);
   const receita = RECEITAS_DB[codigo];
   if(!p || !receita) return;
@@ -5009,59 +5027,65 @@ async function renderEstoque(){
 }
 
 async function abrirReservasItem(codigo){
-  const produto = PRODUTOS_DB.find(p=>p.codigo===codigo);
-  const conteudo = document.getElementById('reservas-item-conteudo');
-  conteudo.innerHTML = `<div class="modal-title">🔒 Reservas — ${codigo}</div><div style="text-align:center;padding:24px;color:var(--muted)">Buscando pedidos...</div>`;
-  abrirModal('modal-reservas-item');
+  try {
+    const produto = PRODUTOS_DB.find(p=>p.codigo===codigo);
+    const conteudo = document.getElementById('reservas-item-conteudo');
+    conteudo.innerHTML = `<div class="modal-title">🔒 Reservas — ${codigo}</div><div style="text-align:center;padding:24px;color:var(--muted)">Buscando pedidos...</div>`;
+    abrirModal('modal-reservas-item');
 
-  const snap = await db.ref('pedidos').once('value');
-  const todos = snap.val() || {};
-  // Considera reservado apenas em pedidos ainda não bipados/cancelados (AA, AP ou EX)
-  const statusReservam = ['AA','AP','EX'];
-  const linhas = [];
-  for(const k in todos){
-    const p = todos[k];
-    if(!statusReservam.includes(p.status)) continue;
-    const item = (p.itens||[]).find(i=>i.codigo===codigo);
-    if(!item) continue;
-    linhas.push({
-      numero: p.numero, id: p.id||k, cliente: p.cliente_nome||'—',
-      qtd: Number(item.qtd||0), status: p.status, data: p.data
-    });
-  }
-  linhas.sort((a,b)=> new Date(a.data) - new Date(b.data));
-  const totalReservado = linhas.reduce((s,l)=>s+l.qtd,0);
+    const snap = await db.ref('pedidos').once('value');
+    const todos = snap.val() || {};
+    // Considera reservado apenas em pedidos ainda não bipados/cancelados (AA, AP ou EX)
+    const statusReservam = ['AA','AP','EX'];
+    const linhas = [];
+    for(const k in todos){
+      const p = todos[k];
+      if(!statusReservam.includes(p.status)) continue;
+      const item = (p.itens||[]).find(i=>i.codigo===codigo);
+      if(!item) continue;
+      linhas.push({
+        numero: p.numero, id: p.id||k, cliente: p.cliente_nome||'—',
+        qtd: Number(item.qtd||0), status: p.status, data: p.data
+      });
+    }
+    linhas.sort((a,b)=> new Date(a.data) - new Date(b.data));
+    const totalReservado = linhas.reduce((s,l)=>s+l.qtd,0);
 
-  conteudo.innerHTML = `
-    <div class="modal-title">🔒 Reservas — ${codigo}${produto?' · '+produto.nome:''}</div>
-    <div style="font-size:13px;color:var(--muted);margin-bottom:14px">${linhas.length} pedido(s) com este item reservado · total reservado: <strong>${totalReservado}</strong></div>
-    ${linhas.length ? `
-    <div style="max-height:50vh;overflow-y:auto;border:1px solid var(--border);border-radius:10px">
-      ${linhas.map(l=>`
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer" onclick="fecharModal('modal-reservas-item');verPedido('${l.id}')">
-          <div>
-            <div style="font-size:13px;font-weight:600">Pedido #${l.numero} <span style="font-weight:400;color:var(--muted)">— ${l.cliente}</span></div>
-            <div style="font-size:11px;color:var(--muted)">${fmtData(l.data)} · ${statusBadge(l.status)}</div>
-          </div>
-          <div style="font-weight:700;color:#d97706;font-size:13px;white-space:nowrap">${l.qtd} un.</div>
-        </div>`).join('')}
-    </div>` : '<div style="text-align:center;color:var(--muted);padding:24px;font-size:13px">Nenhum pedido encontrado com esse item reservado (pode ter sido reservado por uma compra/produção e não por pedido de venda).</div>'}
-  `;
+    conteudo.innerHTML = `
+      <div class="modal-title">🔒 Reservas — ${codigo}${produto?' · '+produto.nome:''}</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:14px">${linhas.length} pedido(s) com este item reservado · total reservado: <strong>${totalReservado}</strong></div>
+      ${linhas.length ? `
+      <div style="max-height:50vh;overflow-y:auto;border:1px solid var(--border);border-radius:10px">
+        ${linhas.map(l=>`
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer" onclick="fecharModal('modal-reservas-item');verPedido('${l.id}')">
+            <div>
+              <div style="font-size:13px;font-weight:600">Pedido #${l.numero} <span style="font-weight:400;color:var(--muted)">— ${l.cliente}</span></div>
+              <div style="font-size:11px;color:var(--muted)">${fmtData(l.data)} · ${statusBadge(l.status)}</div>
+            </div>
+            <div style="font-weight:700;color:#d97706;font-size:13px;white-space:nowrap">${l.qtd} un.</div>
+          </div>`).join('')}
+      </div>` : '<div style="text-align:center;color:var(--muted);padding:24px;font-size:13px">Nenhum pedido encontrado com esse item reservado (pode ter sido reservado por uma compra/produção e não por pedido de venda).</div>'}
+    `;
+
+  } catch(e){ toast('Erro ao carregar reservas: '+e.message,'error'); }
 }
 
 async function abrirModalMovimentoEstoque(){
-  if(!temPermissaoEditar('estoque')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
-  if(!INSUMOS_DB.length) await carregarInsumosFirebase();
-  if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
-  movProdutoSelecionado = null;
-  document.getElementById('mov-busca-produto').value = '';
-  document.getElementById('mov-lista-produtos').style.display = 'none';
-  document.getElementById('mov-produto-selecionado').innerHTML = '';
-  document.getElementById('mov-form-resto').style.display = 'none';
-  document.getElementById('mov-tipo').value = 'entrada';
-  document.getElementById('mov-qtd').value = 0;
-  document.getElementById('mov-obs').value = '';
-  abrirModal('modal-movimento-estoque');
+  try {
+    if(!temPermissaoEditar('estoque')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+    if(!INSUMOS_DB.length) await carregarInsumosFirebase();
+    if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
+    movProdutoSelecionado = null;
+    document.getElementById('mov-busca-produto').value = '';
+    document.getElementById('mov-lista-produtos').style.display = 'none';
+    document.getElementById('mov-produto-selecionado').innerHTML = '';
+    document.getElementById('mov-form-resto').style.display = 'none';
+    document.getElementById('mov-tipo').value = 'entrada';
+    document.getElementById('mov-qtd').value = 0;
+    document.getElementById('mov-obs').value = '';
+    abrirModal('modal-movimento-estoque');
+
+  } catch(e){ toast('Erro ao abrir movimentação: '+e.message,'error'); }
 }
 
 function buscarProdutoMovimento(){
@@ -6560,43 +6584,46 @@ function imprimirRelatorioGarantias(){
 let PEDIDOS_SEPARACAO_CACHE = [];
 
 async function renderSeparacao(){
-  if(!temPermissaoEditar('separacao')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
-  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
-  if(!INSUMOS_DB.length) await carregarInsumosFirebase();
-  await carregarProdutosFirebase();
-  await carregarOPsFirebase();
+  try {
+    if(!temPermissaoEditar('separacao')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+    if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
+    if(!INSUMOS_DB.length) await carregarInsumosFirebase();
+    await carregarProdutosFirebase();
+    await carregarOPsFirebase();
 
-  const snap = await db.ref('pedidos').once('value');
-  const todos = snap.val() || {};
-  PEDIDOS_SEPARACAO_CACHE = Object.keys(todos)
-    .map(id => ({ id, ...todos[id] }))
-    .filter(p => p.status === 'AP' || p.status === 'EX')
-    .sort((a,b) => new Date(a.data) - new Date(b.data)); // mais antigo primeiro
+    const snap = await db.ref('pedidos').once('value');
+    const todos = snap.val() || {};
+    PEDIDOS_SEPARACAO_CACHE = Object.keys(todos)
+      .map(id => ({ id, ...todos[id] }))
+      .filter(p => p.status === 'AP' || p.status === 'EX')
+      .sort((a,b) => new Date(a.data) - new Date(b.data)); // mais antigo primeiro
 
-  if(!PEDIDOS_SEPARACAO_CACHE.length){
-    document.getElementById('separacao-lista').innerHTML =
-      '<div style="text-align:center;color:var(--muted);padding:40px">Nenhum pedido aprovado aguardando separação.</div>';
-    return;
-  }
+    if(!PEDIDOS_SEPARACAO_CACHE.length){
+      document.getElementById('separacao-lista').innerHTML =
+        '<div style="text-align:center;color:var(--muted);padding:40px">Nenhum pedido aprovado aguardando separação.</div>';
+      return;
+    }
 
-  document.getElementById('separacao-lista').innerHTML = PEDIDOS_SEPARACAO_CACHE.map(p=>{
-    const totalItens = (p.itens||[]).length;
-    const separados = (p.itens||[]).filter(i=>i.separado).length;
-    const pct = totalItens ? Math.round(separados/totalItens*100) : 0;
-    return `<div class="pedido-card" style="cursor:pointer" onclick="abrirSeparacaoPedido('${p.id}')">
-      <div class="pedido-card-header">
-        <div>
-          <div class="pedido-card-num">#${p.numero} — ${p.cliente_nome}</div>
-          <div style="font-size:12px;color:var(--muted);margin-top:2px">${p.cliente_cidade||''}/${p.cliente_uf||''} · ${fmtData(p.data)}</div>
+    document.getElementById('separacao-lista').innerHTML = PEDIDOS_SEPARACAO_CACHE.map(p=>{
+      const totalItens = (p.itens||[]).length;
+      const separados = (p.itens||[]).filter(i=>i.separado).length;
+      const pct = totalItens ? Math.round(separados/totalItens*100) : 0;
+      return `<div class="pedido-card" style="cursor:pointer" onclick="abrirSeparacaoPedido('${p.id}')">
+        <div class="pedido-card-header">
+          <div>
+            <div class="pedido-card-num">#${p.numero} — ${p.cliente_nome}</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px">${p.cliente_cidade||''}/${p.cliente_uf||''} · ${fmtData(p.data)}</div>
+          </div>
+          ${statusBadge(p.status)}
         </div>
-        ${statusBadge(p.status)}
-      </div>
-      <div class="pedido-card-info">📦 Itens separados: <span>${separados} / ${totalItens}</span> (${pct}%)</div>
-      <div style="background:#f0f0f0;border-radius:6px;height:6px;margin-top:8px;overflow:hidden">
-        <div style="background:#7c3aed;height:100%;width:${pct}%"></div>
-      </div>
-    </div>`;
-  }).join('');
+        <div class="pedido-card-info">📦 Itens separados: <span>${separados} / ${totalItens}</span> (${pct}%)</div>
+        <div style="background:#f0f0f0;border-radius:6px;height:6px;margin-top:8px;overflow:hidden">
+          <div style="background:#7c3aed;height:100%;width:${pct}%"></div>
+        </div>
+      </div>`;
+    }).join('');
+
+  } catch(e){ toast('Erro ao carregar separação: '+e.message,'error'); }
 }
 
 async function abrirSeparacaoPedido(pedidoId){
@@ -6689,6 +6716,7 @@ async function desmarcarItemSeparado(idx){
 let opSeparacaoContexto = null; // guarda {codigo, nome} do item sendo gerado na OP de separação
 
 async function abrirGerarOPSeparacao(idx){
+  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
   const item = pedidoSeparacaoAtual.itens[idx];
   opSeparacaoContexto = { codigo: item.codigo, nome: item.nome };
 
@@ -6762,6 +6790,8 @@ async function abrirGerarOPSeparacao(idx){
 }
 
 async function confirmarGerarOPSeparacao(){
+  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
+  if(!INSUMOS_DB.length) await carregarInsumosFirebase();
   if(!opSeparacaoContexto){ toast('Erro: contexto perdido, tente novamente','error'); return; }
   const { codigo, nome } = opSeparacaoContexto;
   const qtd = Number(document.getElementById('op-sep-qtd').value) || 0;
@@ -6933,35 +6963,38 @@ function confirmarReiniciarBipagem(){
 }
 
 async function finalizarPedidoBipado(){
-  const p = pedidoSeparacaoAtual;
+  try {
+    const p = pedidoSeparacaoAtual;
 
-  // Dar baixa no estoque de cada item do pedido
-  for(const item of p.itens){
-    const prodSnap = await db.ref('produtos/'+item.codigo).once('value');
-    if(prodSnap.exists()){
-      const estoqueAtual = Number(prodSnap.val().quantidade||0);
-      const novoEstoque = estoqueAtual - item.qtd;
-      await db.ref('produtos/'+item.codigo+'/quantidade').set(novoEstoque);
-      const prodMem = PRODUTOS_DB.find(x=>x.codigo===item.codigo);
-      if(prodMem) prodMem.quantidade = novoEstoque;
-      await registrarMovimentoEstoque(item.codigo, item.nome, 'saida', item.qtd, `Pedido #${p.numero} — ${p.cliente_nome}`, 'pedido', p.id);
+    // Dar baixa no estoque de cada item do pedido
+    for(const item of p.itens){
+      const prodSnap = await db.ref('produtos/'+item.codigo).once('value');
+      if(prodSnap.exists()){
+        const estoqueAtual = Number(prodSnap.val().quantidade||0);
+        const novoEstoque = estoqueAtual - item.qtd;
+        await db.ref('produtos/'+item.codigo+'/quantidade').set(novoEstoque);
+        const prodMem = PRODUTOS_DB.find(x=>x.codigo===item.codigo);
+        if(prodMem) prodMem.quantidade = novoEstoque;
+        await registrarMovimentoEstoque(item.codigo, item.nome, 'saida', item.qtd, `Pedido #${p.numero} — ${p.cliente_nome}`, 'pedido', p.id);
+      }
     }
-  }
 
-  // Libera a reserva, já que a baixa física definitiva acabou de ser feita
-  await liberarReservaEstoquePedido(p.itens);
+    // Libera a reserva, já que a baixa física definitiva acabou de ser feita
+    await liberarReservaEstoquePedido(p.itens);
 
-  // Finalizar pedido
-  await db.ref('pedidos/'+p.id).update({
-    status: 'CC',
-    ts_fim_bipagem: Date.now(),
-    bipado_por: usuarioLogado?.nome || ''
-  });
-  toast(`✅ Pedido #${p.numero} concluído! Estoque atualizado.`,'success');
+    // Finalizar pedido
+    await db.ref('pedidos/'+p.id).update({
+      status: 'CC',
+      ts_fim_bipagem: Date.now(),
+      bipado_por: usuarioLogado?.nome || ''
+    });
+    toast(`✅ Pedido #${p.numero} concluído! Estoque atualizado.`,'success');
 
-  fecharModal('modal-separacao');
-  await renderSeparacao();
-  abrirModalEtiqueta(p.id);
+    fecharModal('modal-separacao');
+    await renderSeparacao();
+    abrirModalEtiqueta(p.id);
+
+  } catch(e){ toast('Erro ao finalizar bipagem: '+e.message,'error'); }
 }
 
 // ── Etiqueta de envio ──
@@ -7653,6 +7686,7 @@ async function salvarFornecedoresDoItem(codigo, tipo, fornecedores){
 }
 
 async function clonarItem(codigoOrigem, tipo){
+  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
   if(!temPermissaoEditar('produtos')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const original = buscarItemPorCodigo(codigoOrigem, tipo);
   if(!original) return;
@@ -7834,6 +7868,8 @@ async function toggleInativoInsumo(codigo){
 }
 
 async function adicionarItemComposicao(codigoProduto){
+  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
+  if(!INSUMOS_DB.length) await carregarInsumosFirebase();
   if(!temPermissaoEditar('produtos')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const codigoInsumo = prompt('Código do insumo a adicionar (ex: M0123):');
   if(!codigoInsumo) return;
@@ -7854,6 +7890,7 @@ async function adicionarItemComposicao(codigoProduto){
 }
 
 async function editarQtdComposicao(codigoProduto, idx, novoValor){
+  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
   if(!temPermissaoEditar('produtos')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const qtd = Number(novoValor);
   if(!qtd || qtd<=0){ toast('Quantidade inválida','error'); renderModalProduto(codigoProduto); return; }
@@ -7863,6 +7900,7 @@ async function editarQtdComposicao(codigoProduto, idx, novoValor){
 }
 
 async function removerItemComposicao(codigoProduto, idx){
+  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
   if(!temPermissaoEditar('produtos')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const item = RECEITAS_DB[codigoProduto].itens[idx];
   if(!confirm(`Remover "${item.nome}" da composição?`)) return;
