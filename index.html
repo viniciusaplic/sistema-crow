@@ -5280,17 +5280,26 @@ async function abrirHistoricoEstoque(codigo){
   const dados = snap.val() || {};
   const movimentos = Object.values(dados).sort((a,b)=>b.ts-a.ts);
 
-  // Verifica quais origens ainda existem no Firebase (evita mostrar link "Ver pedido" para pedidos deletados)
+  // Verifica quais origens ainda existem no Firebase (evita mostrar link "Ver pedido/OP" para itens deletados)
   const origensValidas = new Set();
   const pedidoIds = [...new Set(movimentos.filter(m=>m.origem_tipo==='pedido'&&m.origem_id).map(m=>m.origem_id))];
-  await Promise.all(pedidoIds.map(async pid=>{
-    const s = await db.ref('pedidos/'+pid).once('value');
-    if(s.exists()) origensValidas.add(pid);
-  }));
+  const opIds = [...new Set(movimentos.filter(m=>m.origem_tipo==='op'&&m.origem_id).map(m=>m.origem_id))];
 
-  // Remove movimentos de pedidos que já foram deletados do sistema
+  await Promise.all([
+    ...pedidoIds.map(async pid=>{
+      const s = await db.ref('pedidos/'+pid).once('value');
+      if(s.exists()) origensValidas.add(pid);
+    }),
+    ...opIds.map(async oid=>{
+      const s = await db.ref('ordens_producao/'+oid).once('value');
+      if(s.exists()) origensValidas.add(oid);
+    })
+  ]);
+
+  // Remove movimentos de pedidos/OPs que já foram deletados do sistema
   const movimentosFiltrados = movimentos.filter(m=> {
-    if(m.origem_tipo === 'pedido' && m.origem_id) return origensValidas.has(m.origem_id);
+    if((m.origem_tipo === 'pedido' || m.origem_tipo === 'op') && m.origem_id)
+      return origensValidas.has(m.origem_id);
     return true;
   });
 
@@ -5338,6 +5347,7 @@ async function abrirOrigemMovimento(tipo, id){
       toast('Pedido não encontrado — pode ter sido removido do sistema','error');
     }
   } else if(tipo === 'op'){
+    if(!OPS_DB.length) await carregarOPsFirebase();
     await verDetalheOP(id);
   } else if(tipo === 'compra'){
     await abrirDetalheCompra(id);
