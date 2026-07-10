@@ -1710,6 +1710,14 @@ tbody td{padding:11px 16px;font-size:14px}
       <div class="form-row single">
         <div class="form-group"><label>Motivo / Observação</label><input type="text" id="defeito-motivo" placeholder="ex: vazamento no corpo, rosca trincada..."></div>
       </div>
+      <div class="form-row single" id="defeito-baixa-wrap">
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal">
+            <input type="checkbox" id="defeito-dar-baixa" style="width:auto" checked>
+            Dar baixa no estoque ao registrar (desmarque se a peça já saiu do estoque)
+          </label>
+        </div>
+      </div>
       <div class="form-actions">
         <button class="btn btn-outline" onclick="fecharModal('modal-defeito')">Cancelar</button>
         <button class="btn btn-primary" style="background:#d97706;border-color:#d97706" onclick="confirmarRegistroDefeito()">⚠️ Registrar Defeito</button>
@@ -6338,6 +6346,9 @@ async function abrirModalDefeito(opKey, opNumero){
   document.getElementById('defeito-qtd').value = 1;
   document.getElementById('defeito-motivo').value = '';
   document.getElementById('defeito-fornecedor').value = '';
+  document.getElementById('defeito-dar-baixa').checked = true;
+  // Na OP: baixa é sempre obrigatória (oculta o checkbox); manual: usuário decide
+  document.getElementById('defeito-baixa-wrap').style.display = ehManual ? '' : 'none';
   preencherDatalistFornecedores('defeito-fornecedores-list');
   abrirModal('modal-defeito');
 }
@@ -6392,16 +6403,19 @@ async function confirmarRegistroDefeito(){
 
   const i = insumoDefeitoSelecionado;
   const ehManual = !opContextoDefeito?.key;
+  const darBaixa = ehManual ? document.getElementById('defeito-dar-baixa').checked : true;
 
-  // Dá baixa no estoque do insumo defeituoso
-  const estoqueAtual = Number(i.estoque_atual||0);
-  const novoEstoque = Math.max(0, estoqueAtual - qtd);
-  const key = i.key || ('ins_'+i.codigo);
-  await db.ref('insumos/'+key+'/estoque_atual').set(novoEstoque);
-  i.estoque_atual = novoEstoque;
-  await registrarMovimentoEstoque(i.codigo, i.nome, 'saida', qtd,
-    ehManual ? `Defeito — produto retornado (garantia manual)` : `Defeito identificado na produção — OP #${opContextoDefeito.numero}`,
-    ehManual ? null : 'op', ehManual ? null : opContextoDefeito.key);
+  // Dá baixa no estoque do insumo defeituoso (se aplicável)
+  if(darBaixa){
+    const estoqueAtual = Number(i.estoque_atual||0);
+    const novoEstoque = Math.max(0, estoqueAtual - qtd);
+    const key = i.key || ('ins_'+i.codigo);
+    await db.ref('insumos/'+key+'/estoque_atual').set(novoEstoque);
+    i.estoque_atual = novoEstoque;
+    await registrarMovimentoEstoque(i.codigo, i.nome, 'saida', qtd,
+      ehManual ? `Defeito — produto retornado (garantia manual)` : `Defeito identificado na produção — OP #${opContextoDefeito.numero}`,
+      ehManual ? null : 'op', ehManual ? null : opContextoDefeito.key);
+  }
 
   // Registra na lista de garantias
   const garantiaKey = db.ref('garantias').push().key;
@@ -6419,7 +6433,7 @@ async function confirmarRegistroDefeito(){
   });
 
   fecharModal('modal-defeito');
-  toast(`✓ Garantia registrada! ${qtd}x ${i.nome} retirado(s) do estoque.`,'success');
+  toast(`✓ Garantia registrada! ${darBaixa ? qtd+'x '+i.nome+' retirado(s) do estoque.' : 'Sem baixa de estoque.'}`, 'success');
   renderGarantias();
 }
 
