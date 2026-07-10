@@ -5288,11 +5288,17 @@ async function abrirHistoricoEstoque(codigo){
     if(s.exists()) origensValidas.add(pid);
   }));
 
+  // Remove movimentos de pedidos que já foram deletados do sistema
+  const movimentosFiltrados = movimentos.filter(m=> {
+    if(m.origem_tipo === 'pedido' && m.origem_id) return origensValidas.has(m.origem_id);
+    return true;
+  });
+
   document.getElementById('historico-estoque-conteudo').innerHTML = `
     <div class="modal-title">📋 Histórico — ${nomeExibir}</div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:16px">${codigo} · Estoque atual: <strong>${estoqueExibir||0}</strong></div>
     <div style="max-height:50vh;overflow-y:auto;border:1px solid var(--border);border-radius:10px">
-      ${movimentos.length ? movimentos.map(m=>{
+      ${movimentosFiltrados.length ? movimentosFiltrados.map(m=>{
         const origemExiste = m.origem_tipo && m.origem_id &&
           (m.origem_tipo !== 'pedido' || origensValidas.has(m.origem_id));
         const onclickAttr = origemExiste ? `onclick="abrirOrigemMovimento('${m.origem_tipo}','${m.origem_id}')" style="cursor:pointer"` : '';
