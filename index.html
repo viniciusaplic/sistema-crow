@@ -11081,7 +11081,8 @@ function montarCabecalhoSlipHTML(p, subtitulo){
   `;
 }
 
-function montarRodapeSlipHTML(p){
+function montarSummarySlipHTML(p){
+  // Só totais + parcelas + obs — sem a tabela de itens (usada no PDF paginado)
   const itens = p.itens||[];
   const totalQtd = itens.reduce((s,i)=>s+Number(i.qtd||0),0);
   const totalProd = itens.reduce((s,i)=>s+(i.qtd*i.preco*(1-(i.desconto_item||0)/100)),0);
@@ -11108,18 +11109,6 @@ function montarRodapeSlipHTML(p){
     <div style="font-size:10px;font-weight:600;color:#333;margin:10px 0 4px">Pagamento</div>
     <div style="border:1px solid #ccc;padding:5px 8px;font-size:11px">${[p.forma,p.condicao].filter(Boolean).join(' — ')}</div>` : '');
   return `
-    <div style="font-size:10px;font-weight:600;color:#333;margin-bottom:4px">Itens do pedido de venda</div>
-    <table style="width:100%;border-collapse:collapse">
-      <thead><tr style="background:#0B3B21;color:#fff">
-        <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:left;font-size:11px">Descrição do produto/serviço</th>
-        <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:center;font-size:11px">Código</th>
-        <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:center;font-size:11px">Un.</th>
-        <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:center;font-size:11px">Qtd.</th>
-        <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:right;font-size:11px">Valor unitário</th>
-        <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:right;font-size:11px">Valor total</th>
-      </tr></thead>
-      <tbody>${itens.map((i,idx)=>montarLinhaItemHTML(i,idx)).join('')}</tbody>
-    </table>
     <table style="width:100%;border-collapse:collapse;margin-top:4px">
       <tr>
         <td style="width:55%"></td>
@@ -11145,6 +11134,27 @@ function montarRodapeSlipHTML(p){
     </div>
   `;
 }
+
+function montarRodapeSlipHTML(p){
+  // Versão completa: inclui tabela de itens + summary (usada na impressão normal)
+  const itens = p.itens||[];
+  return `
+    <div style="font-size:10px;font-weight:600;color:#333;margin-bottom:4px">Itens do pedido de venda</div>
+    <table style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:#0B3B21;color:#fff">
+        <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:left;font-size:11px">Descrição do produto/serviço</th>
+        <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:center;font-size:11px">Código</th>
+        <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:center;font-size:11px">Un.</th>
+        <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:center;font-size:11px">Qtd.</th>
+        <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:right;font-size:11px">Valor unitário</th>
+        <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:right;font-size:11px">Valor total</th>
+      </tr></thead>
+      <tbody>${itens.map((i,idx)=>montarLinhaItemHTML(i,idx)).join('')}</tbody>
+    </table>
+    ${montarSummarySlipHTML(p)}
+  `;
+}
+
 
 function montarSlipPedidoHTML(p){
   return `${montarCabecalhoSlipHTML(p)}${montarRodapeSlipHTML(p)}`;
@@ -11203,7 +11213,7 @@ async function gerarImagemPedido(id){
           </tr></thead>
           <tbody>${itensTr}</tbody>
         </table>
-        ${ehUltima ? montarRodapeSlipHTML(p) : '<div style="padding:8px 14px;font-size:10px;color:#999;text-align:center;border-top:1px solid #eee">▸ continua...</div>'}
+        ${ehUltima ? montarSummarySlipHTML(p) : '<div style="padding:8px 14px;font-size:10px;color:#999;text-align:center;border-top:1px solid #eee">▸ continua...</div>'}
       `;
 
       const div = document.createElement('div');
