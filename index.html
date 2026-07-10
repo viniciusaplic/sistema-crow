@@ -3437,6 +3437,9 @@ function adicionarItem(cod){
         }
       }
     }
+    // Garante que o preço sugerido (histórico ou padrão) nunca fique abaixo do mínimo cadastrado
+    const precoMinimo = Number(p.preco_minimo) || 0;
+    if(precoMinimo > 0 && precoUsado < precoMinimo) precoUsado = precoMinimo;
     pedidoAtual.itens.push({
       codigo:p.codigo, nome:p.nome, unidade:p.unidade||'UN',
       qtd:1, preco:precoUsado, preco_minimo:Number(p.preco_minimo),
