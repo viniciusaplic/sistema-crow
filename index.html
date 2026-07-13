@@ -9720,32 +9720,40 @@ function relVendasCidade(pedidos, el){
 }
 
 // ── Sugestão de Compra (corrigida) ──
-function relSugestaoCompra(el){
+async function relSugestaoCompra(el){
   if(!PRODUTOS_DB.length){
     el.innerHTML='<div style="color:#dc2626;padding:20px">⏳ Produtos ainda não carregados. Aguarde e tente novamente.</div>';
-    carregarProdutosFirebase().then(()=>relSugestaoCompra(el));
-    return;
+    await carregarProdutosFirebase(); relSugestaoCompra(el); return;
   }
+  if(!INSUMOS_DB.length) await carregarInsumosFirebase();
 
-  // Inclui produtos sem estoque mínimo definido mas com estoque zerado também
-  const lista = PRODUTOS_DB.filter(p=>{
-    if(p.inativo) return false;
+  // Monta lista unificada — vendáveis (por estoque físico - reservado) e insumos (por estoque_atual)
+  const itensVendaveis = PRODUTOS_DB.filter(p=>!p.inativo).map(p=>{
     const disp = Number(p.quantidade||0) - Number(p.reservado||0);
     const min = Number(p.estoque_minimo||0);
-    return min > 0 ? disp <= min : disp <= 0; // sem mínimo: só mostra se zerado
-  }).map(p=>({
-    codigo:p.codigo, nome:p.nome||'', unidade:p.unidade||'UN',
-    disponivel:Number(p.quantidade||0)-Number(p.reservado||0),
-    minimo:Number(p.estoque_minimo||0),
-    fornecedor:(p.fornecedores||[])[0]?.nome||p.fornecedor||'—',
-    cod_fornecedor:(p.fornecedores||[])[0]?.codigo_fornecedor||'',
-    sugestao:Math.max(1, Number(p.estoque_minimo||0)*2 - (Number(p.quantidade||0)-Number(p.reservado||0)))
-  })).sort((a,b)=>a.disponivel-b.disponivel);
+    return { tipo:'Vendável', codigo:p.codigo, nome:p.nome||'', unidade:p.unidade||'UN',
+      disponivel:disp, minimo:min,
+      fornecedor:(p.fornecedores||[])[0]?.nome||p.fornecedor||'—',
+      cod_fornecedor:(p.fornecedores||[])[0]?.codigo_fornecedor||'',
+      sugestao:Math.max(1, min*2 - disp) };
+  }).filter(p=> p.minimo>0 ? p.disponivel<=p.minimo : p.disponivel<=0);
+
+  const itensInsumo = INSUMOS_DB.filter(i=>!i.inativo).map(i=>{
+    const estq = Number(i.estoque_atual||0);
+    const min = Number(i.estoque_minimo||0);
+    return { tipo:'Insumo', codigo:i.codigo, nome:i.nome||'', unidade:i.unidade||'UN',
+      disponivel:estq, minimo:min,
+      fornecedor:(i.fornecedores||[])[0]?.nome||i.fornecedor||'—',
+      cod_fornecedor:(i.fornecedores||[])[0]?.codigo_fornecedor||'',
+      sugestao:Math.max(1, min*2 - estq) };
+  }).filter(i=> i.minimo>0 ? i.disponivel<=i.minimo : i.disponivel<=0);
+
+  const lista = [...itensVendaveis, ...itensInsumo].sort((a,b)=>a.disponivel-b.disponivel);
 
   relatorioCache = { tipo:'sugestao-compra', lista };
 
   if(!lista.length){
-    el.innerHTML='<div style="padding:24px;text-align:center;color:var(--success)">✅ Nenhum produto abaixo do estoque mínimo ou com estoque zerado.</div>';
+    el.innerHTML='<div style="padding:24px;text-align:center;color:var(--success)">✅ Nenhum item abaixo do estoque mínimo ou com estoque zerado.</div>';
     return;
   }
 
@@ -9753,13 +9761,14 @@ function relSugestaoCompra(el){
   lista.forEach(p=>{ if(!porFornecedor[p.fornecedor]) porFornecedor[p.fornecedor]=[]; porFornecedor[p.fornecedor].push(p); });
 
   let html = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
-    <span style="font-size:13px;color:#92400e;font-weight:700">🛒 ${lista.length} produto(s) precisam de reposição</span>
+    <span style="font-size:13px;color:#92400e;font-weight:700">🛒 ${lista.length} item(ns) precisam de reposição (${itensVendaveis.length} vendáveis + ${itensInsumo.length} insumos)</span>
     <button class="btn btn-primary btn-sm" style="background:#1565c0" onclick="criarPedidoCompraDoRelatorio()">🛒 Criar Pedido com Selecionados</button>
   </div>
   <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
     <thead style="background:var(--primary);color:rgba(255,255,255,.85)"><tr>
       <th style="padding:10px 12px;width:30px"><input type="checkbox" id="rel-sel-todos" onchange="selecionarTodosSugestao(this.checked)"></th>
-      <th style="padding:10px 12px">Código</th><th style="padding:10px 12px">Produto</th>
+      <th style="padding:10px 12px">Código</th><th style="padding:10px 12px">Produto/Insumo</th>
+      <th style="padding:10px 12px;text-align:center">Tipo</th>
       <th style="padding:10px 12px">Fornecedor</th>
       <th style="padding:10px 12px;text-align:center">Disponível</th>
       <th style="padding:10px 12px;text-align:center">Mínimo</th>
@@ -9768,16 +9777,17 @@ function relSugestaoCompra(el){
     </tr></thead><tbody>`;
 
   Object.entries(porFornecedor).forEach(([forn, itens])=>{
-    html += `<tr style="background:#f8f9fa"><td colspan="8" style="padding:8px 12px;font-weight:700;color:var(--primary)">📦 ${forn}</td></tr>`;
+    html += `<tr style="background:#f8f9fa"><td colspan="9" style="padding:8px 12px;font-weight:700;color:var(--primary)">📦 ${forn}</td></tr>`;
     itens.forEach(p=>{
       html += `<tr style="border-bottom:1px solid var(--border)">
         <td style="padding:10px 12px;text-align:center"><input type="checkbox" class="rel-sugestao-check" data-codigo="${p.codigo}" checked></td>
         <td style="padding:10px 12px"><strong>${p.codigo}</strong></td>
         <td style="padding:10px 12px">${p.nome}</td>
+        <td style="padding:10px 12px;text-align:center"><span class="badge badge-gray" style="font-size:10px">${p.tipo}</span></td>
         <td style="padding:10px 12px;color:var(--muted)">${forn}</td>
-        <td style="padding:10px 12px;text-align:center;color:${p.disponivel<=0?'#dc2626':'#d97706'};font-weight:700">${p.disponivel}</td>
-        <td style="padding:10px 12px;text-align:center">${p.minimo||'—'}</td>
-        <td style="padding:10px 12px;text-align:center">${p.sugestao}</td>
+        <td style="padding:10px 12px;text-align:center;color:${p.disponivel<=0?'#dc2626':'#d97706'};font-weight:700">${p.disponivel.toLocaleString('pt-BR')}</td>
+        <td style="padding:10px 12px;text-align:center">${p.minimo?p.minimo.toLocaleString('pt-BR'):'—'}</td>
+        <td style="padding:10px 12px;text-align:center">${p.sugestao.toLocaleString('pt-BR')}</td>
         <td style="padding:10px 12px;text-align:center">
           <input type="number" class="rel-sugestao-qtd" data-codigo="${p.codigo}" value="${p.sugestao}" min="1"
             style="width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;font-size:12px;text-align:center">
@@ -10035,7 +10045,7 @@ function exportarRelatorioExcel(){
     case 'vendas-produto': dados = lista.map(g=>({'Código':g.cod,'Produto':g.nome,'Qtd':g.qtd,'Total':g.total})); break;
     case 'compras-fornecedor': dados = lista.map(g=>({'Fornecedor':g.nome,'Pedidos':g.qtd,'Total':g.total})); break;
     case 'estoque-posicao': dados = lista.map(g=>({'Código':g.codigo,'Produto':g.nome,'Estoque':g.estoque,'Reservado':g.reservado,'Disponível':g.disponivel,'Mínimo':g.minimo})); break;
-    case 'sugestao-compra': dados = lista.map(g=>({'Código':g.codigo,'Produto':g.nome,'Fornecedor':g.fornecedor,'Disponível':g.disponivel,'Mínimo':g.minimo,'Sugestão de Compra':g.sugestao})); break;
+    case 'sugestao-compra': dados = lista.map(g=>({'Tipo':g.tipo||'—','Código':g.codigo,'Produto/Insumo':g.nome,'Fornecedor':g.fornecedor,'Disponível':g.disponivel,'Mínimo':g.minimo,'Sugestão de Compra':g.sugestao})); break;
     case 'estoque-minimo': return exportarRelatorioExcelEstoqueMinimo(lista);
     case 'sugestao-jornal': dados = lista.map((g,i)=>({'#':i+1,'Código':g.codigo,'Produto':g.nome,'Qtd Vendida':g.qtd,'Disponível':g.disponivel,'Em Trânsito':g.emTransito?'Sim':'Não'})); break;
     default: dados = lista;
