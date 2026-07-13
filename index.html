@@ -6756,6 +6756,7 @@ async function renderSeparacao(){
           ${statusBadge(p.status)}
         </div>
         <div class="pedido-card-info">📦 Itens separados: <span>${separados} / ${totalItens}</span> (${pct}%)</div>
+        ${p.obs ? `<div style="font-size:12px;margin-top:6px;padding:6px 10px;background:#fffbea;border-left:3px solid #f59e0b;border-radius:0 6px 6px 0;color:#92400e"><strong>⚠️ Obs:</strong> ${p.obs}</div>` : ''}
         <div style="background:#f0f0f0;border-radius:6px;height:6px;margin-top:8px;overflow:hidden">
           <div style="background:#7c3aed;height:100%;width:${pct}%"></div>
         </div>
