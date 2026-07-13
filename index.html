@@ -2688,10 +2688,40 @@ async function renderPedidos(){
   const inicio = (paginaPedidos-1)*POR_PAGINA;
   const pagina = pedidos.slice(inicio, inicio+POR_PAGINA);
 
+  const isMobile = window.innerWidth <= 768;
+
   document.getElementById('pedidos-lista').innerHTML = pagina.map(p=>{
     const bloqueado = !podeEditar(p);
     const lockIcon = bloqueado ? '🔒' : '✏️';
     const desc = p.desconto_total>0 ? `<div style="font-size:11px;color:var(--accent)">- ${fmtMoeda(p.desconto_total)}</div>` : '';
+
+    if(isMobile){
+      // Layout mobile — card em blocos com botões de ação visíveis
+      return `<div class="pedido-card">
+        <div class="pedido-card-header">
+          <div style="display:flex;align-items:flex-start;gap:8px">
+            <input type="checkbox" class="check-imprimir-pedido" data-id="${p.id}" ${pedidosSelecionadosImprimir.has(p.id)?'checked':''} onchange="toggleSelecaoPedido('${p.id}',this.checked)" style="margin-top:4px;width:16px;height:16px;cursor:pointer;flex-shrink:0">
+            <div>
+              <div class="pedido-card-num">#${p.numero} ${statusBadge(p.status)}</div>
+              <div style="font-size:12px;color:var(--muted);margin-top:2px">${fmtData(p.data)}</div>
+            </div>
+          </div>
+          ${!ocultarValores ? `<div style="text-align:right">
+            <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px;color:var(--success)">${fmtMoeda(p.total)}</div>
+            ${desc}
+          </div>` : ''}
+        </div>
+        <div class="pedido-card-info">👤 <span>${p.cliente_nome}</span></div>
+        <div class="pedido-card-info">📦 <span>${(p.itens||[]).length} iten(s)</span> · ${p.condicao||''}</div>
+        ${p.obs ? `<div style="margin-top:6px;padding:5px 10px;background:#fffbeb;border-left:3px solid #fde68a;border-radius:0 6px 6px 0;font-size:12px;color:#92400e">⚠️ ${p.obs}</div>` : ''}
+        <div class="pedido-card-actions">
+          <button class="btn btn-outline btn-sm" onclick="verPedido('${p.id}')">Ver detalhes</button>
+          <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600" onclick="gerarImagemPedido('${p.id}')">📲 WhatsApp</button>
+          ${!bloqueado&&p.status!=='Cancelado'?`<button class="btn btn-warning btn-sm" onclick="editarPedido('${p.id}')">${lockIcon} Editar</button>`:`<span style="font-size:13px;color:var(--muted)">${lockIcon} Bloqueado</span>`}
+          ${usuarioLogado.admin&&p.status!=='Cancelado'?`<button class="btn btn-sm btn-danger" onclick="cancelarPedido('${p.id}')">Cancelar</button>`:''}
+        </div>
+      </div>`;
+    }
 
     // Layout compacto (desktop) — tudo em uma linha
     return `<div class="pedido-card pedido-card-compact" style="padding:10px 14px">
