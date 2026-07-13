@@ -5379,52 +5379,90 @@ async function abrirHistoricoEstoque(codigo){
   const dados = snap.val() || {};
   const movimentos = Object.values(dados).sort((a,b)=>b.ts-a.ts);
 
-  // Verifica quais origens ainda existem no Firebase (evita mostrar link "Ver pedido/OP" para itens deletados)
+  // Verifica quais origens ainda existem no Firebase
   const origensValidas = new Set();
   const pedidoIds = [...new Set(movimentos.filter(m=>m.origem_tipo==='pedido'&&m.origem_id).map(m=>m.origem_id))];
   const opIds = [...new Set(movimentos.filter(m=>m.origem_tipo==='op'&&m.origem_id).map(m=>m.origem_id))];
-
   await Promise.all([
-    ...pedidoIds.map(async pid=>{
-      const s = await db.ref('pedidos/'+pid).once('value');
-      if(s.exists()) origensValidas.add(pid);
-    }),
-    ...opIds.map(async oid=>{
-      const s = await db.ref('ordens_producao/'+oid).once('value');
-      if(s.exists()) origensValidas.add(oid);
-    })
+    ...pedidoIds.map(async pid=>{ const s = await db.ref('pedidos/'+pid).once('value'); if(s.exists()) origensValidas.add(pid); }),
+    ...opIds.map(async oid=>{ const s = await db.ref('ordens_producao/'+oid).once('value'); if(s.exists()) origensValidas.add(oid); })
   ]);
 
-  // Remove movimentos de pedidos/OPs que já foram deletados do sistema
+  // Remove movimentos de pedidos/OPs deletados
   const movimentosFiltrados = movimentos.filter(m=> {
     if((m.origem_tipo === 'pedido' || m.origem_tipo === 'op') && m.origem_id)
       return origensValidas.has(m.origem_id);
     return true;
   });
 
+  // Guarda contexto para o filtro
+  window._historicoCtx = { codigo, nomeExibir, estoqueExibir, movimentos: movimentosFiltrados, origensValidas };
+
   document.getElementById('historico-estoque-conteudo').innerHTML = `
     <div class="modal-title">📋 Histórico — ${nomeExibir}</div>
-    <div style="font-size:13px;color:var(--muted);margin-bottom:16px">${codigo} · Estoque atual: <strong>${estoqueExibir||0}</strong></div>
-    <div style="max-height:50vh;overflow-y:auto;border:1px solid var(--border);border-radius:10px">
-      ${movimentosFiltrados.length ? movimentosFiltrados.map(m=>{
-        const origemExiste = m.origem_tipo && m.origem_id &&
-          (m.origem_tipo !== 'pedido' || origensValidas.has(m.origem_id));
-        const onclickAttr = origemExiste ? `onclick="abrirOrigemMovimento('${m.origem_tipo}','${m.origem_id}')" style="cursor:pointer"` : '';
-        const linkLabel = m.origem_tipo === 'pedido' ? '🧾 Ver pedido' : m.origem_tipo === 'op' ? '🏭 Ver OP' : m.origem_tipo === 'compra' ? '🛒 Ver compra' : '';
-        return `<div ${onclickAttr} style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);${origemExiste?'cursor:pointer':''}" ${origemExiste?`onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''"`:''}>
-          <div>
-            <div style="font-size:13px;font-weight:600;color:${m.tipo==='entrada'?'var(--success)':'#dc2626'}">
-              ${m.tipo==='entrada'?'⬆️ Entrada':'⬇️ Saída'} de ${m.qtd}
-            </div>
-            <div style="font-size:12px;color:var(--muted)">${m.motivo||''}</div>
-            <div style="font-size:11px;color:var(--muted)">${new Date(m.ts).toLocaleString('pt-BR')} · ${m.usuario||''}</div>
-          </div>
-          ${origemExiste ? `<div style="font-size:12px;color:var(--accent);font-weight:600;white-space:nowrap">${linkLabel} →</div>` : ''}
-        </div>`;
-      }).join('') : '<div style="text-align:center;color:var(--muted);padding:24px;font-size:13px">Nenhuma movimentação registrada ainda</div>'}
+    <div style="font-size:13px;color:var(--muted);margin-bottom:12px">${codigo} · Estoque atual: <strong>${estoqueExibir||0}</strong></div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;padding:10px;background:var(--bg);border-radius:8px">
+      <select id="hist-f-tipo" onchange="renderHistoricoFiltrado()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px">
+        <option value="">Todos os tipos</option>
+        <option value="entrada">⬆️ Entradas</option>
+        <option value="saida">⬇️ Saídas</option>
+        <option value="balanco">⚖️ Balanços</option>
+      </select>
+      <input type="date" id="hist-f-ini" onchange="renderHistoricoFiltrado()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px" placeholder="De">
+      <input type="date" id="hist-f-fim" onchange="renderHistoricoFiltrado()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px" placeholder="Até">
+      <button onclick="document.getElementById('hist-f-tipo').value='';document.getElementById('hist-f-ini').value='';document.getElementById('hist-f-fim').value='';renderHistoricoFiltrado()"
+        style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:#fff;cursor:pointer">Limpar</button>
     </div>
+    <div id="hist-lista" style="max-height:45vh;overflow-y:auto;border:1px solid var(--border);border-radius:10px"></div>
   `;
+  renderHistoricoFiltrado();
   abrirModal('modal-historico-estoque');
+}
+
+function renderHistoricoFiltrado(){
+  const ctx = window._historicoCtx;
+  if(!ctx) return;
+  const filtroTipo = document.getElementById('hist-f-tipo')?.value || '';
+  const filtroIni  = document.getElementById('hist-f-ini')?.value || '';
+  const filtroFim  = document.getElementById('hist-f-fim')?.value || '';
+  const origensValidas = ctx.origensValidas;
+
+  const lista = ctx.movimentos.filter(m=>{
+    // filtro tipo
+    if(filtroTipo){
+      const isBalanco = (m.motivo||'').toLowerCase().includes('balanço') || (m.motivo||'').toLowerCase().includes('balanco') || (m.motivo||'').toLowerCase().includes('ajuste');
+      if(filtroTipo==='balanco' && !isBalanco) return false;
+      if(filtroTipo==='entrada' && (m.tipo!=='entrada' || isBalanco)) return false;
+      if(filtroTipo==='saida'   && (m.tipo!=='saida'   || isBalanco)) return false;
+    }
+    // filtro data
+    const dataM = new Date(m.ts).toISOString().split('T')[0];
+    if(filtroIni && dataM < filtroIni) return false;
+    if(filtroFim && dataM > filtroFim) return false;
+    return true;
+  });
+
+  const el = document.getElementById('hist-lista');
+  if(!el) return;
+  el.innerHTML = lista.length ? lista.map(m=>{
+    const origemExiste = m.origem_tipo && m.origem_id &&
+      (m.origem_tipo !== 'pedido' || origensValidas.has(m.origem_id));
+    const linkLabel = m.origem_tipo === 'pedido' ? '🧾 Ver pedido' : m.origem_tipo === 'op' ? '🏭 Ver OP' : m.origem_tipo === 'compra' ? '🛒 Ver compra' : '';
+    const isBalanco = (m.motivo||'').toLowerCase().includes('balanço') || (m.motivo||'').toLowerCase().includes('balanco') || (m.motivo||'').toLowerCase().includes('ajuste');
+    const cor = isBalanco ? '#7c3aed' : m.tipo==='entrada' ? 'var(--success)' : '#dc2626';
+    const icon = isBalanco ? '⚖️' : m.tipo==='entrada' ? '⬆️' : '⬇️';
+    const label = isBalanco ? 'Balanço' : m.tipo==='entrada' ? 'Entrada' : 'Saída';
+    return `<div ${origemExiste?`onclick="abrirOrigemMovimento('${m.origem_tipo}','${m.origem_id}')" style="cursor:pointer"`:''}
+      style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border)"
+      ${origemExiste?`onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''"`:''}> 
+      <div>
+        <div style="font-size:13px;font-weight:600;color:${cor}">${icon} ${label} de ${m.qtd}</div>
+        <div style="font-size:12px;color:var(--muted)">${m.motivo||''}</div>
+        <div style="font-size:11px;color:var(--muted)">${new Date(m.ts).toLocaleString('pt-BR')} · ${m.usuario||''}</div>
+      </div>
+      ${origemExiste ? `<div style="font-size:12px;color:var(--accent);font-weight:600;white-space:nowrap">${linkLabel} →</div>` : ''}
+    </div>`;
+  }).join('') : '<div style="text-align:center;color:var(--muted);padding:24px;font-size:13px">Nenhum movimento encontrado para os filtros selecionados.</div>';
 }
 
 async function abrirOrigemMovimento(tipo, id){
