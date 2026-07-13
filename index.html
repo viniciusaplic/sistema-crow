@@ -2428,7 +2428,7 @@ async function renderPainel(){
   const hoje = new Date(); hoje.setHours(0,0,0,0);
   const mesInicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
 
-  let meusPedidos=[], total=0, totalMes=0, pedidosHoje=0;
+  let meusPedidos=[], total=0, totalMes=0, pedidosMes=0;
   try {
     const snap = await db.ref('pedidos').once('value');
     const todos = snap.val()||{};
@@ -2436,26 +2436,34 @@ async function renderPainel(){
       const p = todos[k];
       if(p.status==='Cancelado') continue;
       if(!vejaTudoDoModulo('pedidos') && p.vendedor_id!==usuarioLogado.id) continue;
-      meusPedidos.push(p);
+      meusPedidos.push({...p, id:p.id||k});
       total++;
       const d = new Date(p.data); d.setHours(0,0,0,0);
-      if(d>=mesInicio) totalMes += (p.total||0);
-      if(d.getTime()===hoje.getTime()) pedidosHoje++;
+      if(d>=mesInicio){
+        totalMes += (p.total||0);
+        pedidosMes++;
+      }
     }
   } catch(e){}
 
   const ocultarValoresPainel = ehExpedicao();
   document.getElementById('dash-cards').innerHTML = ocultarValoresPainel ? `
-    <div class="dash-card"><div class="dash-card-label">Pedidos Hoje</div><div class="dash-card-value accent">${pedidosHoje}</div></div>
+    <div class="dash-card"><div class="dash-card-label">Pedidos do Mês</div><div class="dash-card-value accent">${pedidosMes}</div></div>
   ` : `
-    <div class="dash-card"><div class="dash-card-label">Pedidos Hoje</div><div class="dash-card-value accent">${pedidosHoje}</div></div>
+    <div class="dash-card"><div class="dash-card-label">Pedidos do Mês</div><div class="dash-card-value accent">${pedidosMes}</div></div>
     <div class="dash-card"><div class="dash-card-label">Total do Mês</div><div class="dash-card-value success">${fmtMoeda(totalMes)}</div></div>
     <div class="dash-card"><div class="dash-card-label">Total de Pedidos</div><div class="dash-card-value">${total}</div></div>
   `;
-  const recentes = meusPedidos.sort((a,b)=>new Date(b.data)-new Date(a.data)).slice(0,8);
+
+  // Painel mostra só pedidos ativos (Aguardando Aprovação, Aprovado, Em Separação)
+  const statusAtivos = ['AA', 'AP', 'EX'];
+  const ativos = meusPedidos
+    .filter(p => statusAtivos.includes(p.status))
+    .sort((a,b)=>new Date(b.data)-new Date(a.data));
+
   const isMobile = window.innerWidth <= 768;
   if(isMobile){
-    document.getElementById('dash-pedidos-wrap').innerHTML = recentes.map(p=>`
+    document.getElementById('dash-pedidos-wrap').innerHTML = ativos.map(p=>`
       <div class="pedido-card">
         <div class="pedido-card-header">
           <div>
@@ -2471,12 +2479,12 @@ async function renderPainel(){
         <div class="pedido-card-actions">
           <button class="btn btn-outline btn-sm" onclick="verPedido('${p.id}')">Ver detalhes</button>
         </div>
-      </div>`).join('') || '<div style="text-align:center;color:var(--muted);padding:24px">Nenhum pedido ainda</div>';
+      </div>`).join('') || '<div style="text-align:center;color:var(--muted);padding:24px">Nenhum pedido ativo no momento</div>';
   } else {
     document.getElementById('dash-pedidos-wrap').innerHTML = `
       <div class="table-wrap">
         <table><thead><tr><th>Nº</th><th>Cliente</th><th>Total</th><th>Condição</th><th>Status</th><th>Data</th></tr></thead>
-        <tbody>${recentes.map(p=>`
+        <tbody>${ativos.map(p=>`
           <tr onclick="verPedido('${p.id}')" style="cursor:pointer">
             <td><strong>#${p.numero}</strong></td>
             <td>${p.cliente_nome}</td>
@@ -2484,7 +2492,7 @@ async function renderPainel(){
             <td>${p.condicao||''}</td>
             <td>${statusBadge(p.status)}</td>
             <td>${fmtData(p.data)}</td>
-          </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">Nenhum pedido ainda</td></tr>'}
+          </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">Nenhum pedido ativo no momento</td></tr>'}
         </tbody></table>
       </div>`;
   }
