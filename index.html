@@ -2428,7 +2428,7 @@ async function renderPainel(){
   const hoje = new Date(); hoje.setHours(0,0,0,0);
   const mesInicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
 
-  let meusPedidos=[], total=0, totalMes=0, pedidosMes=0;
+  let meusPedidos=[], total=0, totalMes=0, pedidosMes=0, pedidosHoje=0;
   try {
     const snap = await db.ref('pedidos').once('value');
     const todos = snap.val()||{};
@@ -2443,16 +2443,18 @@ async function renderPainel(){
         totalMes += (p.total||0);
         pedidosMes++;
       }
+      if(d.getTime()===hoje.getTime()) pedidosHoje++;
     }
   } catch(e){}
 
   const ocultarValoresPainel = ehExpedicao();
   document.getElementById('dash-cards').innerHTML = ocultarValoresPainel ? `
-    <div class="dash-card"><div class="dash-card-label">Pedidos do Mês</div><div class="dash-card-value accent">${pedidosMes}</div></div>
+    <div class="dash-card"><div class="dash-card-label">Pedidos Hoje</div><div class="dash-card-value accent">${pedidosHoje}</div></div>
+    <div class="dash-card"><div class="dash-card-label">Pedidos do Mês</div><div class="dash-card-value">${pedidosMes}</div></div>
   ` : `
-    <div class="dash-card"><div class="dash-card-label">Pedidos do Mês</div><div class="dash-card-value accent">${pedidosMes}</div></div>
+    <div class="dash-card"><div class="dash-card-label">Pedidos Hoje</div><div class="dash-card-value accent">${pedidosHoje}</div></div>
     <div class="dash-card"><div class="dash-card-label">Total do Mês</div><div class="dash-card-value success">${fmtMoeda(totalMes)}</div></div>
-    <div class="dash-card"><div class="dash-card-label">Total de Pedidos</div><div class="dash-card-value">${total}</div></div>
+    <div class="dash-card"><div class="dash-card-label">Pedidos do Mês</div><div class="dash-card-value">${pedidosMes}</div></div>
   `;
 
   // Painel mostra só pedidos ativos (Aguardando Aprovação, Aprovado, Em Separação)
