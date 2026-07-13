@@ -1710,6 +1710,9 @@ tbody td{padding:11px 16px;font-size:14px}
       <div class="form-row single">
         <div class="form-group"><label>Motivo / Observação</label><input type="text" id="defeito-motivo" placeholder="ex: vazamento no corpo, rosca trincada..."></div>
       </div>
+      <div class="form-row single">
+        <div class="form-group"><label>Observações adicionais</label><textarea id="defeito-obs" rows="3" placeholder="Informações extras, instruções para o fornecedor, número de NF de devolução..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px;resize:vertical"></textarea></div>
+      </div>
       <div class="form-row single" id="defeito-baixa-wrap">
         <div class="form-group">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal">
@@ -1741,6 +1744,10 @@ tbody td{padding:11px 16px;font-size:14px}
     <div class="form-row single"><div class="form-group">
       <label>Motivo / Observação</label>
       <input type="text" id="editar-garantia-motivo" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px">
+    </div></div>
+    <div class="form-row single"><div class="form-group">
+      <label>Observações adicionais</label>
+      <textarea id="editar-garantia-obs" rows="3" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px;resize:vertical" placeholder="Informações extras, instruções para o fornecedor..."></textarea>
     </div></div>
     <div class="form-actions">
       <button class="btn btn-outline" onclick="fecharModal('modal-editar-garantia-fornecedor')">Cancelar</button>
@@ -5290,11 +5297,10 @@ function imprimirEtiquetaProduto(codigo, tipo){
   let svgBarcode;
   try {
     const svgTemp = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    JsBarcode(svgTemp, gtinLimpo, { format: "EAN13", displayValue: true, fontSize: 9, width: 0.9, height: 22, margin: 0, textMargin: 2 });
-    // Força o tamanho final do SVG diretamente nos atributos (não depende de CSS responsivo,
-    // que pode calcular diferente entre a pré-visualização e a impressão real).
-    svgTemp.setAttribute('width', '30mm');
-    svgTemp.setAttribute('height', '13mm');
+    JsBarcode(svgTemp, gtinLimpo, { format: "EAN13", displayValue: true, fontSize: 11, width: 1.5, height: 40, margin: 0, textMargin: 2 });
+    // Força o tamanho final do SVG diretamente nos atributos
+    svgTemp.setAttribute('width', '44mm');
+    svgTemp.setAttribute('height', '18mm');
     svgTemp.setAttribute('preserveAspectRatio', 'xMidYMid meet');
     svgBarcode = svgTemp.outerHTML;
   } catch(e){
@@ -5309,22 +5315,23 @@ function imprimirEtiquetaProduto(codigo, tipo){
       @page { size: 50mm 30mm; margin: 0; }
       body { margin: 0; font-family: Arial, sans-serif; }
       .etq {
-        width: 44mm; height: 28mm; box-sizing: border-box; padding: 1mm;
-        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        width: 48mm; height: 28mm; box-sizing: border-box; padding: 1mm 1mm 0 1mm;
+        display: flex; flex-direction: column; align-items: center; justify-content: space-between;
         overflow: hidden;
       }
-      .nome { width: 100%; font-size: 10px; font-weight: 700; line-height: 1.1; text-align: center; overflow: hidden; margin-bottom: 0.5mm; }
-      .linha-inferior { width: 100%; display: flex; align-items: center; flex-shrink: 0; }
-      .barcode-wrap { width: 30mm; flex-shrink: 0; overflow: hidden; }
-      .codigo-lateral { width: 10mm; flex-shrink: 0; font-size: 10px; font-weight: 900; white-space: nowrap; text-align: right; padding-left: 1mm; }
+      .topo { width: 100%; display: flex; justify-content: space-between; align-items: flex-start; }
+      .nome { font-size: 8px; font-weight: 700; line-height: 1.1; flex: 1; overflow: hidden; }
+      .codigo { font-size: 11px; font-weight: 900; white-space: nowrap; padding-left: 2mm; }
+      .barcode-wrap { width: 100%; flex-shrink: 0; }
+      .barcode-wrap svg { width: 100% !important; height: 18mm !important; }
     </style>
     </head><body>
       <div class="etq">
-        <div class="nome">${item.nome}</div>
-        <div class="linha-inferior">
-          <div class="barcode-wrap">${svgBarcode}</div>
-          <div class="codigo-lateral">${codigo}</div>
+        <div class="topo">
+          <div class="nome">${item.nome}</div>
+          <div class="codigo">${codigo}</div>
         </div>
+        <div class="barcode-wrap">${svgBarcode}</div>
       </div>
       <script>
         window.onload = function(){ setTimeout(function(){ window.print(); }, 300); };
@@ -6356,6 +6363,7 @@ async function abrirModalDefeito(opKey, opNumero){
   document.getElementById('defeito-form-resto').style.display = 'none';
   document.getElementById('defeito-qtd').value = 1;
   document.getElementById('defeito-motivo').value = '';
+  document.getElementById('defeito-obs').value = '';
   document.getElementById('defeito-fornecedor').value = '';
   document.getElementById('defeito-dar-baixa').checked = true;
   // Na OP: baixa é sempre obrigatória (oculta o checkbox); manual: usuário decide
@@ -6410,6 +6418,7 @@ async function confirmarRegistroDefeito(){
   const qtd = Number(document.getElementById('defeito-qtd').value) || 0;
   if(qtd <= 0){ toast('Quantidade inválida','error'); return; }
   const motivo = document.getElementById('defeito-motivo').value.trim();
+  const obs = document.getElementById('defeito-obs').value.trim();
   const fornecedorNome = document.getElementById('defeito-fornecedor').value.trim() || 'Não identificado';
 
   const i = insumoDefeitoSelecionado;
@@ -6434,7 +6443,7 @@ async function confirmarRegistroDefeito(){
     codigo: i.codigo,
     nome: i.nome,
     fornecedor: fornecedorNome,
-    qtd, motivo,
+    qtd, motivo, obs,
     op_numero: ehManual ? null : opContextoDefeito.numero,
     op_key: ehManual ? null : opContextoDefeito.key,
     manual: ehManual || false,
@@ -6458,6 +6467,7 @@ async function abrirEditarGarantia(id){
   document.getElementById('editar-garantia-info').textContent = `${g.codigo} — ${g.nome} · Qtd: ${g.qtd}`;
   document.getElementById('editar-garantia-fornecedor').value = g.fornecedor||'';
   document.getElementById('editar-garantia-motivo').value = g.motivo||'';
+  document.getElementById('editar-garantia-obs').value = g.obs||'';
   const dl = document.getElementById('editar-garantia-fornecedores-list');
   dl.innerHTML = FORNECEDORES_DB.map(f=>`<option value="${f.nome}">`).join('');
   abrirModal('modal-editar-garantia-fornecedor');
@@ -6467,10 +6477,11 @@ async function salvarEdicaoGarantia(){
   const id = document.getElementById('editar-garantia-id').value;
   const fornecedor = document.getElementById('editar-garantia-fornecedor').value.trim();
   const motivo = document.getElementById('editar-garantia-motivo').value.trim();
+  const obs = document.getElementById('editar-garantia-obs').value.trim();
   if(!fornecedor){ toast('Informe o fornecedor','error'); return; }
-  await db.ref('garantias/'+id).update({ fornecedor, motivo });
+  await db.ref('garantias/'+id).update({ fornecedor, motivo, obs });
   const g = GARANTIAS_CACHE.find(x=>x.id===id);
-  if(g){ g.fornecedor = fornecedor; g.motivo = motivo; }
+  if(g){ g.fornecedor = fornecedor; g.motivo = motivo; g.obs = obs; }
   fecharModal('modal-editar-garantia-fornecedor');
   toast('✓ Garantia atualizada','success');
   renderGarantias();
@@ -6526,16 +6537,18 @@ async function renderGarantias(){
   document.getElementById('garantias-lista').innerHTML = pagina.map(g=>{
     const si = statusInfoGarantia(g.status);
     const podeEditar = g.status !== 'finalizado' && g.status !== 'cancelado';
+    const opLabel = g.manual ? 'Manual' : (g.op_numero ? 'OP #'+g.op_numero : '—');
     return `<div class="pedido-card">
       <div class="pedido-card-header">
         <div>
           <div class="pedido-card-num">${g.codigo} — ${g.nome}</div>
-          <div style="font-size:12px;color:var(--muted);margin-top:2px">🚚 ${g.fornecedor} · OP #${g.op_numero} · ${new Date(g.ts).toLocaleDateString('pt-BR')}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">🚚 ${g.fornecedor} · ${opLabel} · ${new Date(g.ts).toLocaleDateString('pt-BR')}</div>
         </div>
         <span class="badge" style="background:${si.bg};color:${si.cor}">${si.label}</span>
       </div>
       <div class="pedido-card-info">Quantidade: <span><strong>${g.qtd}</strong></span></div>
       ${g.motivo?`<div style="font-size:13px;color:var(--muted);margin-top:4px">📝 ${g.motivo}</div>`:''}
+      ${g.obs?`<div style="font-size:13px;color:#1a1a2e;margin-top:4px;padding:6px 10px;background:#f8f9fa;border-radius:6px;border-left:3px solid var(--primary)">💬 ${g.obs}</div>`:''}
       <div style="font-size:11px;color:var(--muted);margin-top:6px">Registrado por ${g.registrado_por} em ${new Date(g.ts).toLocaleString('pt-BR')}</div>
       ${podeEditar ? `
         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
