@@ -3684,6 +3684,7 @@ async function confirmarPedido(){
       cliente_codigo:c.codigo, cliente_nome:c.nome, cliente_cpf:c.cpf_cnpj||'',
       cliente_cidade:c.cidade||'', cliente_uf:c.uf||'',
       cliente_endereco: c.endereco||c.end||'', cliente_cep: c.cep||'',
+      cliente_telefone: c.telefone||c.tel||'',
       vendedor_id: vendedorIdFinal,
       vendedor_nome: vendedorNomeFinal,
       digitado_por_id: usuarioLogado.id, digitado_por_nome: usuarioLogado.nome,
@@ -3731,6 +3732,7 @@ async function salvarComoOrcamento(){
       cliente_codigo:c.codigo, cliente_nome:c.nome, cliente_cpf:c.cpf_cnpj||'',
       cliente_cidade:c.cidade||'', cliente_uf:c.uf||'',
       cliente_endereco: c.endereco||c.end||'', cliente_cep: c.cep||'',
+      cliente_telefone: c.telefone||c.tel||'',
       vendedor_id: vendedorIdFinalOrc,
       vendedor_nome: vendedorNomeFinalOrc,
       digitado_por_id: usuarioLogado.id, digitado_por_nome: usuarioLogado.nome,
@@ -11245,7 +11247,17 @@ function montarLinhaItemHTML(i, idx){
 }
 
 function montarCabecalhoSlipHTML(p, subtitulo){
-  const end = [p.cliente_endereco, p.cliente_cidade&&p.cliente_uf ? p.cliente_cidade+', '+p.cliente_uf : (p.cliente_cidade||p.cliente_uf||''), p.cliente_cep].filter(Boolean).join('<br>');
+  // Para pedidos antigos que não têm CEP/telefone no snapshot, busca no cadastro do cliente
+  const clienteCadastro = CLIENTES_DB.find(c=>c.codigo===p.cliente_codigo);
+  const cep = p.cliente_cep || clienteCadastro?.cep || '';
+  const tel = p.cliente_telefone || clienteCadastro?.telefone || clienteCadastro?.tel || '';
+
+  const endPartes = [p.cliente_endereco, p.cliente_cidade&&p.cliente_uf ? p.cliente_cidade+', '+p.cliente_uf : (p.cliente_cidade||p.cliente_uf||'')].filter(Boolean);
+  const endHtml = [
+    endPartes.join('<br>'),
+    cep ? 'CEP: '+cep : '',
+    tel ? 'Tel: '+tel : ''
+  ].filter(Boolean).join('<br>');
   return `
     <table style="width:100%;border-collapse:collapse;margin-bottom:12px">
       <tr>
@@ -11268,7 +11280,7 @@ function montarCabecalhoSlipHTML(p, subtitulo){
       <tr>
         <td style="width:60%;vertical-align:top;border:1px solid #ccc;padding:6px 8px;font-size:11px">
           <strong>${p.cliente_nome}</strong><br>
-          ${end}
+          ${endHtml}
           ${p.cliente_cpf?'<br>CNPJ/CPF: '+p.cliente_cpf:''}
         </td>
         <td style="width:40%;vertical-align:top;padding-left:8px">
