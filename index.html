@@ -138,11 +138,12 @@ tbody td{padding:11px 16px;font-size:14px}
 .form-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:24px}
 
 /* PEDIDO */
-.item-row{display:grid;grid-template-columns:2fr 70px 110px 90px 80px 32px;gap:8px;padding:10px 14px;align-items:center;border-bottom:1px solid var(--border);background:var(--card);font-size:13px}
+.item-row{display:grid;grid-template-columns:2fr 70px 110px 90px 80px 32px;gap:8px;padding:10px 14px;align-items:center;border-bottom:1px solid var(--border);background:var(--card);font-size:13px;min-width:480px}
 .item-row:last-child{border-bottom:none}
 .item-row-header{background:var(--primary);color:rgba(255,255,255,.6);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px}
 .item-row input[type=number]{border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;font-family:'DM Sans',sans-serif;width:100%;outline:none}
 .item-row input:focus{border-color:var(--accent)}
+.item-rows-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--border);border-radius:10px;margin-bottom:12px}
 .btn-del{background:none;border:none;cursor:pointer;color:#ccc;font-size:18px}
 .btn-del:hover{color:var(--accent)}
 .totais-box{background:var(--primary);color:#fff;border-radius:10px;padding:16px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px}
@@ -225,7 +226,11 @@ tbody td{padding:11px 16px;font-size:14px}
 .pedido-card-num{font-family:'Syne',sans-serif;font-weight:700;font-size:16px}
 .pedido-card-info{font-size:13px;color:var(--muted);margin-bottom:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 .pedido-card-info span{color:var(--text)}
-.pedido-card-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.pedido-card-compact > div:first-child { display:flex;align-items:center;gap:10px;flex-wrap:nowrap;overflow:hidden }
+@media(max-width:768px){
+  .pedido-card-compact > div:first-child { flex-wrap:wrap }
+  .pedido-card-compact > div:first-child > div { min-width:unset!important; flex-shrink:unset!important }
+}
 
 .produto-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:8px;display:flex;gap:12px;align-items:flex-start}
 .produto-card-foto{flex-shrink:0}
@@ -268,7 +273,8 @@ tbody td{padding:11px 16px;font-size:14px}
   .dash-card-value{font-size:clamp(14px,5vw,20px)}
   .form-row,.form-row.triple{grid-template-columns:1fr}
   .item-row{grid-template-columns:2fr 45px 85px 65px 65px 22px;font-size:11px;padding:8px 6px}
-  .modal{padding:20px 14px}
+  .modal{padding:20px 14px;max-height:92vh;overflow-y:auto}
+  .modal-overlay{padding:10px}
   .modal-title{font-size:17px}
   .btn{padding:8px 14px;font-size:13px}
   .btn-sm{padding:7px 12px;font-size:13px}
@@ -2685,31 +2691,34 @@ async function renderPedidos(){
   document.getElementById('pedidos-lista').innerHTML = pagina.map(p=>{
     const bloqueado = !podeEditar(p);
     const lockIcon = bloqueado ? '🔒' : '✏️';
-    const desc = p.desconto_total>0 ? '- '+fmtMoeda(p.desconto_total) : '';
-    
-    return `<div class="pedido-card">
-      <div class="pedido-card-header">
-        <div style="display:flex;align-items:flex-start;gap:10px">
-          <input type="checkbox" class="check-imprimir-pedido" data-id="${p.id}" ${pedidosSelecionadosImprimir.has(p.id)?'checked':''} onchange="toggleSelecaoPedido('${p.id}',this.checked)" style="margin-top:4px;width:16px;height:16px;cursor:pointer">
-          <div>
-            <div class="pedido-card-num">#${p.numero} ${statusBadge(p.status)}</div>
-            <div style="font-size:13px;color:var(--muted);margin-top:2px">${fmtData(p.data)}</div>
-          </div>
+    const desc = p.desconto_total>0 ? `<div style="font-size:11px;color:var(--accent)">- ${fmtMoeda(p.desconto_total)}</div>` : '';
+
+    // Layout compacto (desktop) — tudo em uma linha
+    return `<div class="pedido-card pedido-card-compact" style="padding:10px 14px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:nowrap;overflow:hidden">
+        <input type="checkbox" class="check-imprimir-pedido" data-id="${p.id}" ${pedidosSelecionadosImprimir.has(p.id)?'checked':''} onchange="toggleSelecaoPedido('${p.id}',this.checked)" style="flex-shrink:0;width:16px;height:16px;cursor:pointer">
+        <div style="flex-shrink:0;min-width:90px">
+          <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px">#${p.numero}</div>
+          <div style="margin-top:2px">${statusBadge(p.status)}</div>
         </div>
-        ${!ocultarValores ? `<div style="text-align:right">
-          <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:17px;color:var(--success)">${fmtMoeda(p.total)}</div>
-          ${desc?`<div style="font-size:12px;color:var(--accent)">${desc}</div>`:''}
+        <div style="flex-shrink:0;font-size:12px;color:var(--muted);min-width:70px">${fmtData(p.data)}</div>
+        <div style="flex:1;min-width:0;overflow:hidden">
+          <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">👤 ${p.cliente_nome}</div>
+          <div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">📦 ${(p.itens||[]).length} iten(s) · ${[p.forma,p.condicao].filter(Boolean).join(' · ')||''}</div>
+        </div>
+        <div style="flex-shrink:0;font-size:12px;color:var(--muted);min-width:80px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${p.vendedor_nome||''}">👤 ${(p.vendedor_nome||'').split(' ')[0]}</div>
+        ${!ocultarValores ? `<div style="flex-shrink:0;text-align:right;min-width:90px">
+          <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px;color:var(--success)">${fmtMoeda(p.total)}</div>
+          ${desc}
         </div>` : ''}
+        <div style="flex-shrink:0;display:flex;gap:6px;align-items:center">
+          <button class="btn btn-outline btn-sm" onclick="verPedido('${p.id}')">Ver detalhes</button>
+          <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600;padding:4px 8px" onclick="gerarImagemPedido('${p.id}')">📲 WhatsApp</button>
+          ${!bloqueado&&p.status!=='Cancelado'?`<button class="btn btn-warning btn-sm" onclick="editarPedido('${p.id}')">${lockIcon} Editar</button>`:`<span style="font-size:12px;color:var(--muted)">${lockIcon}</span>`}
+          ${usuarioLogado.admin&&p.status!=='Cancelado'?`<button class="btn btn-sm btn-danger" onclick="cancelarPedido('${p.id}')">Cancelar</button>`:''}
+        </div>
       </div>
-      <div class="pedido-card-info">👤 <span>${p.cliente_nome}</span></div>
-      <div class="pedido-card-info">📦 <span>${(p.itens||[]).length} iten(s)</span> · ${p.forma||''} · ${p.condicao||''}</div>
-      ${p.obs ? `<div style="margin-top:6px;padding:6px 10px;background:#fffbeb;border-left:3px solid #fde68a;border-radius:0 6px 6px 0;font-size:12px;color:#92400e">⚠️ ${p.obs}</div>` : ''}
-      <div class="pedido-card-actions">
-        <button class="btn btn-outline btn-sm" onclick="verPedido('${p.id}')">Ver detalhes</button>
-        <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600" onclick="gerarImagemPedido('${p.id}')">📲 WhatsApp</button>
-        ${!bloqueado&&p.status!=='Cancelado'?`<button class="btn btn-warning btn-sm" onclick="editarPedido('${p.id}')">${lockIcon} Editar</button>`:`<span style="font-size:13px;color:var(--muted)">${lockIcon} Bloqueado</span>`}
-        ${usuarioLogado.admin&&p.status!=='Cancelado'?`<button class="btn btn-sm btn-danger" onclick="cancelarPedido('${p.id}')">Cancelar</button>`:''}
-      </div>
+      ${p.obs ? `<div style="margin-top:6px;padding:4px 10px;background:#fffbeb;border-left:3px solid #fde68a;border-radius:0 4px 4px 0;font-size:11px;color:#92400e">⚠️ ${p.obs}</div>` : ''}
     </div>`;
   }).join('') || '<div style="text-align:center;color:var(--muted);padding:24px">Nenhum pedido encontrado</div>';
 
@@ -2881,14 +2890,16 @@ async function verPedido(id){
       ${(() => {
         const ocultarVal = usuarioLogado && ehExpedicao();
         return `
-      <div class="item-row item-row-header"><span>Produto</span><span>Qtd</span>${!ocultarVal?'<span>Preço Unit.</span><span>Desc.%</span><span>Subtotal</span>':''}<span></span></div>
-      ${(p.itens||[]).map(i=>`
-        <div class="item-row">
-          <span><strong style="color:${i.codigo&&i.codigo!=='reservado'?'var(--accent)':'#dc2626'}">${i.codigo&&i.codigo!=='reservado'?i.codigo:'SEM CÓD.'}</strong> — ${i.nome}</span>
-          <span>${i.qtd} ${i.unidade}</span>
-          ${!ocultarVal?`<span>${fmtMoeda(i.preco)}</span><span>${i.desconto_item||0}%</span><span><strong>${fmtMoeda(i.qtd*i.preco*(1-(i.desconto_item||0)/100))}</strong></span>`:''}
-          <span></span>
-        </div>`).join('')}`;
+      <div class="item-rows-wrap">
+        <div class="item-row item-row-header"><span>Produto</span><span>Qtd</span>${!ocultarVal?'<span>Preço Unit.</span><span>Desc.%</span><span>Subtotal</span>':''}<span></span></div>
+        ${(p.itens||[]).map(i=>`
+          <div class="item-row">
+            <span><strong style="color:${i.codigo&&i.codigo!=='reservado'?'var(--accent)':'#dc2626'}">${i.codigo&&i.codigo!=='reservado'?i.codigo:'SEM CÓD.'}</strong> — ${i.nome}</span>
+            <span>${i.qtd} ${i.unidade}</span>
+            ${!ocultarVal?`<span>${fmtMoeda(i.preco)}</span><span>${i.desconto_item||0}%</span><span><strong>${fmtMoeda(i.qtd*i.preco*(1-(i.desconto_item||0)/100))}</strong></span>`:''}
+            <span></span>
+          </div>`).join('')}
+      </div>`;
       })()}
       <div class="totais-box" style="margin-top:12px">
         ${usuarioLogado && !ehExpedicao() ? `
@@ -3812,24 +3823,27 @@ async function renderOrcamentos(){
   const total=orcamentos.length, inicio=(paginaOrcamentos-1)*POR_PAGINA;
   const pagina=orcamentos.slice(inicio,inicio+POR_PAGINA);
   document.getElementById('orcamentos-table').innerHTML = pagina.map(p=>`
-    <div class="pedido-card">
-      <div class="pedido-card-header">
-        <div style="display:flex;align-items:flex-start;gap:10px">
-          <input type="checkbox" class="check-imprimir-orcamento" data-id="${p.id}" ${orcamentosSelecionadosImprimir.has(p.id)?'checked':''} onchange="toggleSelecaoOrcamento('${p.id}',this.checked)" style="margin-top:4px;width:16px;height:16px;cursor:pointer">
-          <div>
-            <div class="pedido-card-num">#${p.numero} <span class="tag-orcamento">Orçamento</span></div>
-            <div style="font-size:13px;color:var(--muted);margin-top:2px">${fmtData(p.data)}</div>
-          </div>
+    <div class="pedido-card pedido-card-compact" style="padding:10px 14px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:nowrap;overflow:hidden">
+        <input type="checkbox" class="check-imprimir-orcamento" data-id="${p.id}" ${orcamentosSelecionadosImprimir.has(p.id)?'checked':''} onchange="toggleSelecaoOrcamento('${p.id}',this.checked)" style="flex-shrink:0;width:16px;height:16px;cursor:pointer">
+        <div style="flex-shrink:0;min-width:90px">
+          <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px">#${p.numero}</div>
+          <div style="margin-top:2px"><span class="tag-orcamento">Orçamento</span></div>
         </div>
-        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:17px;color:var(--success)">${fmtMoeda(p.total)}</div>
-      </div>
-      <div class="pedido-card-info">👤 <span>${p.cliente_nome}</span></div>
-      <div class="pedido-card-info">📦 <span>${(p.itens||[]).length} iten(s)</span></div>
-      <div class="pedido-card-actions">
-        <button class="btn btn-outline btn-sm" onclick="verPedido('${p.id}')">Ver</button>
-        <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600" onclick="gerarImagemPedido('${p.id}')">📲 WhatsApp</button>
-        <button class="btn btn-success btn-sm" onclick="confirmarOrcamento('${p.id}')">✓ Confirmar Pedido</button>
-        <button class="btn btn-sm" style="background:#ffeef0;color:var(--accent)" onclick="cancelarPedido('${p.id}')">Excluir</button>
+        <div style="flex-shrink:0;font-size:12px;color:var(--muted);min-width:70px">${fmtData(p.data)}</div>
+        <div style="flex:1;min-width:0;overflow:hidden">
+          <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">👤 ${p.cliente_nome}</div>
+          <div style="font-size:11px;color:var(--muted)">📦 ${(p.itens||[]).length} iten(s)</div>
+        </div>
+        <div style="flex-shrink:0;text-align:right;min-width:90px">
+          <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px;color:var(--success)">${fmtMoeda(p.total)}</div>
+        </div>
+        <div style="flex-shrink:0;display:flex;gap:6px;align-items:center">
+          <button class="btn btn-outline btn-sm" onclick="verPedido('${p.id}')">Ver</button>
+          <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600;padding:4px 8px" onclick="gerarImagemPedido('${p.id}')">📲 WhatsApp</button>
+          <button class="btn btn-success btn-sm" onclick="confirmarOrcamento('${p.id}')">✓ Confirmar</button>
+          <button class="btn btn-sm" style="background:#ffeef0;color:var(--accent)" onclick="cancelarPedido('${p.id}')">Excluir</button>
+        </div>
       </div>
     </div>`).join('')||'<div style="text-align:center;color:var(--muted);padding:24px">Nenhum orçamento</div>';
   renderPaginacao('orcamentos-pag',total,paginaOrcamentos,n=>{ paginaOrcamentos=n; renderOrcamentos(); });
