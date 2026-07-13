@@ -616,6 +616,25 @@ tbody td{padding:11px 16px;font-size:14px}
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('estoque-posicao',this)">📊 Posição de Estoque</button>
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('sugestao-compra',this)">🛒 Sugestão de Compra</button>
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('sugestao-jornal',this)">📰 Sugestão Jornal do Mês</button>
+          <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('estoque-minimo',this)">🔴 Abaixo do Mínimo</button>
+        </div>
+
+        <!-- Filtros específicos do relatório Abaixo do Mínimo -->
+        <div id="rel-filtro-estoque-minimo-wrap" style="display:none;flex-wrap:wrap;gap:10px;margin-bottom:12px;padding:12px;background:var(--bg);border-radius:8px">
+          <div class="filtro-group">
+            <label>Tipo de item</label>
+            <select id="rel-em-tipo" onchange="gerarRelatorio()">
+              <option value="">Vendáveis + Insumos</option>
+              <option value="vendavel">Só Vendáveis</option>
+              <option value="insumo">Só Insumos</option>
+            </select>
+          </div>
+          <div class="filtro-group">
+            <label>Fornecedor</label>
+            <select id="rel-em-fornecedor" onchange="gerarRelatorio()">
+              <option value="">Todos os fornecedores</option>
+            </select>
+          </div>
         </div>
 
         <!-- Filtros comuns -->
@@ -9361,6 +9380,14 @@ function mostrarRelatorio(tipo, btnEl){
     ['vendas-vendedor','vendas-cliente','clientes-inativos','vendas-cidade'].includes(tipo) ? 'block' : 'none';
   document.getElementById('rel-filtro-periodo-wrap').style.display =
     ['vendas-periodo'].includes(tipo) ? 'block' : 'none';
+  document.getElementById('rel-filtro-estoque-minimo-wrap').style.display =
+    tipo === 'estoque-minimo' ? 'flex' : 'none';
+
+  // Preenche o select de fornecedores no filtro do relatório de mínimo
+  if(tipo === 'estoque-minimo'){
+    if(!FORNECEDORES_DB.length) carregarFornecedoresFirebase().then(populaFornecedoresRelEM);
+    else populaFornecedoresRelEM();
+  }
   document.getElementById('rel-conteudo').innerHTML =
     '<div style="text-align:center;color:var(--muted);padding:40px">Clique em Gerar para carregar</div>';
   document.getElementById('rel-grafico-wrap').style.display = 'none';
@@ -9397,6 +9424,7 @@ async function gerarRelatorio(){
     case 'estoque-posicao': relEstoquePosicao(el); break;
     case 'vendas-cidade': relVendasCidade(pedidos, el); break;
     case 'sugestao-compra': relSugestaoCompra(el); break;
+    case 'estoque-minimo': relEstoqueAbaixoMinimo(el); break;
     case 'sugestao-jornal': await relSugestaoJornal(pedidos, el); break;
   }
 }
@@ -9761,6 +9789,118 @@ function relSugestaoCompra(el){
 }
 
 // ── Sugestão Jornal do Mês (corrigida) ──
+async function populaFornecedoresRelEM(){
+  const sel = document.getElementById('rel-em-fornecedor');
+  if(!sel) return;
+  const atual = sel.value;
+  sel.innerHTML = '<option value="">Todos os fornecedores</option>' +
+    FORNECEDORES_DB.map(f=>`<option value="${f.nome}" ${f.nome===atual?'selected':''}>${f.nome}</option>`).join('');
+}
+
+async function relEstoqueAbaixoMinimo(el){
+  if(!INSUMOS_DB.length) await carregarInsumosFirebase();
+  if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
+
+  const filtroTipo = document.getElementById('rel-em-tipo')?.value || '';
+  const filtroFornecedor = document.getElementById('rel-em-fornecedor')?.value || '';
+
+  // Monta lista unificada (vendáveis + insumos) conforme filtro
+  const itens = [];
+
+  if(filtroTipo !== 'insumo'){
+    PRODUTOS_DB.filter(p=>!p.inativo).forEach(p=>{
+      const estq = Number(p.quantidade||0);
+      const min = Number(p.estoque_minimo||0);
+      if(min <= 0) return; // sem mínimo cadastrado, ignora
+      if(estq >= min) return; // acima do mínimo, ignora
+      const fornecedor = (p.fornecedores||[])[0]?.nome || p.fornecedor || '—';
+      if(filtroFornecedor && fornecedor !== filtroFornecedor) return;
+      itens.push({ tipo:'Vendável', codigo:p.codigo, nome:p.nome, unidade:p.unidade||'UN',
+        fornecedor, estoque:estq, minimo:min, diferenca:estq-min });
+    });
+  }
+
+  if(filtroTipo !== 'vendavel'){
+    INSUMOS_DB.filter(i=>!i.inativo).forEach(i=>{
+      const estq = Number(i.estoque_atual||0);
+      const min = Number(i.estoque_minimo||0);
+      if(min <= 0) return;
+      if(estq >= min) return;
+      const fornecedor = (i.fornecedores||[])[0]?.nome || i.fornecedor || '—';
+      if(filtroFornecedor && fornecedor !== filtroFornecedor) return;
+      itens.push({ tipo:'Insumo', codigo:i.codigo, nome:i.nome, unidade:i.unidade||'UN',
+        fornecedor, estoque:estq, minimo:min, diferenca:estq-min });
+    });
+  }
+
+  // Ordena: mais críticos (maior déficit relativo) primeiro
+  itens.sort((a,b) => (a.estoque/a.minimo) - (b.estoque/b.minimo));
+
+  relatorioCache = { tipo:'estoque-minimo', lista: itens };
+
+  if(!itens.length){
+    el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--success)">✅ Nenhum item abaixo do estoque mínimo com os filtros selecionados.</div>';
+    return;
+  }
+
+  // Agrupa por fornecedor
+  const porFornecedor = {};
+  itens.forEach(i=>{ if(!porFornecedor[i.fornecedor]) porFornecedor[i.fornecedor]=[]; porFornecedor[i.fornecedor].push(i); });
+
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <span style="font-size:13px;color:#dc2626;font-weight:700">🔴 ${itens.length} item(ns) abaixo do estoque mínimo</span>
+      <button class="btn btn-outline btn-sm" onclick="exportarRelatorioExcel()">📥 Exportar Excel</button>
+    </div>
+    <div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead style="background:var(--primary);color:rgba(255,255,255,.85)"><tr>
+        <th style="padding:10px 12px;text-align:left">Código</th>
+        <th style="padding:10px 12px;text-align:left">Produto/Insumo</th>
+        <th style="padding:10px 12px;text-align:center">Tipo</th>
+        <th style="padding:10px 12px;text-align:left">Fornecedor</th>
+        <th style="padding:10px 12px;text-align:center">Estoque Atual</th>
+        <th style="padding:10px 12px;text-align:center">Mínimo</th>
+        <th style="padding:10px 12px;text-align:center">Déficit</th>
+      </tr></thead>
+      <tbody>
+        ${Object.entries(porFornecedor).map(([forn, lista])=>`
+          <tr style="background:#f8f9fa"><td colspan="7" style="padding:8px 12px;font-weight:700;color:var(--primary)">📦 ${forn} (${lista.length} item(ns))</td></tr>
+          ${lista.map((i,idx)=>{
+            const pct = Math.round(i.estoque/i.minimo*100);
+            const cor = pct === 0 ? '#dc2626' : pct < 50 ? '#d97706' : '#ca8a04';
+            return `<tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
+              <td style="padding:9px 12px;font-weight:700">${i.codigo}</td>
+              <td style="padding:9px 12px">${i.nome}</td>
+              <td style="padding:9px 12px;text-align:center"><span class="badge badge-gray">${i.tipo}</span></td>
+              <td style="padding:9px 12px;color:var(--muted)">${i.fornecedor}</td>
+              <td style="padding:9px 12px;text-align:center;font-weight:700;color:${cor}">${i.estoque.toLocaleString('pt-BR')}</td>
+              <td style="padding:9px 12px;text-align:center">${i.minimo.toLocaleString('pt-BR')}</td>
+              <td style="padding:9px 12px;text-align:center;font-weight:700;color:#dc2626">${i.diferenca.toLocaleString('pt-BR')}</td>
+            </tr>`;
+          }).join('')}`).join('')}
+      </tbody>
+    </table></div>`;
+}
+
+// Exportação Excel do relatório Abaixo do Mínimo
+function exportarRelatorioExcelEstoqueMinimo(lista){
+  const dados = lista.map(i=>({
+    'Tipo': i.tipo,
+    'Código': i.codigo,
+    'Nome': i.nome,
+    'Unidade': i.unidade,
+    'Fornecedor': i.fornecedor,
+    'Estoque Atual': i.estoque,
+    'Estoque Mínimo': i.minimo,
+    'Déficit': i.diferenca
+  }));
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(dados);
+  XLSX.utils.book_append_sheet(wb, ws, 'Abaixo do Mínimo');
+  XLSX.writeFile(wb, `estoque_minimo_${new Date().toISOString().split('T')[0]}.xlsx`);
+}
+
 async function relSugestaoJornal(pedidos, el){
   if(!PRODUTOS_DB.length){
     el.innerHTML='<div style="color:#dc2626;padding:20px">⏳ Produtos ainda não carregados. Aguarde e tente novamente.</div>';
@@ -9798,12 +9938,12 @@ async function relSugestaoJornal(pedidos, el){
       emTransito: emTransito.has(v.codigo),
       score: v.qtd * (emTransito.has(v.codigo)?0.5:1) * (disponivel>0?1:0.1)
     };
-  }).sort((a,b)=>b.score-a.score).slice(0,20);
+  }).sort((a,b)=>b.score-a.score).slice(0,100);
 
   relatorioCache = { tipo:'sugestao-jornal', lista };
 
   el.innerHTML = `<div style="font-size:13px;margin-bottom:12px;color:var(--muted)">
-    Top 20 produtos sugeridos para o Jornal — mais vendidos no período, com estoque disponível. Produtos em trânsito são sinalizados.
+    Top 100 produtos sugeridos para o Jornal — mais vendidos no período, com estoque disponível. Produtos em trânsito são sinalizados.
   </div>`+tabelaRel(
     ['#','Código','Produto',{label:'Qtd Vendida',align:'center'},{label:'Disponível',align:'center'},{label:'Em Trânsito',align:'center'},{label:'Indicação',align:'center'}],
     lista.map((v,i)=>[
@@ -9895,6 +10035,7 @@ function exportarRelatorioExcel(){
     case 'compras-fornecedor': dados = lista.map(g=>({'Fornecedor':g.nome,'Pedidos':g.qtd,'Total':g.total})); break;
     case 'estoque-posicao': dados = lista.map(g=>({'Código':g.codigo,'Produto':g.nome,'Estoque':g.estoque,'Reservado':g.reservado,'Disponível':g.disponivel,'Mínimo':g.minimo})); break;
     case 'sugestao-compra': dados = lista.map(g=>({'Código':g.codigo,'Produto':g.nome,'Fornecedor':g.fornecedor,'Disponível':g.disponivel,'Mínimo':g.minimo,'Sugestão de Compra':g.sugestao})); break;
+    case 'estoque-minimo': return exportarRelatorioExcelEstoqueMinimo(lista);
     case 'sugestao-jornal': dados = lista.map((g,i)=>({'#':i+1,'Código':g.codigo,'Produto':g.nome,'Qtd Vendida':g.qtd,'Disponível':g.disponivel,'Em Trânsito':g.emTransito?'Sim':'Não'})); break;
     default: dados = lista;
   }
