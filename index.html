@@ -2629,12 +2629,14 @@ async function renderPedidos(){
   }
 
   let pedidos = [];
+  let todosPedidos = []; // todos os pedidos (antes dos filtros) para calcular Total do Mês
   try {
     const snap = await db.ref('pedidos').once('value');
     const todos = snap.val()||{};
     for(const k in todos){
       const p = todos[k];
       if(!vejaTudoDoModulo('pedidos') && p.vendedor_id!==usuarioLogado.id) continue;
+      todosPedidos.push(p);
       pedidos.push(p);
     }
   } catch(e){ toast('Erro ao carregar pedidos','error'); return; }
@@ -2671,9 +2673,11 @@ async function renderPedidos(){
   const totalValor = pedidos.filter(p=>p.status!=='Cancelado').reduce((s,p)=>s+(p.total||0),0);
   const mesAtual = new Date().getMonth();
   const anoAtual = new Date().getFullYear();
-  const totalMes = pedidos.filter(p=>{
-    const d=new Date(p.data);
-    return p.status!=='Cancelado'&&d.getMonth()===mesAtual&&d.getFullYear()===anoAtual;
+  // Total do mês = TODOS os pedidos do mês vigente não cancelados (ignora filtros ativos)
+  const totalMes = todosPedidos.filter(p=>{
+    if(p.status==='Cancelado') return false;
+    const d = new Date(p.data);
+    return d.getMonth()===mesAtual && d.getFullYear()===anoAtual;
   }).reduce((s,p)=>s+(p.total||0),0);
   // Usuários sem permissão de ver valores financeiros
   const ocultarValores = ehExpedicao();
