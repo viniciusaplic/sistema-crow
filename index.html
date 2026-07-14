@@ -9564,8 +9564,11 @@ function mostrarRelatorio(tipo, btnEl){
     ['vendas-periodo'].includes(tipo) ? 'block' : 'none';
   document.getElementById('rel-filtro-estoque-minimo-wrap').style.display =
     tipo === 'estoque-minimo' ? 'flex' : 'none';
-  document.getElementById('rel-filtros').style.display =
-    tipo === 'diagnostico-consumo' ? 'none' : 'flex';
+  // Diagnóstico de Consumo não usa período/vendedor/agrupamento — esconde só esses campos,
+  // mantendo visíveis os botões Gerar/Excel que ficam no mesmo container
+  const escondePeriodoVendedorAgrupar = tipo === 'diagnostico-consumo';
+  document.querySelector('#rel-filtros .filtro-group:nth-child(1)').style.display = escondePeriodoVendedorAgrupar ? 'none' : '';
+  document.querySelector('#rel-filtros .filtro-group:nth-child(2)').style.display = escondePeriodoVendedorAgrupar ? 'none' : '';
 
   // Preenche o select de fornecedores no filtro do relatório de mínimo
   if(tipo === 'estoque-minimo'){
