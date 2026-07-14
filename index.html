@@ -5435,19 +5435,13 @@ function imprimirEtiquetaProduto(codigo, tipo){
   let svgBarcode;
   try {
     const svgTemp = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    // width=2 e height=50 para barras mais largas e altas, melhor leitura
-    JsBarcode(svgTemp, gtinLimpo, { format: "EAN13", displayValue: true, fontSize: 11, width: 2, height: 50, margin: 1, textMargin: 2 });
+    // Código de barras reduzido para sobrar mais espaço para o nome completo do item
+    JsBarcode(svgTemp, gtinLimpo, { format: "EAN13", displayValue: true, fontSize: 9, width: 1.4, height: 32, margin: 1, textMargin: 2 });
     svgBarcode = svgTemp.outerHTML;
   } catch(e){
     toast('Erro ao gerar código de barras: GTIN inválido (' + e.message + ')', 'error');
     return;
   }
-
-  // Nomes muito longos geravam uma segunda página de etiqueta — trunca com reticências
-  const MAX_CHARS_NOME_ETIQUETA = 80;
-  const nomeEtiqueta = item.nome.length > MAX_CHARS_NOME_ETIQUETA
-    ? item.nome.slice(0, MAX_CHARS_NOME_ETIQUETA).trim() + '…'
-    : item.nome;
 
   const win = window.open('', '_blank');
   win.document.write(`
@@ -5466,9 +5460,9 @@ function imprimirEtiquetaProduto(codigo, tipo){
         display: flex; flex-direction: column; justify-content: space-between;
       }
       .nome {
-        font-size: 8px; font-weight: 700; line-height: 1.25;
+        font-size: 7.5px; font-weight: 700; line-height: 1.2;
         text-transform: uppercase; word-break: break-word;
-        display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+        display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical;
         overflow: hidden; flex-shrink: 0;
       }
       .cod {
@@ -5485,7 +5479,7 @@ function imprimirEtiquetaProduto(codigo, tipo){
     </style>
     </head><body>
       <div class="etq">
-        <div class="nome">${nomeEtiqueta}</div>
+        <div class="nome">${item.nome}</div>
         <div class="cod">${codigo}</div>
         <div class="barcode-wrap">${svgBarcode}</div>
       </div>
