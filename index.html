@@ -815,6 +815,15 @@ tbody td{padding:11px 16px;font-size:14px}
           <div id="import-mapeamentos-result" style="margin-top:12px;font-size:13px"></div>
         </div>
         <div class="table-wrap" style="padding:24px">
+          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">📦 Importar Balanço de Estoque (Contagem Física)</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
+            Corrige o estoque de vários insumos de uma vez, a partir de uma contagem física. Use o Excel exportado no relatório <strong>🩺 Diagnóstico de Consumo (OPs)</strong> — preencha a coluna <strong>"Contagem Física (preencher)"</strong> só nos itens que você contou (deixe em branco os que não contou) e importe o mesmo arquivo aqui. Cada ajuste vira um lançamento de <strong>Balanço</strong> no histórico de movimentação, com a diferença exata entre o valor do sistema e a contagem real — rastreável, igual ao balanço feito item por item.
+          </div>
+          <input type="file" id="import-balanco-file" accept=".xlsx,.xls" style="font-size:13px;margin-bottom:12px;display:block">
+          <button class="btn btn-primary btn-sm" onclick="preVisualizarBalancoImportado()">🔍 Pré-visualizar</button>
+          <div id="import-balanco-preview" style="margin-top:14px"></div>
+        </div>
+        <div class="table-wrap" style="padding:24px">
           <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">📊 Importar Estoque do Bling</div>
           <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
             Atualiza a quantidade em estoque dos produtos a partir do relatório de posição de estoque exportado do Bling (CSV — <strong>relatorio_estoque.csv</strong>). Cruza pelo código do produto e sobrescreve o campo "Estoque Atual".
@@ -10211,7 +10220,8 @@ function exportarRelatorioExcelDiagnosticoConsumo(){
     'Consumo Teórico (todas OPs)': l.teorico,
     'Consumo Registrado': l.registrado,
     'Consumo Não Registrado': l.gap,
-    'Nº de OPs': l.nOPs
+    'Nº de OPs': l.nOPs,
+    'Contagem Física (preencher)': ''
   }));
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(dados);
@@ -11197,6 +11207,160 @@ async function diagnosticarEstoquesDecimais(){
       </tr>`).join('')}</tbody>
     </table>`;
   toast(`✓ ${afetados.length} estoque(s) corrigido(s)`,'success');
+}
+
+// ══════════════════════════════════════════════
+// ══ IMPORTAÇÃO DE BALANÇO EM MASSA (contagem física) ══
+// Lê a planilha exportada pelo relatório "Diagnóstico de Consumo (OPs)" já
+// preenchida com a coluna "Contagem Física (preencher)", mostra uma prévia
+// das diferenças, e só grava no Firebase quando confirmado. Cada linha vira
+// um lançamento de Balanço no histórico de movimentação (mesma lógica do
+// balanço individual em confirmarMovimentoEstoque).
+// ══════════════════════════════════════════════
+let balancoImportadoCache = [];
+
+function preVisualizarBalancoImportado(){
+  if(!temPermissaoEditar('estoque')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  const file = document.getElementById('import-balanco-file').files[0];
+  const el = document.getElementById('import-balanco-preview');
+  if(!file){ toast('Selecione um arquivo','error'); return; }
+
+  const reader = new FileReader();
+  reader.onload = async e => {
+    try {
+      if(!INSUMOS_DB.length) await carregarInsumosFirebase();
+
+      const XLSX = window.XLSX;
+      if(!XLSX) throw new Error('Biblioteca XLS não carregada. Recarregue a página e tente novamente.');
+      const wb = XLSX.read(e.target.result, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const linhas = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      if(!linhas.length) throw new Error('Planilha vazia');
+
+      // Localiza as colunas pelo cabeçalho (case-insensitive, tolera pequenas variações)
+      const header = linhas[0].map(h => String(h||'').toLowerCase().trim());
+      const idxCodigo = header.findIndex(h => h.includes('código') || h.includes('codigo'));
+      const idxContagem = header.findIndex(h => h.includes('contagem'));
+      if(idxCodigo === -1 || idxContagem === -1){
+        throw new Error('Não encontrei as colunas "Código" e "Contagem Física" no cabeçalho da planilha. Use o arquivo exportado pelo relatório Diagnóstico de Consumo.');
+      }
+
+      const itens = [];
+      for(let i = 1; i < linhas.length; i++){
+        const row = linhas[i];
+        const codigo = String(row[idxCodigo]||'').trim();
+        const contagemRaw = row[idxContagem];
+        if(!codigo) continue;
+        if(contagemRaw === '' || contagemRaw === undefined || contagemRaw === null) continue; // não contado, ignora
+
+        const contagem = Math.round(Number(String(contagemRaw).replace(',','.')));
+        if(isNaN(contagem)){
+          itens.push({ codigo, nome:'', status:'invalido', motivo:`Valor de contagem inválido: "${contagemRaw}"` });
+          continue;
+        }
+
+        const insumo = INSUMOS_DB.find(x => x.codigo.toUpperCase() === codigo.toUpperCase());
+        if(!insumo){
+          itens.push({ codigo, nome:'', status:'naoencontrado', motivo:'Código não encontrado no cadastro de insumos' });
+          continue;
+        }
+
+        const estoqueAtual = Number(insumo.estoque_atual||0);
+        const diff = contagem - estoqueAtual;
+        itens.push({
+          codigo: insumo.codigo, nome: insumo.nome, key: insumo.key || ('ins_'+insumo.codigo),
+          estoqueAtual, contagem, diff,
+          status: diff === 0 ? 'semmudanca' : 'ok'
+        });
+      }
+
+      balancoImportadoCache = itens;
+
+      const validos = itens.filter(i => i.status === 'ok');
+      const semMudanca = itens.filter(i => i.status === 'semmudanca');
+      const problemas = itens.filter(i => i.status === 'invalido' || i.status === 'naoencontrado');
+
+      if(!itens.length){
+        el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--muted)">Nenhuma linha com contagem preenchida foi encontrada na planilha.</div>';
+        return;
+      }
+
+      el.innerHTML = `
+        <div style="margin-bottom:12px;padding:12px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:13px">
+          <strong>${validos.length}</strong> item(ns) serão ajustados · <strong>${semMudanca.length}</strong> sem diferença (contagem bate com o sistema) · <strong style="color:${problemas.length?'#dc2626':'inherit'}">${problemas.length}</strong> com problema
+        </div>
+        ${problemas.length ? `
+        <div style="margin-bottom:12px;padding:12px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#991b1b">
+          ${problemas.map(p=>`⚠️ <strong>${p.codigo}</strong> — ${p.motivo}`).join('<br>')}
+        </div>` : ''}
+        ${validos.length ? `
+        <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead style="background:var(--primary);color:rgba(255,255,255,.85)"><tr>
+            <th style="padding:8px 10px;text-align:left">Código</th>
+            <th style="padding:8px 10px;text-align:left">Insumo</th>
+            <th style="padding:8px 10px;text-align:center">Estoque no Sistema</th>
+            <th style="padding:8px 10px;text-align:center">Contagem Física</th>
+            <th style="padding:8px 10px;text-align:center">Diferença</th>
+          </tr></thead>
+          <tbody>
+            ${validos.map((it,idx)=>`
+              <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
+                <td style="padding:7px 10px;font-weight:700">${it.codigo}</td>
+                <td style="padding:7px 10px">${it.nome}</td>
+                <td style="padding:7px 10px;text-align:center">${it.estoqueAtual.toLocaleString('pt-BR')}</td>
+                <td style="padding:7px 10px;text-align:center;font-weight:700">${it.contagem.toLocaleString('pt-BR')}</td>
+                <td style="padding:7px 10px;text-align:center;font-weight:700;color:${it.diff>0?'#16a34a':'#dc2626'}">${it.diff>0?'+':''}${it.diff.toLocaleString('pt-BR')}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table></div>
+        <button class="btn btn-primary btn-sm" style="margin-top:14px" onclick="aplicarBalancoImportado()">✅ Aplicar Balanço em ${validos.length} Item(ns)</button>
+        ` : '<div style="padding:12px;color:var(--muted);text-align:center">Nenhum item com diferença a corrigir.</div>'}
+      `;
+    } catch(err){
+      el.innerHTML = `<div style="color:#dc2626;padding:12px">Erro: ${err.message}</div>`;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+async function aplicarBalancoImportado(){
+  if(!temPermissaoEditar('estoque')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  const validos = balancoImportadoCache.filter(i => i.status === 'ok');
+  if(!validos.length){ toast('Nada para aplicar','error'); return; }
+  if(!confirm(`Confirmar o balanço de ${validos.length} insumo(s)?\n\nCada um vai ter o estoque ajustado para o valor contado, com o motivo registrado no histórico. Esta ação não pode ser desfeita automaticamente (mas fica rastreável).`)) return;
+
+  const el = document.getElementById('import-balanco-preview');
+  el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--muted)">⏳ Aplicando balanço...</div>';
+
+  let ok = 0, falhas = [];
+  for(const it of validos){
+    try {
+      await db.ref('insumos/'+it.key+'/estoque_atual').set(it.contagem);
+      const mem = INSUMOS_DB.find(x => x.codigo === it.codigo);
+      if(mem) mem.estoque_atual = it.contagem;
+      await registrarMovimentoEstoque(
+        it.codigo, it.nome,
+        it.diff >= 0 ? 'entrada' : 'saida',
+        Math.abs(it.diff),
+        `Balanço em massa — contagem física (importação): ${it.estoqueAtual} → ${it.contagem}`,
+        null, null
+      );
+      ok++;
+    } catch(err){
+      falhas.push(`${it.codigo}: ${err.message}`);
+    }
+  }
+
+  balancoImportadoCache = [];
+  document.getElementById('import-balanco-file').value = '';
+  el.innerHTML = `
+    <div style="padding:14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534">
+      ✅ ${ok} insumo(s) ajustado(s) com sucesso. O histórico de movimentação já reflete o balanço de cada um.
+    </div>
+    ${falhas.length ? `<div style="margin-top:10px;padding:12px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;color:#991b1b;font-size:13px">⚠️ Falhas: ${falhas.join('; ')}</div>` : ''}
+  `;
+  toast(`✓ Balanço aplicado em ${ok} insumo(s)`, 'success');
 }
 
 function importarCepClientes(){
