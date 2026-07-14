@@ -5406,22 +5406,23 @@ function imprimirEtiquetaProduto(codigo, tipo){
         width: 50mm; height: 30mm;
         padding: 1.5mm 1.5mm 0 1.5mm;
         display: flex; flex-direction: column; justify-content: space-between;
-        overflow: hidden;
       }
       .topo {
         display: flex; justify-content: space-between; align-items: flex-start;
-        gap: 1.5mm; margin-bottom: 0.5mm;
+        gap: 2mm;
       }
       .nome {
-        font-size: 9px; font-weight: 700; line-height: 1.3;
-        flex: 1; word-break: break-word; text-transform: uppercase;
+        font-size: 8.5px; font-weight: 700; line-height: 1.3;
+        text-transform: uppercase; flex: 1; word-break: break-word;
       }
       .cod {
-        font-size: 10px; font-weight: 900; white-space: nowrap;
-        flex-shrink: 0; min-width: 8mm; text-align: right;
+        font-size: 10px; font-weight: 900;
+        white-space: nowrap; flex-shrink: 0;
+        background: #000; color: #fff;
+        padding: 1px 4px; border-radius: 2px;
+        line-height: 1.4;
       }
-      .barcode-wrap { width: 100%; }
-      .barcode-wrap svg { display: block; width: 100% !important; height: auto !important; max-height: 17mm; }
+      .barcode-wrap svg { display: block; width: 100% !important; height: auto !important; }
     </style>
     </head><body>
       <div class="etq">
