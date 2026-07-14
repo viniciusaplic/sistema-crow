@@ -593,6 +593,7 @@ tbody td{padding:11px 16px;font-size:14px}
           <select id="filter-fornecedor-produto" onchange="renderProdutos()" class="search-input" style="width:auto">
             <option value="">Todos os fornecedores</option>
           </select>
+          <button class="btn btn-outline btn-sm admin-only" onclick="abrirModalNovoProdutoVendavel()">+ Novo Produto</button>
           <button class="btn btn-primary admin-only" onclick="abrirModalNovoItem()">+ Novo Insumo</button>
         </div>
       </div>
@@ -8091,6 +8092,53 @@ async function salvarEdicaoInsumo(codigo){
 }
 
 // ── Cadastro de novo insumo (botão "+ Novo Insumo" na aba Produtos) ──
+// Cadastro de novo produto vendável — abre o modal de detalhes com código auto-gerado
+function abrirModalNovoProdutoVendavel(){
+  if(!temPermissaoEditar('produtos')){ toast('Acesso restrito','error'); return; }
+  const codigoAuto = gerarProximoCodigo('vendavel');
+  // Injeta temporariamente em PRODUTOS_DB para que renderModalProduto encontre o objeto
+  PRODUTOS_DB.unshift({ codigo:codigoAuto, nome:'', unidade:'UN', preco_venda:0, preco_minimo:0, quantidade:0, estoque_minimo:0, localizacao:'', gtin:'', _temp:true });
+  produtoDetalheModo = 'editar';
+  itemDetalheTipo = 'vendavel';
+  renderModalProduto(codigoAuto);
+  // Personaliza o botão salvar
+  setTimeout(()=>{
+    const btnSalvar = document.querySelector('#modal-produto-detalhe-conteudo .btn-primary');
+    if(btnSalvar){ btnSalvar.textContent='💾 Criar Produto'; btnSalvar.onclick=()=>salvarNovoProdutoVendavel(codigoAuto); }
+    const btnCancel = document.querySelector('#modal-produto-detalhe-conteudo .btn-outline');
+    if(btnCancel){ btnCancel.onclick=()=>{ const i=PRODUTOS_DB.findIndex(p=>p.codigo===codigoAuto&&p._temp); if(i>-1)PRODUTOS_DB.splice(i,1); fecharModal('modal-produto-detalhe'); }; }
+    document.getElementById('modal-produto-detalhe-titulo').textContent = '➕ Novo Produto Vendável';
+  }, 50);
+  abrirModal('modal-produto-detalhe');
+}
+
+async function salvarNovoProdutoVendavel(codigoTemp){
+  const novoCodigo = document.getElementById('pd-codigo')?.value.trim().toUpperCase();
+  const nome = document.getElementById('pd-nome')?.value.trim();
+  if(!novoCodigo || !nome){ toast('Código e nome são obrigatórios','error'); return; }
+  // Remove o produto temporário
+  const idx = PRODUTOS_DB.findIndex(p=>p.codigo===codigoTemp && p._temp);
+  if(idx>-1) PRODUTOS_DB.splice(idx,1);
+  const conflito = PRODUTOS_DB.find(p=>p.codigo===novoCodigo);
+  if(conflito){ toast(`Código "${novoCodigo}" já existe — ${conflito.nome}`,'error'); return; }
+  const produto = {
+    codigo:novoCodigo, nome,
+    unidade: document.getElementById('pd-unidade')?.value||'UN',
+    preco_venda: Number(document.getElementById('pd-preco-venda')?.value)||0,
+    preco_minimo: Number(document.getElementById('pd-preco-minimo')?.value)||0,
+    quantidade: Number(document.getElementById('pd-estoque')?.value)||0,
+    estoque_minimo: Number(document.getElementById('pd-estoque-min')?.value)||0,
+    localizacao: document.getElementById('pd-localizacao')?.value.trim()||'',
+    gtin: document.getElementById('pd-gtin')?.value.trim()||'',
+    ts_cadastro: Date.now(), pendente_w3: true, novo: true
+  };
+  await db.ref('produtos/'+novoCodigo).set(produto);
+  PRODUTOS_DB.unshift(produto);
+  fecharModal('modal-produto-detalhe');
+  toast(`✓ Produto "${nome}" cadastrado — código ${novoCodigo}`,'success');
+  renderProdutos();
+}
+
 function abrirModalNovoItem(){
   abrirModalInsumo();
 }
