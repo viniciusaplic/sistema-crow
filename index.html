@@ -1587,6 +1587,15 @@ tbody td{padding:11px 16px;font-size:14px}
   </div>
 </div>
 
+<!-- MODAL MESCLAR CLIENTES DUPLICADOS -->
+<div class="modal-overlay" id="modal-mesclar-cliente">
+  <div class="modal" style="max-width:640px">
+    <button class="modal-close" onclick="fecharModal('modal-mesclar-cliente')">×</button>
+    <div class="modal-title">🔗 Mesclar Cliente Duplicado</div>
+    <div id="mesclar-cliente-conteudo"></div>
+  </div>
+</div>
+
 <!-- MODAL SELECIONAR FORNECEDOR DO ITEM -->
 <div class="modal-overlay" id="modal-selecionar-fornecedor">
   <div class="modal" style="max-width:480px">
@@ -4007,6 +4016,7 @@ async function renderClientes(){
           <button class="btn btn-outline btn-sm" onclick="verHistoricoCliente('${c.codigo}')">Histórico</button>
           ${temPermissaoEditar('clientes')?`<button class="btn btn-outline btn-sm" onclick="abrirModalCliente(null,'${c.codigo}')">✏️ Editar</button>`:''}
           ${c.pendente_w3&&temPermissaoEditar('clientes')?`<button class="btn btn-outline btn-sm" style="color:#16a34a;border-color:#16a34a" onclick="marcarClienteW3Ok('${c.codigo}')">✅ Cadastrado no W3</button>`:''}        ${temPermissaoEditar('clientes')?`<button class="btn btn-outline btn-sm" onclick="clonarCliente('${c.codigo}')">📑 Clonar</button>`:''}
+          ${temPermissaoEditar('clientes')?`<button class="btn btn-outline btn-sm" style="color:#7c3aed;border-color:#7c3aed" onclick="abrirModalMesclarCliente('${c.codigo}')">🔗 Mesclar</button>`:''}
           ${temPermissaoEditar('clientes')?`<button class="btn btn-outline btn-sm" style="${c.inativo?'':'color:#dc2626;border-color:#dc2626'}" onclick="toggleInativoCliente('${c.codigo}')">${c.inativo?'✅ Reativar':'🚫 Inativar'}</button>`:''}
         </div>
       </div>`;
@@ -7443,8 +7453,8 @@ async function salvarCliente(){
     }
   } else if(!codigoEdicao){
     // Sem CPF/CNPJ informado: ao menos avisa se já existe cliente com nome muito parecido (não bloqueia, pode ser coincidência real)
-    const nomeNorm = nome.trim().toUpperCase();
-    const duplicadoNome = CLIENTES_DB.find(c => (c.nome||'').trim().toUpperCase() === nomeNorm);
+    const nomeNorm = normalizarNomeCliente(nome);
+    const duplicadoNome = CLIENTES_DB.find(c => normalizarNomeCliente(c.nome) === nomeNorm);
     if(duplicadoNome){
       if(!confirm(`Já existe um cliente cadastrado com o nome "${duplicadoNome.nome}" (código ${duplicadoNome.codigo}). Cadastrar mesmo assim como um cliente diferente?`)) return;
     }
@@ -7493,6 +7503,146 @@ async function marcarClienteW3Ok(codigo){
   if(c) c.pendente_w3 = false;
   toast('✅ Cliente marcado como cadastrado no W3','success');
   renderClientes();
+}
+
+// Normaliza nome de cliente para comparação: remove acentos, espaços duplicados e caixa —
+// evita duplicidade por pequenas diferenças invisíveis (ex: "CONSTRUÇÃO" vs "CONSTRUCAO", espaço duplo)
+function normalizarNomeCliente(nome){
+  return (nome||'')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // remove acentos
+    .trim().replace(/\s+/g, ' ')
+    .toUpperCase();
+}
+
+// ══════════════════════════════════════════════
+// ══ MESCLAGEM DE CLIENTES DUPLICADOS ══
+// Combina dois cadastros do mesmo cliente em um só: preenche os campos vazios do
+// principal com os dados do duplicado, transfere todos os pedidos do duplicado
+// para o principal, e remove o cadastro duplicado.
+// ══════════════════════════════════════════════
+function abrirModalMesclarCliente(codigoPrincipal){
+  const principal = CLIENTES_DB.find(c => c.codigo === codigoPrincipal);
+  if(!principal) return;
+
+  const nomeNorm = normalizarNomeCliente(principal.nome);
+  const candidatos = CLIENTES_DB.filter(c => c.codigo !== codigoPrincipal && normalizarNomeCliente(c.nome) === nomeNorm);
+
+  const conteudo = document.getElementById('mesclar-cliente-conteudo');
+  if(!candidatos.length){
+    conteudo.innerHTML = `
+      <div style="padding:12px;color:var(--muted)">Nenhum outro cliente com o mesmo nome foi encontrado automaticamente.</div>
+      <div style="margin-top:10px">
+        <label style="font-size:13px;font-weight:600">Buscar duplicado manualmente por nome:</label>
+        <input type="text" id="mesclar-busca-manual" placeholder="Digite parte do nome..." style="width:100%;margin-top:6px" oninput="buscarCandidatosMesclagem('${codigoPrincipal}')">
+        <div id="mesclar-busca-resultado" style="margin-top:10px"></div>
+      </div>`;
+  } else {
+    conteudo.innerHTML = renderCandidatosMesclagem(principal, candidatos);
+  }
+  abrirModal('modal-mesclar-cliente');
+}
+
+function buscarCandidatosMesclagem(codigoPrincipal){
+  const principal = CLIENTES_DB.find(c => c.codigo === codigoPrincipal);
+  const termo = (document.getElementById('mesclar-busca-manual').value||'').toLowerCase().trim();
+  const resultDiv = document.getElementById('mesclar-busca-resultado');
+  if(termo.length < 3){ resultDiv.innerHTML = ''; return; }
+  const candidatos = CLIENTES_DB.filter(c => c.codigo !== codigoPrincipal && (c.nome||'').toLowerCase().includes(termo));
+  resultDiv.innerHTML = renderCandidatosMesclagem(principal, candidatos, true);
+}
+
+function renderCandidatosMesclagem(principal, candidatos, semTitulo){
+  if(!candidatos.length) return '<div style="color:var(--muted);padding:8px">Nenhum resultado.</div>';
+  return `
+    ${semTitulo?'':'<div style="font-size:13px;margin-bottom:10px">Encontramos o(s) seguinte(s) cadastro(s) com o mesmo nome. Escolha qual mesclar com <strong>'+principal.nome+'</strong> (código '+principal.codigo+'):</div>'}
+    ${candidatos.map(c => `
+      <div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;font-size:13px">
+        <div style="font-weight:700">${c.nome} <span style="font-weight:400;color:var(--muted)">(código ${c.codigo})</span></div>
+        <div>📄 CNPJ/CPF: ${c.cpf_cnpj||'—'} · 📞 ${c.telefone||'—'}</div>
+        <div>📍 ${c.cidade||''}/${c.uf||''} ${c.endereco?'— '+c.endereco:''}</div>
+        <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="prepararMesclagem('${principal.codigo}','${c.codigo}')">Mesclar este com o principal →</button>
+      </div>
+    `).join('')}
+  `;
+}
+
+function prepararMesclagem(codigoPrincipal, codigoDuplicado){
+  const principal = CLIENTES_DB.find(c => c.codigo === codigoPrincipal);
+  const duplicado = CLIENTES_DB.find(c => c.codigo === codigoDuplicado);
+  if(!principal || !duplicado) return;
+
+  // Monta prévia do resultado: principal mantém seus dados preenchidos, completa com o que faltar do duplicado
+  const campos = ['cpf_cnpj','telefone','email','endereco','cidade','uf','cep','vendedor_id','vendedor_nome'];
+  const resultado = { ...principal };
+  campos.forEach(campo => { if(!resultado[campo] && duplicado[campo]) resultado[campo] = duplicado[campo]; });
+
+  const conteudo = document.getElementById('mesclar-cliente-conteudo');
+  conteudo.innerHTML = `
+    <div style="padding:12px 14px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;font-size:13px;color:#9a3412;margin-bottom:14px">
+      ⚠️ O cadastro <strong>${duplicado.codigo} — ${duplicado.nome}</strong> será removido. Todos os pedidos que estavam ligados a ele passam a ficar ligados ao cadastro principal <strong>${principal.codigo}</strong>. Esta ação não pode ser desfeita automaticamente.
+    </div>
+    <div style="font-size:13px;font-weight:700;margin-bottom:6px">Resultado final (cadastro principal, código ${principal.codigo}):</div>
+    <div style="border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;margin-bottom:14px">
+      <div><strong>${resultado.nome}</strong></div>
+      <div>📄 CNPJ/CPF: ${resultado.cpf_cnpj||'—'}</div>
+      <div>📞 Tel: ${resultado.telefone||'—'} ${resultado.email?' · ✉️ '+resultado.email:''}</div>
+      <div>📍 ${resultado.cidade||''}/${resultado.uf||''} ${resultado.endereco?'— '+resultado.endereco:''}</div>
+      <div>👤 Vendedor: ${resultado.vendedor_nome||'—'}</div>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="confirmarMesclagemCliente('${codigoPrincipal}','${codigoDuplicado}')">✅ Confirmar Mesclagem</button>
+    <button class="btn btn-outline btn-sm" onclick="abrirModalMesclarCliente('${codigoPrincipal}')">← Voltar</button>
+  `;
+}
+
+async function confirmarMesclagemCliente(codigoPrincipal, codigoDuplicado){
+  if(!temPermissaoEditar('clientes')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  const principal = CLIENTES_DB.find(c => c.codigo === codigoPrincipal);
+  const duplicado = CLIENTES_DB.find(c => c.codigo === codigoDuplicado);
+  if(!principal || !duplicado) return;
+  if(!confirm(`Confirmar mesclagem?\n\n"${duplicado.nome}" (${duplicado.codigo}) será removido e seus pedidos passam a ficar ligados a "${principal.nome}" (${principal.codigo}).`)) return;
+
+  const conteudo = document.getElementById('mesclar-cliente-conteudo');
+  conteudo.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted)">⏳ Mesclando...</div>';
+
+  try {
+    // 1) Completa os campos vazios do principal com os dados do duplicado
+    const campos = ['cpf_cnpj','telefone','email','endereco','cidade','uf','cep','vendedor_id','vendedor_nome'];
+    const atualizacoes = {};
+    campos.forEach(campo => { if(!principal[campo] && duplicado[campo]) atualizacoes[campo] = duplicado[campo]; });
+    if(Object.keys(atualizacoes).length){
+      await db.ref('clientes/c'+principal.codigo).update(atualizacoes);
+      Object.assign(principal, atualizacoes);
+    }
+
+    // 2) Transfere todos os pedidos do duplicado para o principal
+    const snapPedidos = await db.ref('pedidos').orderByChild('cliente_codigo').equalTo(codigoDuplicado).once('value');
+    const pedidosDuplicado = snapPedidos.val() || {};
+    const updatesPedidos = {};
+    Object.keys(pedidosDuplicado).forEach(pid => {
+      updatesPedidos['pedidos/'+pid+'/cliente_codigo'] = principal.codigo;
+      updatesPedidos['pedidos/'+pid+'/cliente_nome'] = principal.nome;
+      updatesPedidos['pedidos/'+pid+'/cliente_cpf'] = principal.cpf_cnpj || '';
+      updatesPedidos['pedidos/'+pid+'/cliente_cidade'] = principal.cidade || '';
+      updatesPedidos['pedidos/'+pid+'/cliente_uf'] = principal.uf || '';
+      updatesPedidos['pedidos/'+pid+'/cliente_endereco'] = principal.endereco || '';
+      updatesPedidos['pedidos/'+pid+'/cliente_cep'] = principal.cep || '';
+    });
+    const qtdPedidosTransferidos = Object.keys(pedidosDuplicado).length;
+    if(Object.keys(updatesPedidos).length){
+      await db.ref().update(updatesPedidos);
+    }
+
+    // 3) Remove o cadastro duplicado
+    await db.ref('clientes/c'+duplicado.codigo).remove();
+    const idx = CLIENTES_DB.findIndex(c => c.codigo === duplicado.codigo);
+    if(idx > -1) CLIENTES_DB.splice(idx, 1);
+
+    fecharModal('modal-mesclar-cliente');
+    toast(`✅ Mesclagem concluída — ${qtdPedidosTransferidos} pedido(s) transferido(s)`, 'success');
+    renderClientes();
+  } catch(err){
+    conteudo.innerHTML = `<div style="color:#dc2626;padding:12px">Erro ao mesclar: ${err.message}</div>`;
+  }
 }
 
 async function clonarCliente(codigo){
@@ -8457,7 +8607,7 @@ async function vincularClientesPorVendedor(){
           existente = CLIENTES_DB.find(c => (c.cpf_cnpj||'').replace(/\D/g,'') === cpfLimpo);
         }
         if(!existente){
-          existente = CLIENTES_DB.find(c => (c.nome||'').trim().toUpperCase() === linha.nome.trim().toUpperCase());
+          existente = CLIENTES_DB.find(c => normalizarNomeCliente(c.nome) === normalizarNomeCliente(linha.nome));
         }
 
         if(existente){
@@ -10635,8 +10785,8 @@ async function importarPedidosW3(){
         }
 
         // Busca cliente existente pelo nome; se não encontrar, cria um cadastro básico automaticamente
-        const nomeClienteNorm = (pCsv.cliente||'').trim().toUpperCase();
-        let clienteEncontrado = CLIENTES_DB.find(c => (c.nome||'').trim().toUpperCase() === nomeClienteNorm);
+        const nomeClienteNorm = normalizarNomeCliente(pCsv.cliente);
+        let clienteEncontrado = CLIENTES_DB.find(c => normalizarNomeCliente(c.nome) === nomeClienteNorm);
 
         if(!clienteEncontrado && nomeClienteNorm){
           // Tenta extrair cidade/UF do final do endereço (formato comum: "..., CIDADE/UF - CEP")
