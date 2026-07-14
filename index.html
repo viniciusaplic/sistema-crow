@@ -624,6 +624,7 @@ tbody td{padding:11px 16px;font-size:14px}
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('sugestao-compra',this)">🛒 Sugestão de Compra</button>
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('sugestao-jornal',this)">📰 Sugestão Jornal do Mês</button>
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('estoque-minimo',this)">🔴 Abaixo do Mínimo</button>
+          <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('diagnostico-consumo',this)">🩺 Diagnóstico de Consumo (OPs)</button>
         </div>
 
         <!-- Filtros específicos do relatório Abaixo do Mínimo -->
@@ -4868,7 +4869,24 @@ async function concluirOP(key){
   if(!op) return;
   const qtdProduzida = Number(document.getElementById('op-qtd-concluir').value) || op.qtd_solicitada;
 
-  if(!confirm(`Confirmar conclusão da OP #${op.numero}?\n\nIsso vai:\n- Dar baixa nos insumos da receita\n- Somar ${qtdProduzida} unidade(s) no estoque de ${op.produto_nome}\n\nEsta ação não pode ser desfeita.`)) return;
+  // Verifica antecipadamente se algum insumo vai ficar negativo, pra avisar antes de confirmar
+  const alertasEstoque = [];
+  for(const item of (op.receita||[])){
+    const consumir = item.qtd * qtdProduzida;
+    const insumoKey = 'ins_' + item.codigo;
+    const snap = await db.ref('insumos/'+insumoKey).once('value');
+    const insumo = snap.val();
+    const estoqueAtualInsumo = Number(insumo?.estoque_atual||0);
+    if(estoqueAtualInsumo - consumir < 0){
+      alertasEstoque.push(`${item.codigo} — ${insumo?.nome||'?'} (estoque: ${estoqueAtualInsumo}, necessário: ${consumir}, ficaria em ${estoqueAtualInsumo - consumir})`);
+    }
+  }
+
+  let msgConfirm = `Confirmar conclusão da OP #${op.numero}?\n\nIsso vai:\n- Dar baixa nos insumos da receita\n- Somar ${qtdProduzida} unidade(s) no estoque de ${op.produto_nome}\n\nEsta ação não pode ser desfeita.`;
+  if(alertasEstoque.length){
+    msgConfirm = `⚠️ ATENÇÃO — estoque insuficiente!\n\nOs insumos abaixo vão ficar NEGATIVOS:\n${alertasEstoque.join('\n')}\n\n` + msgConfirm;
+  }
+  if(!confirm(msgConfirm)) return;
 
   try {
     // Baixa nos insumos (proporcional à quantidade produzida)
@@ -4880,6 +4898,7 @@ async function concluirOP(key){
       if(insumo){
         const novoEstoque = Number(insumo.estoque_atual||0) - consumir;
         await db.ref('insumos/'+insumoKey+'/estoque_atual').set(novoEstoque);
+        await registrarMovimentoEstoque(item.codigo, insumo.nome, 'saida', consumir, `Consumo em produção — OP #${op.numero}`, 'op', key);
       }
     }
 
@@ -9545,6 +9564,8 @@ function mostrarRelatorio(tipo, btnEl){
     ['vendas-periodo'].includes(tipo) ? 'block' : 'none';
   document.getElementById('rel-filtro-estoque-minimo-wrap').style.display =
     tipo === 'estoque-minimo' ? 'flex' : 'none';
+  document.getElementById('rel-filtros').style.display =
+    tipo === 'diagnostico-consumo' ? 'none' : 'flex';
 
   // Preenche o select de fornecedores no filtro do relatório de mínimo
   if(tipo === 'estoque-minimo'){
@@ -9589,6 +9610,7 @@ async function gerarRelatorio(){
     case 'sugestao-compra': relSugestaoCompra(el); break;
     case 'estoque-minimo': relEstoqueAbaixoMinimo(el); break;
     case 'sugestao-jornal': await relSugestaoJornal(pedidos, el); break;
+    case 'diagnostico-consumo': await relDiagnosticoConsumoInsumos(el); break;
   }
 }
 
@@ -10082,6 +10104,118 @@ function exportarRelatorioExcelEstoqueMinimo(lista){
   XLSX.writeFile(wb, `estoque_minimo_${new Date().toISOString().split('T')[0]}.xlsx`);
 }
 
+// ── Diagnóstico de Consumo de Insumos em OPs ──
+// Reconstrói, a partir do histórico de OPs concluídas, quanto CADA insumo deveria
+// ter sido consumido, e compara com o que está registrado no histórico de movimentação.
+// A diferença é consumo que aconteceu (baixou o estoque de verdade) mas não deixou rastro —
+// isso acontecia antes da correção de 14/07/2026 em concluirOP().
+async function relDiagnosticoConsumoInsumos(el){
+  el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:40px">⏳ Recalculando consumo de todas as OPs concluídas...</div>';
+
+  if(!INSUMOS_DB.length) await carregarInsumosFirebase();
+  if(!OPS_DB.length) await carregarOPsFirebase();
+
+  const movSnap = await db.ref('movimentos_estoque').once('value');
+  const movimentos = Object.values(movSnap.val() || {});
+
+  // 1) Consumo teórico total por insumo, somando a receita de cada OP concluída
+  const consumoTeorico = {}; // codigo -> qtd
+  const opsQueUsam = {}; // codigo -> Set de números de OP
+  OPS_DB.filter(op => op.status === 'concluida').forEach(op => {
+    const qtdProd = Number(op.qtd_produzida || op.qtd_solicitada || 0);
+    (op.receita || []).forEach(item => {
+      const consumir = Number(item.qtd || 0) * qtdProd;
+      consumoTeorico[item.codigo] = (consumoTeorico[item.codigo] || 0) + consumir;
+      if(!opsQueUsam[item.codigo]) opsQueUsam[item.codigo] = new Set();
+      opsQueUsam[item.codigo].add(op.numero);
+    });
+  });
+
+  // 2) Consumo já registrado no histórico de movimentação (saídas com origem = OP)
+  const consumoRegistrado = {}; // codigo -> qtd
+  movimentos.forEach(m => {
+    if(m.tipo === 'saida' && m.origem_tipo === 'op'){
+      consumoRegistrado[m.codigo] = (consumoRegistrado[m.codigo] || 0) + Number(m.qtd || 0);
+    }
+  });
+
+  // 3) Monta lista de insumos com gap (consumo silencioso) ou estoque negativo
+  const linhas = [];
+  const codigos = new Set([...Object.keys(consumoTeorico), ...INSUMOS_DB.filter(i=>Number(i.estoque_atual||0)<0).map(i=>i.codigo)]);
+  codigos.forEach(codigo => {
+    const insumo = INSUMOS_DB.find(i => i.codigo === codigo);
+    const teorico = consumoTeorico[codigo] || 0;
+    const registrado = consumoRegistrado[codigo] || 0;
+    const gap = teorico - registrado;
+    const estoqueAtual = Number(insumo?.estoque_atual || 0);
+    if(gap <= 0 && estoqueAtual >= 0) return; // sem indício de problema
+    linhas.push({
+      codigo, nome: insumo?.nome || '(insumo não encontrado no cadastro)',
+      estoqueAtual, teorico, registrado, gap,
+      nOPs: opsQueUsam[codigo] ? opsQueUsam[codigo].size : 0
+    });
+  });
+
+  linhas.sort((a,b) => b.gap - a.gap);
+  relatorioCache = { tipo:'diagnostico-consumo', lista: linhas };
+
+  if(!linhas.length){
+    el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--success)">✅ Nenhum insumo com consumo não registrado ou estoque negativo encontrado.</div>';
+    return;
+  }
+
+  el.innerHTML = `
+    <div style="margin-bottom:14px;padding:12px 14px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;font-size:13px;color:#9a3412">
+      ⚠️ Estes insumos têm consumo em OPs concluídas que não bateu com o histórico de movimentação (bug corrigido em 14/07/2026), e/ou estoque atual negativo.
+      O "Consumo não registrado" é a quantidade que baixou o estoque de verdade mas não aparece no histórico — use como indicativo de que uma <strong>contagem física (inventário)</strong> pode ser necessária pra esse item.
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <span style="font-size:13px;color:#dc2626;font-weight:700">🩺 ${linhas.length} insumo(s) com indício de problema</span>
+      <button class="btn btn-outline btn-sm" onclick="exportarRelatorioExcel()">📥 Exportar Excel</button>
+    </div>
+    <div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead style="background:var(--primary);color:rgba(255,255,255,.85)"><tr>
+        <th style="padding:10px 12px;text-align:left">Código</th>
+        <th style="padding:10px 12px;text-align:left">Insumo</th>
+        <th style="padding:10px 12px;text-align:center">Estoque Atual</th>
+        <th style="padding:10px 12px;text-align:center">Consumo Teórico (todas OPs)</th>
+        <th style="padding:10px 12px;text-align:center">Consumo Registrado</th>
+        <th style="padding:10px 12px;text-align:center">Consumo Não Registrado</th>
+        <th style="padding:10px 12px;text-align:center">Nº de OPs</th>
+      </tr></thead>
+      <tbody>
+        ${linhas.map((l,idx)=>`
+          <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
+            <td style="padding:9px 12px;font-weight:700">${l.codigo}</td>
+            <td style="padding:9px 12px">${l.nome}</td>
+            <td style="padding:9px 12px;text-align:center;font-weight:700;color:${l.estoqueAtual<0?'#dc2626':'inherit'}">${l.estoqueAtual.toLocaleString('pt-BR')}</td>
+            <td style="padding:9px 12px;text-align:center">${l.teorico.toLocaleString('pt-BR')}</td>
+            <td style="padding:9px 12px;text-align:center">${l.registrado.toLocaleString('pt-BR')}</td>
+            <td style="padding:9px 12px;text-align:center;font-weight:700;color:${l.gap>0?'#dc2626':'inherit'}">${l.gap.toLocaleString('pt-BR')}</td>
+            <td style="padding:9px 12px;text-align:center">${l.nOPs}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table></div>`;
+}
+
+function exportarRelatorioExcelDiagnosticoConsumo(){
+  const lista = relatorioCache?.lista || [];
+  const dados = lista.map(l=>({
+    'Código': l.codigo,
+    'Insumo': l.nome,
+    'Estoque Atual': l.estoqueAtual,
+    'Consumo Teórico (todas OPs)': l.teorico,
+    'Consumo Registrado': l.registrado,
+    'Consumo Não Registrado': l.gap,
+    'Nº de OPs': l.nOPs
+  }));
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(dados);
+  XLSX.utils.book_append_sheet(wb, ws, 'Diagnóstico Consumo');
+  XLSX.writeFile(wb, `diagnostico_consumo_insumos_${new Date().toISOString().split('T')[0]}.xlsx`);
+}
+
 async function relSugestaoJornal(pedidos, el){
   if(!PRODUTOS_DB.length){
     el.innerHTML='<div style="color:#dc2626;padding:20px">⏳ Produtos ainda não carregados. Aguarde e tente novamente.</div>';
@@ -10217,6 +10351,7 @@ function exportarRelatorioExcel(){
     case 'estoque-posicao': dados = lista.map(g=>({'Código':g.codigo,'Produto':g.nome,'Estoque':g.estoque,'Reservado':g.reservado,'Disponível':g.disponivel,'Mínimo':g.minimo})); break;
     case 'sugestao-compra': dados = lista.map(g=>({'Tipo':g.tipo||'—','Código':g.codigo,'Produto/Insumo':g.nome,'Fornecedor':g.fornecedor,'Disponível':g.disponivel,'Mínimo':g.minimo,'Sugestão de Compra':g.sugestao})); break;
     case 'estoque-minimo': return exportarRelatorioExcelEstoqueMinimo(lista);
+    case 'diagnostico-consumo': return exportarRelatorioExcelDiagnosticoConsumo();
     case 'sugestao-jornal': dados = lista.map((g,i)=>({'#':i+1,'Código':g.codigo,'Produto':g.nome,'Qtd Vendida':g.qtd,'Disponível':g.disponivel,'Em Trânsito':g.emTransito?'Sim':'Não'})); break;
     default: dados = lista;
   }
