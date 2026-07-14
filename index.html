@@ -4057,6 +4057,24 @@ async function carregarInsumosFirebase(){
   } catch(e){ INSUMOS_DB = []; }
 }
 
+// Gera o próximo código disponível — vendáveis: numérico sequencial; insumos: M0XXX
+function gerarProximoCodigo(tipo){
+  if(tipo === 'insumo'){
+    const nums = INSUMOS_DB.map(i=>{
+      const m = (i.codigo||'').match(/^M0*(\d+)$/i);
+      return m ? parseInt(m[1]) : 0;
+    });
+    const proximo = (nums.length ? Math.max(...nums) : 0) + 1;
+    return 'M' + String(proximo).padStart(4,'0');
+  } else {
+    const nums = PRODUTOS_DB.map(p=>{
+      const n = parseInt(p.codigo);
+      return isNaN(n) ? 0 : n;
+    });
+    return String((nums.length ? Math.max(...nums) : 0) + 1);
+  }
+}
+
 async function abrirModalInsumo(key=null){
   if(!temPermissaoEditar('produtos')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   if(!FORNECEDORES_DB.length) await carregarFornecedoresFirebase();
@@ -4080,7 +4098,7 @@ async function abrirModalInsumo(key=null){
   } else {
     document.getElementById('modal-insumo-titulo').textContent = 'Novo Insumo';
     document.getElementById('insumo-key').value = '';
-    document.getElementById('insumo-codigo').value = '';
+    document.getElementById('insumo-codigo').value = gerarProximoCodigo('insumo');
     document.getElementById('insumo-codigo').disabled = false;
     document.getElementById('insumo-nome').value = '';
     document.getElementById('insumo-unidade').value = 'UN';
@@ -4119,7 +4137,8 @@ async function salvarInsumo(){
     fornecedor: document.getElementById('insumo-fornecedor').value,
     preco_custo: Number(document.getElementById('insumo-custo').value)||0,
     localizacao: document.getElementById('insumo-localizacao').value.trim(),
-    ts: Date.now()
+    ts: Date.now(),
+    ...(!keyExistente ? { ts_cadastro: Date.now() } : {})
   };
   // Ao editar, preserva campos não tratados nesta tela (fornecedores múltiplos, GTIN, inativo)
   if(keyExistente){
@@ -7981,7 +8000,12 @@ async function salvarEdicaoProduto(codigoAntigo){
     if(dup){ toast(`O código de barras "${gtin}" já está cadastrado em "${dup.nome}" (${dup.codigo})`,'error'); return; }
   }
 
-  const dadosAtualizados = { nome, unidade, preco_venda, preco_minimo, quantidade, estoque_minimo, gtin, localizacao };
+  const existente = PRODUTOS_DB.find(x=>x.codigo===codigoAntigo);
+  const isNovo = !existente || codigoAntigo === '__NOVO__';
+  const dadosAtualizados = {
+    nome, unidade, preco_venda, preco_minimo, quantidade, estoque_minimo, gtin, localizacao,
+    ...(isNovo ? { ts_cadastro: Date.now() } : {})
+  };
 
   if(novoCodigo !== codigoAntigo){
     // Bloqueia se já existir outro produto com esse código
