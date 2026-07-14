@@ -5357,22 +5357,18 @@ function imprimirEtiquetaEstoque(codigo, tipo){
 function imprimirEtiquetaProduto(codigo, tipo){
   const item = buscarItemParaEtiqueta(codigo, tipo);
   if(!item) return;
-  const gtinLimpo = (item.gtin||'').replace(/\D/g,''); // remove espaços/caracteres não numéricos
+  const gtinLimpo = (item.gtin||'').replace(/\D/g,'');
   if(!gtinLimpo || (gtinLimpo.length!==12 && gtinLimpo.length!==13)){
     toast(`Este item não tem um código de barras válido cadastrado (GTIN/EAN deve ter 12 ou 13 dígitos). Valor atual: "${item.gtin||'vazio'}". Edite o item antes de imprimir.`, 'error');
     return;
   }
 
-  // Gera o código de barras AQUI MESMO, na página principal (onde JsBarcode já está carregado),
-  // e só envia o SVG já pronto para a janela de impressão — evita depender de internet/CDN na nova janela.
+  // Gera o código de barras na página principal (onde JsBarcode está carregado)
   let svgBarcode;
   try {
     const svgTemp = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    JsBarcode(svgTemp, gtinLimpo, { format: "EAN13", displayValue: true, fontSize: 11, width: 1.5, height: 40, margin: 0, textMargin: 2 });
-    // Força o tamanho final do SVG diretamente nos atributos
-    svgTemp.setAttribute('width', '44mm');
-    svgTemp.setAttribute('height', '18mm');
-    svgTemp.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    // width=2 e height=50 para barras mais largas e altas, melhor leitura
+    JsBarcode(svgTemp, gtinLimpo, { format: "EAN13", displayValue: true, fontSize: 11, width: 2, height: 50, margin: 1, textMargin: 2 });
     svgBarcode = svgTemp.outerHTML;
   } catch(e){
     toast('Erro ao gerar código de barras: GTIN inválido (' + e.message + ')', 'error');
@@ -5381,32 +5377,41 @@ function imprimirEtiquetaProduto(codigo, tipo){
 
   const win = window.open('', '_blank');
   win.document.write(`
-    <html><head><title>Etiqueta de Produto — ${codigo}</title>
+    <html><head><title>Etiqueta — ${codigo}</title>
     <style>
       @page { size: 50mm 30mm; margin: 0; }
-      body { margin: 0; font-family: Arial, sans-serif; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: Arial, sans-serif; background: #fff; }
       .etq {
-        width: 48mm; height: 28mm; box-sizing: border-box; padding: 1mm 1mm 0 1mm;
-        display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+        width: 50mm; height: 30mm;
+        padding: 1.5mm 2mm 0 2mm;
+        display: flex; flex-direction: column; justify-content: space-between;
         overflow: hidden;
       }
-      .topo { width: 100%; display: flex; justify-content: space-between; align-items: flex-start; }
-      .nome { font-size: 8px; font-weight: 700; line-height: 1.1; flex: 1; overflow: hidden; }
-      .codigo { font-size: 11px; font-weight: 900; white-space: nowrap; padding-left: 2mm; }
-      .barcode-wrap { width: 100%; flex-shrink: 0; }
-      .barcode-wrap svg { width: 100% !important; height: 18mm !important; }
+      .topo {
+        display: flex; justify-content: space-between; align-items: flex-start;
+        gap: 2mm; margin-bottom: 0.5mm;
+      }
+      .nome {
+        font-size: 7.5px; font-weight: 700; line-height: 1.25;
+        flex: 1; word-break: break-word; text-transform: uppercase;
+      }
+      .cod {
+        font-size: 9px; font-weight: 900; white-space: nowrap;
+        flex-shrink: 0; padding-top: 0.5px;
+      }
+      .barcode-wrap { width: 100%; }
+      .barcode-wrap svg { display: block; width: 100% !important; height: auto !important; max-height: 18mm; }
     </style>
     </head><body>
       <div class="etq">
         <div class="topo">
           <div class="nome">${item.nome}</div>
-          <div class="codigo">${codigo}</div>
+          <div class="cod">${codigo}</div>
         </div>
         <div class="barcode-wrap">${svgBarcode}</div>
       </div>
-      <script>
-        window.onload = function(){ setTimeout(function(){ window.print(); }, 300); };
-      <\/script>
+      <script>window.onload=function(){setTimeout(function(){window.print();},300)};<\/script>
     </body></html>
   `);
   win.document.close();
