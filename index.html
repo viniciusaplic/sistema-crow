@@ -2503,7 +2503,10 @@ async function renderPainel(){
 
   const isMobile = window.innerWidth <= 768;
   if(isMobile){
-    document.getElementById('dash-pedidos-wrap').innerHTML = ativos.map(p=>`
+    document.getElementById('dash-pedidos-wrap').innerHTML = ativos.map(p=>{
+      const bloqueado = !podeEditar(p);
+      const lockIcon = bloqueado ? '🔒' : '✏️';
+      return `
       <div class="pedido-card">
         <div class="pedido-card-header">
           <div>
@@ -2518,8 +2521,12 @@ async function renderPainel(){
         <div class="pedido-card-info">👤 <span>${p.cliente_nome}</span></div>
         <div class="pedido-card-actions">
           <button class="btn btn-outline btn-sm" onclick="verPedido('${p.id}')">Ver detalhes</button>
+          <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600" onclick="gerarImagemPedido('${p.id}')">📲 WhatsApp</button>
+          ${!bloqueado&&p.status!=='Cancelado'?`<button class="btn btn-warning btn-sm" onclick="editarPedido('${p.id}')">${lockIcon} Editar</button>`:`<span style="font-size:13px;color:var(--muted)">${lockIcon} Bloqueado</span>`}
+          ${usuarioLogado.admin&&p.status!=='Cancelado'?`<button class="btn btn-sm btn-danger" onclick="cancelarPedido('${p.id}')">Cancelar</button>`:''}
         </div>
-      </div>`).join('') || '<div style="text-align:center;color:var(--muted);padding:24px">Nenhum pedido ativo no momento</div>';
+      </div>`;
+    }).join('') || '<div style="text-align:center;color:var(--muted);padding:24px">Nenhum pedido ativo no momento</div>';
   } else {
     document.getElementById('dash-pedidos-wrap').innerHTML = `
       <div class="table-wrap">
@@ -7521,25 +7528,35 @@ function normalizarNomeCliente(nome){
 // para o principal, e remove o cadastro duplicado.
 // ══════════════════════════════════════════════
 function abrirModalMesclarCliente(codigoPrincipal){
-  const principal = CLIENTES_DB.find(c => c.codigo === codigoPrincipal);
-  if(!principal) return;
+  try {
+    const principal = CLIENTES_DB.find(c => c.codigo === codigoPrincipal);
+    if(!principal){ toast('Cliente não encontrado','error'); return; }
 
-  const nomeNorm = normalizarNomeCliente(principal.nome);
-  const candidatos = CLIENTES_DB.filter(c => c.codigo !== codigoPrincipal && normalizarNomeCliente(c.nome) === nomeNorm);
+    const nomeNorm = normalizarNomeCliente(principal.nome);
+    const cnpjNorm = (principal.cpf_cnpj||'').replace(/\D/g,'');
+    const candidatos = CLIENTES_DB.filter(c => {
+      if(c.codigo === codigoPrincipal) return false;
+      if(normalizarNomeCliente(c.nome) === nomeNorm) return true;
+      if(cnpjNorm && (c.cpf_cnpj||'').replace(/\D/g,'') === cnpjNorm) return true;
+      return false;
+    });
 
-  const conteudo = document.getElementById('mesclar-cliente-conteudo');
-  if(!candidatos.length){
-    conteudo.innerHTML = `
-      <div style="padding:12px;color:var(--muted)">Nenhum outro cliente com o mesmo nome foi encontrado automaticamente.</div>
-      <div style="margin-top:10px">
-        <label style="font-size:13px;font-weight:600">Buscar duplicado manualmente por nome:</label>
-        <input type="text" id="mesclar-busca-manual" placeholder="Digite parte do nome..." style="width:100%;margin-top:6px" oninput="buscarCandidatosMesclagem('${codigoPrincipal}')">
-        <div id="mesclar-busca-resultado" style="margin-top:10px"></div>
-      </div>`;
-  } else {
-    conteudo.innerHTML = renderCandidatosMesclagem(principal, candidatos);
+    const conteudo = document.getElementById('mesclar-cliente-conteudo');
+    if(!candidatos.length){
+      conteudo.innerHTML = `
+        <div style="padding:12px;color:var(--muted)">Nenhum outro cliente com o mesmo nome ou CNPJ/CPF foi encontrado automaticamente.</div>
+        <div style="margin-top:10px">
+          <label style="font-size:13px;font-weight:600">Buscar duplicado manualmente por nome ou CNPJ:</label>
+          <input type="text" id="mesclar-busca-manual" placeholder="Digite parte do nome ou CNPJ..." style="width:100%;margin-top:6px" oninput="buscarCandidatosMesclagem('${codigoPrincipal}')">
+          <div id="mesclar-busca-resultado" style="margin-top:10px"></div>
+        </div>`;
+    } else {
+      conteudo.innerHTML = renderCandidatosMesclagem(principal, candidatos);
+    }
+    abrirModal('modal-mesclar-cliente');
+  } catch(err){
+    toast('Erro ao abrir mesclagem: ' + err.message, 'error');
   }
-  abrirModal('modal-mesclar-cliente');
 }
 
 function buscarCandidatosMesclagem(codigoPrincipal){
@@ -7547,7 +7564,8 @@ function buscarCandidatosMesclagem(codigoPrincipal){
   const termo = (document.getElementById('mesclar-busca-manual').value||'').toLowerCase().trim();
   const resultDiv = document.getElementById('mesclar-busca-resultado');
   if(termo.length < 3){ resultDiv.innerHTML = ''; return; }
-  const candidatos = CLIENTES_DB.filter(c => c.codigo !== codigoPrincipal && (c.nome||'').toLowerCase().includes(termo));
+  const candidatos = CLIENTES_DB.filter(c => c.codigo !== codigoPrincipal &&
+    ((c.nome||'').toLowerCase().includes(termo) || (c.cpf_cnpj||'').replace(/\D/g,'').includes(termo.replace(/\D/g,'')) && termo.replace(/\D/g,'').length>=3));
   resultDiv.innerHTML = renderCandidatosMesclagem(principal, candidatos, true);
 }
 
