@@ -6507,6 +6507,8 @@ function toggleConferenciaItemCompra(idx, marcado){
 async function abrirDetalheCompra(id){
   const c = COMPRAS_CACHE.find(x=>x.id===id) || (await db.ref('pedidos_compra/'+id).once('value')).val();
   if(!c) return;
+  if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
+  if(!INSUMOS_DB.length) await carregarInsumosFirebase();
   const statusInfo = statusInfoCompra(c.status);
 
   // Fluxo sequencial de avanço de status
@@ -6581,21 +6583,30 @@ async function abrirDetalheCompra(id){
         <th style="padding:6px;text-align:left">Código</th><th style="padding:6px;text-align:left">Descrição</th>
         <th style="padding:6px">Qtd</th><th style="padding:6px">Preço Unit.</th><th style="padding:6px">Custo Final Unit.</th>
       </tr></thead>
-      <tbody>${(c.itens||[]).map((i,idx)=>`
+      <tbody>${(c.itens||[]).map((i,idx)=>{
+        const cadastro = i.tipo === 'insumo' ? INSUMOS_DB.find(x=>x.codigo===i.codigo) : PRODUTOS_DB.find(x=>x.codigo===i.codigo);
+        const estAtual = cadastro ? Number(cadastro.estoque_atual ?? cadastro.quantidade ?? 0) : null;
+        const estMinimo = cadastro ? Number(cadastro.estoque_minimo || 0) : null;
+        const tituloEstoqueCompra = cadastro
+          ? `Estoque atual: ${estAtual.toLocaleString('pt-BR')} | Estoque mínimo: ${estMinimo.toLocaleString('pt-BR')}`
+          : 'Item sem cadastro — sem informação de estoque';
+        return `
         <tr id="compra-item-row-${idx}" style="border-bottom:1px solid var(--border);${i.sem_cadastro?'background:#fef2f2':''}">
           <td style="padding:6px;text-align:center">
             <input type="checkbox" onchange="toggleConferenciaItemCompra(${idx}, this.checked)" style="width:16px;height:16px;cursor:pointer">
           </td>
           <td style="padding:6px;color:var(--muted)">${i.codigo_fornecedor||'—'}</td>
-          <td style="padding:6px"><strong>${i.codigo||'—'}</strong>${i.sem_cadastro?' <span class="badge" style="background:#fef2f2;color:#dc2626;font-size:10px">SEM CADASTRO</span>':''}</td>
-          <td style="padding:6px">${i.nome}</td>
+          <td style="padding:6px" title="${tituloEstoqueCompra}"><strong style="cursor:help;border-bottom:1px dotted var(--muted)">${i.codigo||'—'}</strong>${i.sem_cadastro?' <span class="badge" style="background:#fef2f2;color:#dc2626;font-size:10px">SEM CADASTRO</span>':''}</td>
+          <td style="padding:6px;cursor:help" title="${tituloEstoqueCompra}">${i.nome}${cadastro?` <span style="font-size:10px;color:${estAtual<=estMinimo?'#dc2626':'var(--muted)'}">(estoque: ${estAtual.toLocaleString('pt-BR')})</span>`:''}</td>
           <td style="padding:6px;text-align:center">${i.qtd}</td>
           <td style="padding:6px;text-align:center">${fmtMoeda(i.preco_unit)}</td>
           <td style="padding:6px;text-align:center;font-weight:700;color:var(--success)">${fmtMoeda(i.custoFinalUnitario)}</td>
           <td style="padding:6px;text-align:center">${i.sem_cadastro?`<button class="btn btn-outline btn-sm" style="padding:3px 8px;font-size:11px" onclick="vincularItemCompraAoCadastro('${c.id}',${idx})">🔧 Vincular</button>`:''}</td>
-        </tr>`).join('')}
+        </tr>`;
+      }).join('')}
       </tbody>
     </table>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px">💡 Passe o mouse sobre o código ou a descrição do item pra ver o estoque atual e mínimo.</div>
     <div id="compra-conferencia-progresso" style="margin-top:10px;font-size:12px;color:var(--muted)"></div>
     <div style="margin-top:12px;font-size:13px;color:var(--muted);text-align:right">
       Mercadoria: ${fmtMoeda(totalBruto)} · IPI: ${fmtMoeda(totalIpi)} · ST: ${fmtMoeda(totalSt)} · Frete: ${fmtMoeda(c.frete)}
