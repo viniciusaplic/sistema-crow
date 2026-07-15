@@ -11328,6 +11328,7 @@ function importarEstoque(){
   reader.onload=async e=>{
     try {
       if(!INSUMOS_DB.length) await carregarInsumosFirebase();
+      if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
 
       const linhas=e.target.result.split('\n').filter(l=>l.trim());
       const rows=linhas.slice(1).map(l=>{
@@ -11336,16 +11337,21 @@ function importarEstoque(){
       }).filter(r=>r.codigo && !r.codigo.toUpperCase().startsWith('TOTAL'));
 
       document.getElementById('import-estoque-result').innerHTML = `<span style="color:var(--accent)">⏳ Atualizando estoque no Firebase...</span>`;
-      let atualizados=0, atualizadosInsumo=0;
+      let atualizados=0, atualizadosInsumo=0, semMudanca=0;
       const updates = {};
+      const movimentos = []; // { codigo, nome, de, para } — só os que realmente mudam viram lançamento de Balanço
 
       // Produtos vendáveis (chave = próprio código)
       PRODUTOS_DB.forEach(p=>{
         const est=rows.find(r=>r.codigo.toUpperCase()===p.codigo.toUpperCase());
         if(est){
-          p.quantidade=est.quantidade;
-          updates['produtos/'+p.codigo+'/quantidade'] = est.quantidade;
-          atualizados++;
+          const anterior = Number(p.quantidade||0);
+          if(anterior !== est.quantidade){
+            movimentos.push({ codigo:p.codigo, nome:p.nome, de:anterior, para:est.quantidade });
+            p.quantidade=est.quantidade;
+            updates['produtos/'+p.codigo+'/quantidade'] = est.quantidade;
+            atualizados++;
+          } else semMudanca++;
         }
       });
 
@@ -11353,17 +11359,35 @@ function importarEstoque(){
       INSUMOS_DB.forEach(i=>{
         const est=rows.find(r=>r.codigo.toUpperCase()===i.codigo.toUpperCase());
         if(est){
-          i.estoque_atual=est.quantidade;
-          updates['insumos/'+i.key+'/estoque_atual'] = est.quantidade;
-          atualizadosInsumo++;
+          const anterior = Number(i.estoque_atual||0);
+          if(anterior !== est.quantidade){
+            movimentos.push({ codigo:i.codigo, nome:i.nome, de:anterior, para:est.quantidade });
+            i.estoque_atual=est.quantidade;
+            updates['insumos/'+i.key+'/estoque_atual'] = est.quantidade;
+            atualizadosInsumo++;
+          } else semMudanca++;
         }
       });
 
       await db.ref().update(updates);
 
-      const naoEncontrados = rows.length - atualizados - atualizadosInsumo;
-      document.getElementById('import-estoque-result').innerHTML=`<span style="color:var(--success)">✓ ${atualizados} produtos + ${atualizadosInsumo} insumos atualizados no Firebase</span>${naoEncontrados>0?`<br><span style="color:#d97706">⚠ ${naoEncontrados} código(s) da planilha não encontrados no cadastro</span>`:''}`;
-      toast(`✓ Estoque atualizado`,'success');
+      // Registra um Balanço no histórico para cada item que realmente mudou — rastreável,
+      // igual ao balanço feito item por item (evita repetir o problema de estoque "sumindo" sem explicação)
+      document.getElementById('import-estoque-result').innerHTML = `<span style="color:var(--accent)">⏳ Registrando ${movimentos.length} lançamento(s) de balanço no histórico...</span>`;
+      for(const m of movimentos){
+        const diff = m.para - m.de;
+        await registrarMovimentoEstoque(
+          m.codigo, m.nome,
+          diff >= 0 ? 'entrada' : 'saida',
+          Math.abs(diff),
+          `Balanço — importação de estoque do Bling: ${m.de} → ${m.para}`,
+          null, null
+        );
+      }
+
+      const naoEncontrados = rows.length - atualizados - atualizadosInsumo - semMudanca;
+      document.getElementById('import-estoque-result').innerHTML=`<span style="color:var(--success)">✓ ${atualizados} produtos + ${atualizadosInsumo} insumos atualizados (com balanço registrado no histórico)</span><br><span style="color:var(--muted)">${semMudanca} já estavam corretos, sem mudança</span>${naoEncontrados>0?`<br><span style="color:#d97706">⚠ ${naoEncontrados} código(s) da planilha não encontrados no cadastro</span>`:''}`;
+      toast(`✓ Estoque atualizado — ${movimentos.length} balanço(s) registrado(s)`,'success');
     } catch(err){ document.getElementById('import-estoque-result').innerHTML=`<span style="color:var(--accent)">Erro: ${err.message}</span>`; }
   };
   reader.readAsText(file,'latin1');
