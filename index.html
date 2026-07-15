@@ -3552,14 +3552,19 @@ async function buscarProdutoPedido(){
     const reservado = Number(p.reservado||0);
     const dispFisico = estqFisico - reservado;
 
-    // Capacidade de produção baseada no insumo gargalo da receita
+    // Capacidade de produção baseada no insumo gargalo da receita — embalagem/etiqueta não conta
+    // (ter saco e etiqueta sobrando não significa que dá pra "produzir" mais do item de verdade)
     let capacidadeProducao = 0;
     let gargalhoTooltip = '';
     const receita = RECEITAS_DB[p.codigo];
-    if(receita?.itens?.length){
+    const itensReceitaSemEmbalagem = (receita?.itens||[]).filter(ri => {
+      const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
+      return insumo?.categoria !== 'Embalagens';
+    });
+    if(itensReceitaSemEmbalagem.length){
       let minCap = Infinity;
       let gargalho = null;
-      for(const ri of receita.itens){
+      for(const ri of itensReceitaSemEmbalagem){
         const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
         const estoqueInsumo = Number(insumo?.estoque_atual||0);
         const cap = ri.qtd > 0 ? Math.floor(estoqueInsumo / ri.qtd) : Infinity;
@@ -7185,13 +7190,17 @@ async function abrirGerarOPSeparacao(idx){
   });
   const totalNecessarioGeral = faltaEstePedido + totalPendenteOutros;
 
-  // Calcular capacidade máxima de produção baseada no insumo mais escasso da receita
+  // Calcular capacidade máxima de produção baseada no insumo mais escasso da receita —
+  // embalagem/etiqueta não conta (ter saco/etiqueta sobrando não significa que dá pra produzir mais)
   const receita = RECEITAS_DB[item.codigo];
   let capacidadeMaxima = Infinity;
   let insumoLimitante = null;
+  let temInsumoReal = false;
   if(receita && receita.itens){
     receita.itens.forEach(ri => {
       const insumo = INSUMOS_DB.find(x=>x.codigo===ri.codigo);
+      if(insumo?.categoria === 'Embalagens') return; // não é gargalo de produção
+      temInsumoReal = true;
       const estoqueInsumo = insumo ? Number(insumo.estoque_atual||0) : 0;
       const maxPorEsteInsumo = ri.qtd > 0 ? Math.floor(estoqueInsumo / ri.qtd) : Infinity;
       if(maxPorEsteInsumo < capacidadeMaxima){
@@ -7201,8 +7210,8 @@ async function abrirGerarOPSeparacao(idx){
     });
   }
   const temReceita = !!(receita && receita.itens && receita.itens.length);
-  const capacidadeFinal = temReceita ? Math.max(0, capacidadeMaxima) : null;
-  const sugestao = temReceita ? Math.min(totalNecessarioGeral, capacidadeFinal) : totalNecessarioGeral;
+  const capacidadeFinal = (temReceita && temInsumoReal) ? Math.max(0, capacidadeMaxima) : null;
+  const sugestao = capacidadeFinal !== null ? Math.min(totalNecessarioGeral, capacidadeFinal) : totalNecessarioGeral;
 
   document.getElementById('op-separacao-conteudo').innerHTML = `
     <div class="modal-title">🏭 Gerar OP — ${item.nome}</div>
@@ -7214,19 +7223,20 @@ async function abrirGerarOPSeparacao(idx){
       <div class="dash-card"><div class="dash-card-label">Total necessário</div><div class="dash-card-value" style="color:#7c3aed">${totalNecessarioGeral}</div></div>
     </div>
 
-    ${temReceita ? `
+    ${capacidadeFinal !== null ? `
       <div style="background:var(--bg);border-radius:10px;padding:14px;margin-bottom:16px">
         <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:6px">📋 Capacidade máxima de produção</div>
         <div style="font-size:22px;font-weight:700;font-family:'Syne',sans-serif;color:${capacidadeFinal < totalNecessarioGeral ? '#dc2626' : 'var(--success)'}">${capacidadeFinal} unidades</div>
         ${insumoLimitante ? `<div style="font-size:12px;color:var(--muted);margin-top:4px">Limitado pelo insumo: <strong>${insumoLimitante.codigo} — ${insumoLimitante.nome}</strong> (estoque: ${insumoLimitante.estoque_atual})</div>` : ''}
         ${capacidadeFinal < totalNecessarioGeral ? `<div style="color:#dc2626;font-size:12px;margin-top:6px">⚠️ Não há insumo suficiente para atender toda a demanda. Considere comprar mais insumo.</div>` : ''}
       </div>
-    ` : `<div style="background:#fef3c7;color:#92400e;padding:10px;border-radius:8px;font-size:13px;margin-bottom:16px">⚠️ Este produto não tem receita/composição cadastrada — a OP será criada sem controle de insumos.</div>`}
+    ` : temReceita ? `<div style="background:#fef3c7;color:#92400e;padding:10px;border-radius:8px;font-size:13px;margin-bottom:16px">⚠️ A receita deste item só tem embalagem/etiqueta cadastrada — sem insumo de produção real pra calcular a capacidade. Confirme manualmente quanto dá pra produzir.</div>`
+    : `<div style="background:#fef3c7;color:#92400e;padding:10px;border-radius:8px;font-size:13px;margin-bottom:16px">⚠️ Este produto não tem receita/composição cadastrada — a OP será criada sem controle de insumos.</div>`}
 
     <div class="form-row single">
       <div class="form-group">
         <label>Quantidade a produzir</label>
-        <input type="number" id="op-sep-qtd" value="${sugestao}" min="1" ${temReceita?`max="${capacidadeFinal}"`:''}>
+        <input type="number" id="op-sep-qtd" value="${sugestao}" min="1" ${capacidadeFinal !== null?`max="${capacidadeFinal}"`:''}>
       </div>
     </div>
     <div class="form-row single">
@@ -7998,15 +8008,20 @@ async function renderProdutos(){
     const disponivel=estq-reservado;
     const estMin=Number(p.estoque_minimo||0);
 
-    // Capacidade máxima de produção baseada no insumo gargalo da receita
+    // Capacidade máxima de produção baseada no insumo gargalo da receita — embalagem/etiqueta
+    // não conta como gargalo (ter saco/etiqueta sobrando não significa que dá pra produzir mais)
     let capacidadeProducao = null;
     let gargalhoInfo = '';
     if(p._tipo==='vendavel'){
       const receita = RECEITAS_DB[p.codigo];
+      const itensReceitaSemEmbalagem = (receita?.itens||[]).filter(ri => {
+        const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
+        return insumo?.categoria !== 'Embalagens';
+      });
       if(receita?.itens?.length){
         let minCap = Infinity;
         let gargalho = null;
-        for(const ri of receita.itens){
+        for(const ri of itensReceitaSemEmbalagem){
           const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
           const estoqueInsumo = Number(insumo?.estoque_atual||0);
           const cap = ri.qtd > 0 ? Math.floor(estoqueInsumo / ri.qtd) : Infinity;
@@ -8014,6 +8029,7 @@ async function renderProdutos(){
         }
         capacidadeProducao = minCap === Infinity ? 0 : minCap;
         if(gargalho) gargalhoInfo = `Gargalo: ${gargalho.codigo} — ${gargalho.nome} (${gargalho.estoque} un em estoque, usa ${gargalho.qtdReceita}/un)`;
+        else if(!itensReceitaSemEmbalagem.length) gargalhoInfo = 'Receita contém só embalagem/etiqueta — sem insumo de produção real cadastrado';
       }
     }
 
