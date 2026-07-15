@@ -610,6 +610,7 @@ tbody td{padding:11px 16px;font-size:14px}
           <button class="btn btn-outline btn-sm admin-only" onclick="abrirModalNovoProdutoVendavel()">+ Novo Produto</button>
           <button class="btn btn-primary admin-only" onclick="abrirModalNovoItem()">+ Novo Insumo</button>
           <button class="btn btn-outline btn-sm admin-only" style="color:#d97706;border-color:#d97706" onclick="verificarReceitasSemProduto()">🔍 Receitas sem Cadastro</button>
+          <button class="btn btn-outline btn-sm admin-only" style="color:#dc2626;border-color:#dc2626" onclick="verificarProdutosSemNome()">🔍 Produtos Sem Nome (invisíveis)</button>
         </div>
       </div>
       <div id="receitas-sem-produto-resultado"></div>
@@ -853,6 +854,10 @@ tbody td{padding:11px 16px;font-size:14px}
             </div>
           </div>
           <input type="file" id="import-cat-file" accept=".csv" style="font-size:13px;margin:10px 0 12px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+            <input type="checkbox" id="import-cat-atualizar-status" style="width:auto">
+            <label for="import-cat-atualizar-status" style="margin:0;font-size:13px">Atualizar também o status Ativo/Inativo dos itens que <strong>já existem</strong> (cuidado: pode inativar itens em uso, se a planilha do Bling não refletir o que você quer no sistema)</label>
+          </div>
           <button class="btn btn-primary btn-sm" onclick="preVisualizarImportCategoria()">🔍 Pré-visualizar</button>
           <div id="import-cat-preview" style="margin-top:14px"></div>
         </div>
@@ -2869,6 +2874,8 @@ async function renderPedidos(){
 
 function podeEditar(p){
   if(p.status==='Cancelado') return false;
+  // Orçamento ainda não virou pedido — sem bloqueio de tempo, pode ser editado livremente até ser confirmado
+  if(p.status==='Orçamento') return true;
   // Admin e Expedição podem editar a qualquer momento — necessário para corrigir pedidos travados na
   // separação/bipagem quando falta item em estoque e não há como produzir a tempo
   if(usuarioLogado?.admin || ehExpedicao()) return true;
@@ -7847,6 +7854,56 @@ function tituloEstoque(p, estq, reservado, disponivel, estMin, critico, capacida
   return t;
 }
 
+// Verifica produtos que existem no Firebase mas ficam INVISÍVEIS no sistema inteiro (busca, listagens,
+// tudo) porque o campo "nome" está vazio — carregarProdutosFirebase() filtra qualquer item sem nome.
+async function verificarProdutosSemNome(){
+  const el = document.getElementById('receitas-sem-produto-resultado');
+  el.innerHTML = '<div style="padding:12px;color:var(--muted)">⏳ Verificando...</div>';
+  const snap = await db.ref('produtos').once('value');
+  const dados = snap.val() || {};
+  const semNome = Object.entries(dados).filter(([chave, p]) => !p?.nome || !String(p.nome).trim());
+
+  if(!semNome.length){
+    el.innerHTML = '<div style="padding:12px 14px;margin:10px 0;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534;font-size:13px">✅ Nenhum produto com nome vazio encontrado.</div>';
+    return;
+  }
+
+  el.innerHTML = `
+    <div style="padding:12px 14px;margin:10px 0;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#991b1b">
+      ⚠️ <strong>${semNome.length} produto(s)</strong> existem no banco de dados mas estão com o nome vazio — por isso ficam <strong>invisíveis</strong> na busca e em qualquer lista do sistema. Preencha o nome de cada um pra eles voltarem a aparecer.
+    </div>
+    <div style="overflow-x:auto;margin-bottom:10px">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead style="background:var(--primary);color:rgba(255,255,255,.85)"><tr>
+        <th style="padding:8px 10px;text-align:left">Código</th>
+        <th style="padding:8px 10px;text-align:center">Estoque</th>
+        <th style="padding:8px 10px;text-align:center">Situação</th>
+        <th style="padding:8px 10px;text-align:center">Ação</th>
+      </tr></thead>
+      <tbody>
+        ${semNome.map(([chave,p],idx)=>`
+          <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
+            <td style="padding:7px 10px;font-weight:700">${chave}</td>
+            <td style="padding:7px 10px;text-align:center">${p?.quantidade ?? '—'}</td>
+            <td style="padding:7px 10px;text-align:center">${p?.inativo ? '<span class="badge badge-gray">Inativo</span>' : '<span class="badge" style="background:#dcfce7;color:#16a34a">Ativo</span>'}</td>
+            <td style="padding:7px 10px;text-align:center"><button class="btn btn-primary btn-sm" onclick="corrigirNomeProdutoRapido('${chave}')">✏️ Preencher nome</button></td>
+          </tr>`).join('')}
+      </tbody>
+    </table></div>
+  `;
+}
+
+async function corrigirNomeProdutoRapido(codigo){
+  const nome = prompt(`Qual o nome do produto ${codigo}?`);
+  if(!nome || !nome.trim()) return;
+  await db.ref('produtos/'+codigo+'/nome').set(nome.trim());
+  toast(`✓ Nome do produto ${codigo} definido`,'success');
+  PRODUTOS_DB = []; // força recarregar do zero, agora esse item entra no filtro
+  await carregarProdutosFirebase();
+  verificarProdutosSemNome();
+  renderProdutos();
+}
+
 async function verificarReceitasSemProduto(){
   if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
   const el = document.getElementById('receitas-sem-produto-resultado');
@@ -7933,6 +7990,7 @@ async function renderProdutos(){
   });
 
   const total=filtrado.length, inicio=(paginaProdutos-1)*POR_PAGINA;
+  produtosFiltradosAtual = filtrado; // usado pela reativação em massa
   const pagina=filtrado.slice(inicio,inicio+POR_PAGINA);
   const linhas = pagina.map(p=>{
     const estq=Number(p.quantidade||0);
@@ -7999,6 +8057,11 @@ async function renderProdutos(){
   // IMPORTANTE: produtos-table é uma <div>, não uma <table> — por isso o HTML
   // precisa ser uma <table> completa aqui dentro, senão o navegador descarta os <tr> (regra do parser HTML).
   document.getElementById('produtos-table').innerHTML = `
+    ${filtroStatus==='inativos' && total>0 ? `
+    <div style="padding:10px 12px;margin-bottom:10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;font-size:13px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <span>${total} item(ns) inativo(s) com esse filtro</span>
+      <button class="btn btn-primary btn-sm" onclick="reativarTodosFiltrados()">✅ Reativar todos os ${total} filtrados</button>
+    </div>` : ''}
     <table style="width:100%;border-collapse:collapse">
       <thead><tr style="text-align:left;border-bottom:1px solid var(--border)">
         <th style="padding:8px"></th><th style="padding:8px">Código</th><th style="padding:8px">Nome</th>
@@ -8007,6 +8070,38 @@ async function renderProdutos(){
       <tbody>${linhas}</tbody>
     </table>`;
   renderPaginacao('produtos-pag',total,paginaProdutos,n=>{ paginaProdutos=n; renderProdutos(); });
+}
+
+let produtosFiltradosAtual = [];
+
+async function reativarTodosFiltrados(){
+  if(!temPermissaoEditar('produtos')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  const lista = produtosFiltradosAtual;
+  if(!lista.length) return;
+  const ok = await confirmCustom(`Reativar ${lista.length} item(ns)?\n\nTodos os itens filtrados na tela vão voltar a ficar ativos.`, `Reativar ${lista.length}`);
+  if(!ok) return;
+
+  let count = 0;
+  for(const p of lista){
+    if(p._tipo === 'insumo'){
+      const insumo = INSUMOS_DB.find(x=>x.codigo===p.codigo);
+      if(insumo){
+        const key = insumo.key || ('ins_'+insumo.codigo);
+        await db.ref('insumos/'+key+'/inativo').set(false);
+        insumo.inativo = false;
+        count++;
+      }
+    } else {
+      const prod = PRODUTOS_DB.find(x=>x.codigo===p.codigo);
+      if(prod){
+        await db.ref('produtos/'+prod.codigo+'/inativo').set(false);
+        prod.inativo = false;
+        count++;
+      }
+    }
+  }
+  toast(`✓ ${count} item(ns) reativado(s)`,'success');
+  renderProdutos();
 }
 
 // ══════════════════════════════════════════════
@@ -11656,6 +11751,7 @@ function preVisualizarImportCategoria(){
   if(!file){ toast('Selecione um arquivo','error'); return; }
   const tipo = document.getElementById('import-cat-tipo').value;
   const categoria = document.getElementById('import-cat-categoria').value;
+  const atualizarStatus = document.getElementById('import-cat-atualizar-status').checked;
 
   const reader = new FileReader();
   reader.onload = async e => {
@@ -11685,9 +11781,13 @@ function preVisualizarImportCategoria(){
 
       const dbRef = tipo === 'insumo' ? INSUMOS_DB : PRODUTOS_DB;
       const itens = rows.map(r => {
-        const inativo = r.situacao.toLowerCase() !== 'ativo';
+        const inativoCsv = r.situacao.toLowerCase() !== 'ativo';
         const existente = dbRef.find(x => (x.codigo||'').toUpperCase() === r.codigo.toUpperCase());
-        return { ...r, inativo, existe: !!existente, existente };
+        // Item novo: sempre usa o status do Bling. Item que já existe: só muda o status se a
+        // pessoa marcou explicitamente a caixinha "Atualizar status" — senão preserva o que já tinha.
+        const inativo = !existente ? inativoCsv : (atualizarStatus ? inativoCsv : !!existente.inativo);
+        const statusMudou = existente ? (!!existente.inativo !== inativo) : false;
+        return { ...r, inativo, statusMudou, existe: !!existente, existente };
       });
 
       importCategoriaCache = { tipo, categoria, itens };
@@ -11696,12 +11796,14 @@ function preVisualizarImportCategoria(){
       const atualizados = itens.filter(i=>i.existe).length;
       const ativos = itens.filter(i=>!i.inativo).length;
       const inativos = itens.filter(i=>i.inativo).length;
+      const mudancasStatus = itens.filter(i=>i.statusMudou).length;
 
       el.innerHTML = `
         <div style="padding:12px 14px;margin-bottom:12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:13px">
           <strong>${itens.length}</strong> linha(s) no arquivo — <strong style="color:#16a34a">${novos} serão criadas</strong>, <strong style="color:#d97706">${atualizados} serão atualizadas</strong><br>
           <strong>${ativos}</strong> ativas, <strong>${inativos}</strong> inativas (lido da coluna Situação) · categoria a aplicar: <strong>${categoria||'(nenhuma)'}</strong> · tipo: <strong>${tipo==='insumo'?'Insumo':'Produto Vendável'}</strong>
         </div>
+        ${mudancasStatus>0 ? `<div style="padding:12px 14px;margin-bottom:12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;font-size:13px;color:#9a3412">⚠️ <strong>${mudancasStatus} item(ns) que já existem</strong> vão MUDAR de status (ativo↔inativo) nesta importação — estão marcados em laranja na tabela abaixo. Confira antes de aplicar.</div>` : ''}
         <div style="max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
         <table style="width:100%;border-collapse:collapse;font-size:12px">
           <thead style="background:var(--primary);color:rgba(255,255,255,.85);position:sticky;top:0"><tr>
@@ -11713,11 +11815,11 @@ function preVisualizarImportCategoria(){
           </tr></thead>
           <tbody>
             ${itens.map((it,idx)=>`
-              <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
+              <tr style="border-bottom:1px solid var(--border);${it.statusMudou?'background:#fff7ed':(idx%2===1?'background:#fafafa':'')}">
                 <td style="padding:5px 8px;font-weight:700">${it.codigo}</td>
                 <td style="padding:5px 8px">${it.nome}</td>
                 <td style="padding:5px 8px;text-align:center">${it.estoque}</td>
-                <td style="padding:5px 8px;text-align:center">${it.inativo?'<span class="badge badge-gray">Inativo</span>':'<span class="badge" style="background:#dcfce7;color:#16a34a">Ativo</span>'}</td>
+                <td style="padding:5px 8px;text-align:center">${it.inativo?'<span class="badge badge-gray">Inativo</span>':'<span class="badge" style="background:#dcfce7;color:#16a34a">Ativo</span>'}${it.statusMudou?' <span style="color:#d97706;font-weight:700">⚠ mudou</span>':''}</td>
                 <td style="padding:5px 8px;text-align:center">${it.existe?'<span style="color:#d97706">Atualizar</span>':'<span style="color:#16a34a;font-weight:700">Criar</span>'}</td>
               </tr>`).join('')}
           </tbody>
