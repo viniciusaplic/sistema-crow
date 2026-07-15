@@ -591,6 +591,19 @@ tbody td{padding:11px 16px;font-size:14px}
             <option value="vendavel">Só Vendáveis</option>
             <option value="insumo">Só Insumos</option>
           </select>
+          <select id="filter-status-produto" onchange="renderProdutos()" class="search-input" style="width:auto">
+            <option value="ativos">Ativos</option>
+            <option value="inativos">Inativos</option>
+            <option value="todos">Todos (ativos + inativos)</option>
+          </select>
+          <select id="filter-categoria-produto" onchange="renderProdutos()" class="search-input" style="width:auto">
+            <option value="">Todas as categorias</option>
+            <option value="Embalagens">Embalagens</option>
+            <option value="Itens de Montagem">Itens de Montagem</option>
+            <option value="Produto Acabado">Produto Acabado</option>
+            <option value="Produto Montado">Produto Montado</option>
+            <option value="__sem__">Sem categoria</option>
+          </select>
           <select id="filter-fornecedor-produto" onchange="renderProdutos()" class="search-input" style="width:auto">
             <option value="">Todos os fornecedores</option>
           </select>
@@ -816,6 +829,32 @@ tbody td{padding:11px 16px;font-size:14px}
           <input type="file" id="import-mapeamentos-file" accept=".json" style="font-size:13px;margin-bottom:12px;display:block">
           <button class="btn btn-primary btn-sm" style="background:#16a34a" onclick="importarMapeamentosJSON()">📥 Importar JSON</button>
           <div id="import-mapeamentos-result" style="margin-top:12px;font-size:13px"></div>
+        </div>
+        <div class="table-wrap" style="padding:24px">
+          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">🗂️ Cadastrar/Atualizar Produtos e Insumos do Bling (por Categoria)</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
+            Importa o CSV completo de produtos ou insumos exportado do Bling (o arquivo "produtos_AAAA-MM-DD...csv", com todas as colunas). Diferente do "Importar Estoque do Bling" (que só atualiza quantidade), esta ferramenta <strong>cadastra os itens que ainda não existem</strong> no sistema e atualiza os que já existem — nome, estoque, categoria e status ativo/inativo (lido direto da coluna "Situação" do Bling, então um único arquivo com itens ativos e inativos misturados já resolve os dois de uma vez).
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Tipo dos itens deste arquivo</label>
+              <select id="import-cat-tipo">
+                <option value="vendavel">Produto Vendável</option>
+                <option value="insumo">Insumo</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Categoria a aplicar</label>
+              <select id="import-cat-categoria">
+                <option value="">Sem categoria</option>
+                <option value="Embalagens">Embalagens</option>
+                <option value="Itens de Montagem">Itens de Montagem</option>
+                <option value="Produto Acabado">Produto Acabado</option>
+                <option value="Produto Montado">Produto Montado</option>
+              </select>
+            </div>
+          </div>
+          <input type="file" id="import-cat-file" accept=".csv" style="font-size:13px;margin:10px 0 12px">
+          <button class="btn btn-primary btn-sm" onclick="preVisualizarImportCategoria()">🔍 Pré-visualizar</button>
+          <div id="import-cat-preview" style="margin-top:14px"></div>
         </div>
         <div class="table-wrap" style="padding:24px">
           <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">📦 Importar Balanço de Estoque (Contagem Física)</div>
@@ -1125,6 +1164,11 @@ tbody td{padding:11px 16px;font-size:14px}
       <div id="estoque-view-produtos">
         <div class="search-box" style="margin-bottom:14px">
           <input type="text" class="search-input" id="search-estoque" placeholder="Buscar produto..." oninput="renderEstoque()">
+          <select id="filter-status-estoque" onchange="renderEstoque()" class="search-input" style="width:auto">
+            <option value="ativos">Ativos</option>
+            <option value="inativos">Inativos</option>
+            <option value="todos">Todos (ativos + inativos)</option>
+          </select>
         </div>
         <div id="estoque-lista"></div>
         <div class="pagination" id="estoque-pag"></div>
@@ -1460,6 +1504,16 @@ tbody td{padding:11px 16px;font-size:14px}
     </div>
     <div class="form-row single"><div class="form-group"><label>Preço de Custo (R$)</label><input type="number" id="insumo-custo" step="0.01" value="0"></div></div>
     <div class="form-row single"><div class="form-group"><label>Localização no Estoque</label><input type="text" id="insumo-localizacao" placeholder="ex: Corredor A, Prateleira 3"></div></div>
+    <div class="form-row single"><div class="form-group"><label>Categoria</label>
+      <select id="insumo-categoria">
+        <option value="">Sem categoria</option>
+        <option value="Embalagens">Embalagens</option>
+        <option value="Itens de Montagem">Itens de Montagem</option>
+        <option value="Produto Acabado">Produto Acabado</option>
+        <option value="Produto Montado">Produto Montado</option>
+      </select>
+    </div></div>
+    <div class="form-row single" id="insumo-inativo-criacao-wrap"><div class="form-group" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="insumo-inativo-criacao" style="width:auto"><label for="insumo-inativo-criacao" style="margin:0">Cadastrar já como inativo (item sem estoque/em falta — reative quando voltar)</label></div></div>
     <div class="form-actions">
       <button class="btn btn-outline" onclick="fecharModal('modal-insumo')">Cancelar</button>
       <button class="btn btn-primary" onclick="salvarInsumo()">Salvar</button>
@@ -4134,7 +4188,18 @@ async function carregarInsumosFirebase(){
   try {
     const snap = await db.ref('insumos').once('value');
     const data = snap.val() || {};
-    INSUMOS_DB = Object.keys(data).map(k => ({ key:k, ...data[k] }));
+    INSUMOS_DB = Object.keys(data).map(k => {
+      const item = { key:k, ...data[k] };
+      // Alguns registros antigos podem ter o campo "codigo" vazio/ausente — nesse caso o item
+      // existe e aparece nas listas, mas não aparece na BUSCA por código (só por nome).
+      // A chave no Firebase segue sempre o padrão "ins_CODIGO", então recuperamos daí.
+      if(!item.codigo || !item.codigo.trim()){
+        item.codigo = k.replace(/^ins_/i, '');
+      } else {
+        item.codigo = item.codigo.trim();
+      }
+      return item;
+    });
   } catch(e){ INSUMOS_DB = []; }
 }
 
@@ -4176,6 +4241,8 @@ async function abrirModalInsumo(key=null){
     document.getElementById('insumo-fornecedor').value = i.fornecedor||'';
     document.getElementById('insumo-custo').value = i.preco_custo||0;
     document.getElementById('insumo-localizacao').value = i.localizacao||'';
+    document.getElementById('insumo-categoria').value = i.categoria||'';
+    document.getElementById('insumo-inativo-criacao-wrap').style.display = 'none';
   } else {
     document.getElementById('modal-insumo-titulo').textContent = 'Novo Insumo';
     document.getElementById('insumo-key').value = '';
@@ -4188,6 +4255,9 @@ async function abrirModalInsumo(key=null){
     document.getElementById('insumo-fornecedor').value = '';
     document.getElementById('insumo-custo').value = 0;
     document.getElementById('insumo-localizacao').value = '';
+    document.getElementById('insumo-categoria').value = '';
+    document.getElementById('insumo-inativo-criacao-wrap').style.display = '';
+    document.getElementById('insumo-inativo-criacao').checked = false;
   }
   abrirModal('modal-insumo');
 }
@@ -4218,8 +4288,9 @@ async function salvarInsumo(){
     fornecedor: document.getElementById('insumo-fornecedor').value,
     preco_custo: Number(document.getElementById('insumo-custo').value)||0,
     localizacao: document.getElementById('insumo-localizacao').value.trim(),
+    categoria: document.getElementById('insumo-categoria').value||'',
     ts: Date.now(),
-    ...(!keyExistente ? { ts_cadastro: Date.now() } : {})
+    ...(!keyExistente ? { ts_cadastro: Date.now(), inativo: !!document.getElementById('insumo-inativo-criacao')?.checked } : {})
   };
   // Ao editar, preserva campos não tratados nesta tela (fornecedores múltiplos, GTIN, inativo)
   if(keyExistente){
@@ -4235,7 +4306,7 @@ async function salvarInsumo(){
   INSUMOS_DB = []; // força recarregar
   await carregarInsumosFirebase();
   renderProdutos();
-  toast(`✓ Insumo ${codigo} salvo!`,'success');
+  toast(`✓ Insumo ${codigo} salvo${dados.inativo?' (inativo)':''}!`,'success');
 }
 
 async function removerInsumo(key){
@@ -5224,6 +5295,7 @@ async function renderEstoque(){
   if(!INSUMOS_DB.length) await carregarInsumosFirebase();
 
   const busca = (document.getElementById('search-estoque')?.value||'').toLowerCase();
+  const filtroStatus = document.getElementById('filter-status-estoque')?.value||'ativos';
 
   // Mescla produtos vendáveis + insumos (mesma lógica da aba Produtos & Insumos) —
   // sem isso, itens de insumo (ex: código M0324) não apareciam aqui
@@ -5231,10 +5303,14 @@ async function renderEstoque(){
   const itensInsumo = INSUMOS_DB.map(i => ({
     codigo: i.codigo, nome: i.nome, unidade: i.unidade||'UN',
     quantidade: i.estoque_atual, reservado: i.reservado||0,
-    estoque_minimo: i.estoque_minimo, localizacao: i.localizacao, _tipo: 'insumo'
+    estoque_minimo: i.estoque_minimo, localizacao: i.localizacao, inativo: i.inativo, _tipo: 'insumo'
   }));
 
-  const filtrado = [...itensVendaveis, ...itensInsumo].filter(p =>
+  let baseEstoque = [...itensVendaveis, ...itensInsumo];
+  if(filtroStatus==='ativos') baseEstoque = baseEstoque.filter(p=>!p.inativo);
+  if(filtroStatus==='inativos') baseEstoque = baseEstoque.filter(p=>p.inativo);
+
+  const filtrado = baseEstoque.filter(p =>
     (p.nome||'').toLowerCase().includes(busca) || (p.codigo||'').toLowerCase().includes(busca)
   ).sort((a,b)=>(a.codigo||'').localeCompare(b.codigo||''));
 
@@ -6117,6 +6193,12 @@ async function darEntradaEstoqueCompra(compraId, compra){
     }
     await registrarMovimentoEstoque(item.codigo, item.nome, 'entrada', item.qtd, `Compra ${compra.nf?'NF '+compra.nf:''} — ${compra.fornecedor}`, 'compra', compraId);
   }
+}
+
+const CATEGORIAS_ITEM = ['Embalagens', 'Itens de Montagem', 'Produto Acabado', 'Produto Montado'];
+function opcoesCategorias(selecionada){
+  return '<option value="">Sem categoria</option>' +
+    CATEGORIAS_ITEM.map(c=>`<option value="${c}" ${selecionada===c?'selected':''}>${c}</option>`).join('');
 }
 
 const STATUS_COMPRA = {
@@ -7817,7 +7899,9 @@ async function renderProdutos(){
   const busca=(document.getElementById('search-produtos')?.value||'').toLowerCase();
   const filtroEst=document.getElementById('filter-estoque')?.value||'todos';
   const filtroTipo = document.getElementById('filter-tipo-produto')?.value||'';
+  const filtroStatus = document.getElementById('filter-status-produto')?.value||'ativos';
   const filtroFornecedor=document.getElementById('filter-fornecedor-produto')?.value||'';
+  const filtroCategoria=document.getElementById('filter-categoria-produto')?.value||'';
 
   // Mescla produtos vendáveis + insumos numa lista única, marcando o tipo de cada um
   const itensVendaveis = PRODUTOS_DB.map(p => ({ ...p, _tipo: 'vendavel' }));
@@ -7825,12 +7909,16 @@ async function renderProdutos(){
     codigo: i.codigo, nome: i.nome, unidade: i.unidade||'UN',
     quantidade: i.estoque_atual, preco_venda: null, preco_minimo: null,
     fornecedor: i.fornecedor, fornecedores: i.fornecedores, estoque_minimo: i.estoque_minimo,
-    localizacao: i.localizacao, gtin: i.gtin, key: i.key, _tipo: 'insumo'
+    localizacao: i.localizacao, gtin: i.gtin, key: i.key, inativo: i.inativo, categoria: i.categoria, _tipo: 'insumo'
   }));
 
   let base = [...itensVendaveis, ...itensInsumo];
+  if(filtroStatus==='ativos') base = base.filter(p=>!p.inativo);
+  if(filtroStatus==='inativos') base = base.filter(p=>p.inativo);
   if(filtroTipo==='vendavel') base = base.filter(p=>p._tipo==='vendavel');
   if(filtroTipo==='insumo') base = base.filter(p=>p._tipo==='insumo');
+  if(filtroCategoria==='__sem__') base = base.filter(p=>!p.categoria);
+  else if(filtroCategoria) base = base.filter(p=>p.categoria===filtroCategoria);
   if(filtroEst==='disponivel') base=base.filter(p=>Number(p.quantidade)>0);
   if(filtroEst==='zero') base=base.filter(p=>Number(p.quantidade)<=0);
   if(filtroFornecedor) base=base.filter(p=>(p.fornecedores||[]).some(f=>f.nome===filtroFornecedor));
@@ -7891,11 +7979,12 @@ async function renderProdutos(){
 
     const foto=p._tipo==='vendavel'?`<div onclick="event.stopPropagation();ampliarFoto('${p.codigo}')" style="cursor:pointer">${fotoImg(p.codigo,40)}</div>`:`<div style="width:40px;height:40px;border-radius:8px;background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:16px">🧩</div>`;
     const tipoLabel = p._tipo==='insumo' ? '<span class="badge" style="background:#ede9fe;color:#7c3aed;font-size:10px">INSUMO</span>' : '';
+    const categoriaLabel = p.categoria ? `<span class="badge" style="background:#e0f2fe;color:#0369a1;font-size:10px">${p.categoria}</span>` : '';
     const onclickFn = p._tipo==='insumo' ? `abrirDetalheItem('${p.codigo}','insumo')` : `abrirDetalheItem('${p.codigo}','vendavel')`;
     return `<tr onclick="${onclickFn}" style="cursor:pointer">
       <td>${foto}</td>
       <td style="font-size:12px;color:var(--muted)">${p.codigo}</td>
-      <td style="font-size:13px">${p.nome}${p.inativo?' <span class="badge badge-gray">Inativo</span>':''} ${tipoLabel}</td>
+      <td style="font-size:13px">${p.nome}${p.inativo?' <span class="badge badge-gray">Inativo</span>':''} ${tipoLabel} ${categoriaLabel}</td>
       <td><span class="badge badge-gray">${p.unidade}</span></td>
       <td><strong>${p._tipo==='vendavel'?fmtMoeda(p.preco_venda):'—'}</strong></td>
       <td style="color:var(--muted)">${p._tipo==='vendavel'?fmtMoeda(p.preco_minimo):'—'}</td>
@@ -7974,7 +8063,9 @@ function renderModalProduto(codigo){
           <div class="form-group"><label>Estoque Mínimo</label><input type="number" step="0.01" id="pd-estoque-min" value="${p.estoque_minimo||0}"></div>
         </div>
         <div class="form-row single"><div class="form-group"><label>Localização no Estoque</label><input type="text" id="pd-localizacao" value="${p.localizacao||''}" placeholder="ex: Corredor A, Prateleira 3"></div></div>
+        <div class="form-row single"><div class="form-group"><label>Categoria</label><select id="pd-categoria">${opcoesCategorias(p.categoria)}</select></div></div>
         <div class="form-row single"><div class="form-group"><label>Código de Barras (GTIN/EAN) — usado na bipagem</label><input type="text" id="pd-gtin" value="${p.gtin||''}" placeholder="ex: 7891234567890"></div></div>
+        ${produtoDetalheModo==='editar' && p._temp ? `<div class="form-row single"><div class="form-group" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="pd-inativo-criacao" style="width:auto"><label for="pd-inativo-criacao" style="margin:0">Cadastrar já como inativo (item sem estoque/em falta — reative quando voltar)</label></div></div>` : ''}
         <div class="form-actions">
           <button class="btn btn-outline" onclick="produtoDetalheModo='ver';renderModalProduto('${codigo}')">Cancelar</button>
           <button class="btn btn-primary" onclick="salvarEdicaoProduto('${codigo}')">💾 Salvar Alterações</button>
@@ -8008,6 +8099,7 @@ function renderModalProduto(codigo){
           <div class="form-group"><label>Preço de Custo (R$)</label><input type="number" step="0.01" id="pd-preco-custo" value="${p.preco_custo||0}"></div>
         </div>
         <div class="form-row single"><div class="form-group"><label>Localização no Estoque</label><input type="text" id="pd-localizacao" value="${p.localizacao||''}" placeholder="ex: Corredor A, Prateleira 3"></div></div>
+        <div class="form-row single"><div class="form-group"><label>Categoria</label><select id="pd-categoria">${opcoesCategorias(p.categoria)}</select></div></div>
         <div class="form-row single"><div class="form-group"><label>Código de Barras (GTIN/EAN)</label><input type="text" id="pd-gtin" value="${p.gtin||''}" placeholder="ex: 7891234567890"></div></div>
         <div class="form-actions">
           <button class="btn btn-outline" onclick="produtoDetalheModo='ver';renderModalProduto('${codigo}')">Cancelar</button>
@@ -8291,6 +8383,7 @@ async function salvarEdicaoProduto(codigoAntigo){
   const estoque_minimo = Number(document.getElementById('pd-estoque-min').value) || 0;
   const gtin = document.getElementById('pd-gtin').value.trim();
   const localizacao = document.getElementById('pd-localizacao').value.trim();
+  const categoria = document.getElementById('pd-categoria')?.value || '';
 
   if(!novoCodigo){ toast('Código não pode ficar vazio','error'); return; }
 
@@ -8304,7 +8397,7 @@ async function salvarEdicaoProduto(codigoAntigo){
   const existente = PRODUTOS_DB.find(x=>x.codigo===codigoAntigo);
   const isNovo = !existente || codigoAntigo === '__NOVO__';
   const dadosAtualizados = {
-    nome, unidade, preco_venda, preco_minimo, quantidade, estoque_minimo, gtin, localizacao,
+    nome, unidade, preco_venda, preco_minimo, quantidade, estoque_minimo, gtin, localizacao, categoria,
     ...(isNovo ? { ts_cadastro: Date.now() } : {})
   };
 
@@ -8371,6 +8464,7 @@ async function salvarEdicaoInsumo(codigo){
   const preco_custo = Number(document.getElementById('pd-preco-custo').value) || 0;
   const localizacao = document.getElementById('pd-localizacao').value.trim();
   const gtin = document.getElementById('pd-gtin').value.trim();
+  const categoria = document.getElementById('pd-categoria')?.value || '';
 
   if(gtin){
     const gtinDupInsumo = INSUMOS_DB.find(x=>x.gtin && x.gtin===gtin && x.codigo!==codigo);
@@ -8381,9 +8475,9 @@ async function salvarEdicaoInsumo(codigo){
 
   const insumo = INSUMOS_DB.find(x=>x.codigo===codigo);
   const key = insumo?.key || ('ins_'+codigo);
-  await db.ref('insumos/'+key).update({ nome, unidade, estoque_atual, estoque_minimo, fornecedor, preco_custo, localizacao, gtin });
+  await db.ref('insumos/'+key).update({ nome, unidade, estoque_atual, estoque_minimo, fornecedor, preco_custo, localizacao, gtin, categoria });
 
-  if(insumo) Object.assign(insumo, { nome, unidade, estoque_atual, estoque_minimo, fornecedor, preco_custo, localizacao, gtin });
+  if(insumo) Object.assign(insumo, { nome, unidade, estoque_atual, estoque_minimo, fornecedor, preco_custo, localizacao, gtin, categoria });
 
   produtoDetalheModo = 'ver';
   renderModalProduto(codigo);
@@ -8430,12 +8524,14 @@ async function salvarNovoProdutoVendavel(codigoTemp){
     estoque_minimo: Number(document.getElementById('pd-estoque-min')?.value)||0,
     localizacao: document.getElementById('pd-localizacao')?.value.trim()||'',
     gtin: document.getElementById('pd-gtin')?.value.trim()||'',
-    ts_cadastro: Date.now(), pendente_w3: true, novo: true
+    categoria: document.getElementById('pd-categoria')?.value || '',
+    ts_cadastro: Date.now(), pendente_w3: true, novo: true,
+    inativo: !!document.getElementById('pd-inativo-criacao')?.checked
   };
   await db.ref('produtos/'+novoCodigo).set(produto);
   PRODUTOS_DB.unshift(produto);
   fecharModal('modal-produto-detalhe');
-  toast(`✓ Produto "${nome}" cadastrado — código ${novoCodigo}`,'success');
+  toast(`✓ Produto "${nome}" cadastrado${produto.inativo?' (inativo)':''} — código ${novoCodigo}`,'success');
   renderProdutos();
 }
 
@@ -8448,7 +8544,7 @@ async function toggleInativoProduto(codigo){
   const p = PRODUTOS_DB.find(x=>x.codigo===codigo);
   if(!p) return;
   const novoStatus = !p.inativo;
-  if(novoStatus && !confirm(`Inativar "${p.nome}"? Ele deixará de aparecer nas buscas de novos pedidos.`)) return;
+  if(novoStatus){ const ok = await confirmCustom(`Inativar "${p.nome}"? Ele deixará de aparecer nas buscas de novos pedidos.`, 'Inativar'); if(!ok) return; }
   await db.ref('produtos/'+codigo+'/inativo').set(novoStatus);
   p.inativo = novoStatus;
   renderModalProduto(codigo);
@@ -8461,7 +8557,7 @@ async function toggleInativoInsumo(codigo){
   const i = INSUMOS_DB.find(x=>x.codigo===codigo);
   if(!i) return;
   const novoStatus = !i.inativo;
-  if(novoStatus && !confirm(`Inativar o insumo "${i.nome}"? Ele deixará de aparecer nas buscas de OP, composição e lançamento de compra.`)) return;
+  if(novoStatus){ const ok = await confirmCustom(`Inativar o insumo "${i.nome}"? Ele deixará de aparecer nas buscas de OP, composição e lançamento de compra.`, 'Inativar'); if(!ok) return; }
   const key = i.key || ('ins_'+codigo);
   await db.ref('insumos/'+key+'/inativo').set(novoStatus);
   i.inativo = novoStatus;
@@ -11524,6 +11620,206 @@ async function diagnosticarEstoquesDecimais(){
 // balanço individual em confirmarMovimentoEstoque).
 // ══════════════════════════════════════════════
 let balancoImportadoCache = [];
+
+// ══════════════════════════════════════════════
+// ══ CADASTRO/ATUALIZAÇÃO EM MASSA DE PRODUTOS/INSUMOS A PARTIR DO CSV COMPLETO DO BLING ══
+// Diferente do "Importar Estoque do Bling" (só atualiza quantidade de itens já cadastrados),
+// esta ferramenta CRIA os itens que ainda não existem e atualiza nome/estoque/categoria/status
+// dos que já existem. Lê a coluna "Situação" do Bling para marcar ativo/inativo automaticamente.
+// ══════════════════════════════════════════════
+let importCategoriaCache = null;
+
+// Parser de uma linha de CSV com aspas e ";" como delimitador (formato de exportação do Bling)
+function parseLinhaCSV(linha){
+  const campos = [];
+  let atual = '';
+  let dentroAspas = false;
+  for(let i=0;i<linha.length;i++){
+    const c = linha[i];
+    if(c === '"'){
+      if(dentroAspas && linha[i+1] === '"'){ atual += '"'; i++; }
+      else dentroAspas = !dentroAspas;
+    } else if(c === ';' && !dentroAspas){
+      campos.push(atual); atual = '';
+    } else {
+      atual += c;
+    }
+  }
+  campos.push(atual);
+  return campos;
+}
+
+function preVisualizarImportCategoria(){
+  if(!temPermissaoEditar('produtos')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  const file = document.getElementById('import-cat-file').files[0];
+  const el = document.getElementById('import-cat-preview');
+  if(!file){ toast('Selecione um arquivo','error'); return; }
+  const tipo = document.getElementById('import-cat-tipo').value;
+  const categoria = document.getElementById('import-cat-categoria').value;
+
+  const reader = new FileReader();
+  reader.onload = async e => {
+    try {
+      if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
+      if(!INSUMOS_DB.length) await carregarInsumosFirebase();
+
+      let texto = e.target.result;
+      if(texto.charCodeAt(0) === 0xFEFF) texto = texto.slice(1); // remove BOM
+      const linhas = texto.split(/\r?\n/).filter(l=>l.trim());
+      if(linhas.length < 2) throw new Error('Arquivo vazio ou sem dados');
+
+      // Colunas do CSV completo de produtos do Bling (índices fixos, confirmados no cabeçalho):
+      // 1=Código, 2=Descrição, 3=Unidade, 6=Preço, 9=Situação, 10=Estoque,
+      // 11=Preço de custo, 13=Fornecedor, 14=Localização, 16=Estoque mínimo, 19=GTIN/EAN
+      const rows = linhas.slice(1).map(l => {
+        const c = parseLinhaCSV(l).map(v => v.replace(/\t/g,'').trim());
+        return {
+          codigo: c[1] || '', nome: c[2] || '', unidade: c[3] || 'UN',
+          preco_venda: parseBR(c[6]), situacao: c[9] || '', estoque: parseQtdInteira(c[10]),
+          preco_custo: parseBR(c[11]), fornecedor: c[13] || '', localizacao: c[14] || '',
+          estoque_minimo: parseQtdInteira(c[16]), gtin: c[19] || ''
+        };
+      }).filter(r => r.codigo);
+
+      if(!rows.length) throw new Error('Não encontrei nenhuma linha com código válido. Confira se o arquivo é o CSV completo de produtos exportado do Bling.');
+
+      const dbRef = tipo === 'insumo' ? INSUMOS_DB : PRODUTOS_DB;
+      const itens = rows.map(r => {
+        const inativo = r.situacao.toLowerCase() !== 'ativo';
+        const existente = dbRef.find(x => (x.codigo||'').toUpperCase() === r.codigo.toUpperCase());
+        return { ...r, inativo, existe: !!existente, existente };
+      });
+
+      importCategoriaCache = { tipo, categoria, itens };
+
+      const novos = itens.filter(i=>!i.existe).length;
+      const atualizados = itens.filter(i=>i.existe).length;
+      const ativos = itens.filter(i=>!i.inativo).length;
+      const inativos = itens.filter(i=>i.inativo).length;
+
+      el.innerHTML = `
+        <div style="padding:12px 14px;margin-bottom:12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:13px">
+          <strong>${itens.length}</strong> linha(s) no arquivo — <strong style="color:#16a34a">${novos} serão criadas</strong>, <strong style="color:#d97706">${atualizados} serão atualizadas</strong><br>
+          <strong>${ativos}</strong> ativas, <strong>${inativos}</strong> inativas (lido da coluna Situação) · categoria a aplicar: <strong>${categoria||'(nenhuma)'}</strong> · tipo: <strong>${tipo==='insumo'?'Insumo':'Produto Vendável'}</strong>
+        </div>
+        <div style="max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead style="background:var(--primary);color:rgba(255,255,255,.85);position:sticky;top:0"><tr>
+            <th style="padding:6px 8px;text-align:left">Código</th>
+            <th style="padding:6px 8px;text-align:left">Nome</th>
+            <th style="padding:6px 8px;text-align:center">Estoque</th>
+            <th style="padding:6px 8px;text-align:center">Status</th>
+            <th style="padding:6px 8px;text-align:center">Ação</th>
+          </tr></thead>
+          <tbody>
+            ${itens.map((it,idx)=>`
+              <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
+                <td style="padding:5px 8px;font-weight:700">${it.codigo}</td>
+                <td style="padding:5px 8px">${it.nome}</td>
+                <td style="padding:5px 8px;text-align:center">${it.estoque}</td>
+                <td style="padding:5px 8px;text-align:center">${it.inativo?'<span class="badge badge-gray">Inativo</span>':'<span class="badge" style="background:#dcfce7;color:#16a34a">Ativo</span>'}</td>
+                <td style="padding:5px 8px;text-align:center">${it.existe?'<span style="color:#d97706">Atualizar</span>':'<span style="color:#16a34a;font-weight:700">Criar</span>'}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table></div>
+        <button class="btn btn-primary btn-sm" style="margin-top:14px" onclick="aplicarImportCategoria()">✅ Aplicar (${novos} criar + ${atualizados} atualizar)</button>
+      `;
+    } catch(err){
+      el.innerHTML = `<div style="color:#dc2626;padding:12px">Erro: ${err.message}</div>`;
+    }
+  };
+  reader.readAsText(file, 'utf-8');
+}
+
+async function aplicarImportCategoria(){
+  if(!temPermissaoEditar('produtos')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  const cache = importCategoriaCache;
+  if(!cache || !cache.itens.length){ toast('Nada para aplicar','error'); return; }
+  const ok = await confirmCustom(`Confirmar importação de ${cache.itens.length} item(ns)?\n\nItens novos serão criados, itens existentes serão atualizados (nome, estoque, categoria, status ativo/inativo).`, 'Importar');
+  if(!ok) return;
+
+  const el = document.getElementById('import-cat-preview');
+  el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--muted)">⏳ Importando...</div>';
+
+  let criados = 0, atualizados = 0;
+  const movimentosBalanco = [];
+
+  for(const it of cache.itens){
+    if(cache.tipo === 'insumo'){
+      if(it.existe){
+        const insumo = it.existente;
+        const key = insumo.key || ('ins_'+insumo.codigo);
+        const estoqueAnterior = Number(insumo.estoque_atual||0);
+        const dadosUpd = {
+          nome: it.nome || insumo.nome, unidade: it.unidade || insumo.unidade,
+          estoque_atual: it.estoque, estoque_minimo: it.estoque_minimo || insumo.estoque_minimo || 0,
+          localizacao: it.localizacao || insumo.localizacao || '',
+          categoria: cache.categoria || insumo.categoria || '',
+          inativo: it.inativo
+        };
+        await db.ref('insumos/'+key).update(dadosUpd);
+        Object.assign(insumo, dadosUpd);
+        if(estoqueAnterior !== it.estoque) movimentosBalanco.push({ codigo: it.codigo, nome: it.nome, de: estoqueAnterior, para: it.estoque });
+        atualizados++;
+      } else {
+        const key = 'ins_' + it.codigo;
+        const novoInsumo = {
+          codigo: it.codigo, nome: it.nome, unidade: it.unidade || 'UN',
+          estoque_atual: it.estoque, estoque_minimo: it.estoque_minimo || 0,
+          localizacao: it.localizacao, fornecedor: it.fornecedor, preco_custo: it.preco_custo,
+          gtin: it.gtin, categoria: cache.categoria || '', inativo: it.inativo,
+          ts_cadastro: Date.now()
+        };
+        await db.ref('insumos/'+key).set(novoInsumo);
+        INSUMOS_DB.push({ key, ...novoInsumo });
+        criados++;
+      }
+    } else {
+      if(it.existe){
+        const prod = it.existente;
+        const estoqueAnterior = Number(prod.quantidade||0);
+        const dadosUpd = {
+          nome: it.nome || prod.nome, unidade: it.unidade || prod.unidade,
+          quantidade: it.estoque, estoque_minimo: it.estoque_minimo || prod.estoque_minimo || 0,
+          localizacao: it.localizacao || prod.localizacao || '',
+          categoria: cache.categoria || prod.categoria || '',
+          inativo: it.inativo
+        };
+        await db.ref('produtos/'+prod.codigo).update(dadosUpd);
+        Object.assign(prod, dadosUpd);
+        if(estoqueAnterior !== it.estoque) movimentosBalanco.push({ codigo: it.codigo, nome: it.nome, de: estoqueAnterior, para: it.estoque });
+        atualizados++;
+      } else {
+        const novoProduto = {
+          codigo: it.codigo, nome: it.nome, unidade: it.unidade || 'UN',
+          preco_venda: it.preco_venda || 0, preco_minimo: 0,
+          quantidade: it.estoque, estoque_minimo: it.estoque_minimo || 0,
+          localizacao: it.localizacao, gtin: it.gtin, categoria: cache.categoria || '', inativo: it.inativo,
+          ts_cadastro: Date.now(), pendente_w3: true
+        };
+        await db.ref('produtos/'+it.codigo).set(novoProduto);
+        PRODUTOS_DB.push(novoProduto);
+        criados++;
+      }
+    }
+  }
+
+  // Registra Balanço no histórico só para itens que já existiam e tiveram o estoque alterado
+  // (itens recém-criados não geram lançamento — não havia estoque "anterior" pra comparar)
+  if(movimentosBalanco.length){
+    el.innerHTML = `<div style="padding:16px;text-align:center;color:var(--muted)">⏳ Registrando ${movimentosBalanco.length} balanço(s) de estoque...</div>`;
+    for(const m of movimentosBalanco){
+      const diff = m.para - m.de;
+      await registrarMovimentoEstoque(m.codigo, m.nome, diff>=0?'entrada':'saida', Math.abs(diff), `Balanço — importação de cadastro do Bling: ${m.de} → ${m.para}`, null, null);
+    }
+  }
+
+  importCategoriaCache = null;
+  document.getElementById('import-cat-file').value = '';
+  el.innerHTML = `<div style="padding:14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534">✅ ${criados} item(ns) criado(s), ${atualizados} atualizado(s). ${movimentosBalanco.length} balanço(s) de estoque registrado(s) no histórico.</div>`;
+  toast(`✓ Importação concluída — ${criados} criado(s), ${atualizados} atualizado(s)`, 'success');
+  renderProdutos();
+}
 
 function preVisualizarBalancoImportado(){
   if(!temPermissaoEditar('estoque')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
