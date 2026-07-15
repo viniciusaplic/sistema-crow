@@ -2038,6 +2038,7 @@ let INSUMOS_DB = [];
 let FORNECEDORES_DB = [];
 let RECEITAS_DB = {};
 let OPS_DB = [];
+let opEmConclusao = false; // trava contra clique duplo em concluirOP (evitava baixa de estoque duplicada)
 let opProdutoSelecionado = null;
 let pedidoSeparacaoAtual = null; // pedido sendo trabalhado na tela de separação
 let movProdutoSelecionado = null;
@@ -4943,6 +4944,8 @@ async function concluirOP(key){
   if(!temPermissaoEditar('producao')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const op = OPS_DB.find(o=>o.key===key);
   if(!op) return;
+  if(op.status === 'concluida'){ toast('Esta OP já foi concluída — não é possível concluir de novo (evita duplicar a baixa de estoque).','error'); return; }
+  if(opEmConclusao){ toast('Já estamos processando a conclusão desta OP, aguarde...','error'); return; }
   const qtdProduzida = Number(document.getElementById('op-qtd-concluir').value) || op.qtd_solicitada;
 
   // Verifica antecipadamente se algum insumo vai ficar negativo, pra avisar antes de confirmar
@@ -4962,7 +4965,12 @@ async function concluirOP(key){
   if(alertasEstoque.length){
     msgConfirm = `⚠️ ATENÇÃO — estoque insuficiente!\n\nOs insumos abaixo vão ficar NEGATIVOS:\n${alertasEstoque.join('\n')}\n\n` + msgConfirm;
   }
-  if(!confirm(msgConfirm)) return;
+  const confirmado = await confirmCustom(msgConfirm, 'Concluir OP');
+  if(!confirmado) return;
+
+  // Trava para impedir clique duplo / duplo envio (mesmo problema que gerava a "Saída" duplicada)
+  if(op.status === 'concluida'){ toast('Esta OP já foi concluída — não é possível concluir de novo.','error'); return; }
+  opEmConclusao = true;
 
   try {
     // Baixa nos insumos (proporcional à quantidade produzida)
@@ -5012,6 +5020,8 @@ async function concluirOP(key){
     toast(`✅ OP #${op.numero} concluída! Estoque atualizado.`,'success');
   } catch(e){
     toast('Erro ao concluir OP: ' + e.message, 'error');
+  } finally {
+    opEmConclusao = false;
   }
 }
 
