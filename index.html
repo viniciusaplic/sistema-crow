@@ -596,8 +596,10 @@ tbody td{padding:11px 16px;font-size:14px}
           </select>
           <button class="btn btn-outline btn-sm admin-only" onclick="abrirModalNovoProdutoVendavel()">+ Novo Produto</button>
           <button class="btn btn-primary admin-only" onclick="abrirModalNovoItem()">+ Novo Insumo</button>
+          <button class="btn btn-outline btn-sm admin-only" style="color:#d97706;border-color:#d97706" onclick="verificarReceitasSemProduto()">🔍 Receitas sem Cadastro</button>
         </div>
       </div>
+      <div id="receitas-sem-produto-resultado"></div>
       <div class="table-wrap">
         <div id="produtos-table"></div>
       </div>
@@ -7763,6 +7765,44 @@ function tituloEstoque(p, estq, reservado, disponivel, estMin, critico, capacida
   return t;
 }
 
+async function verificarReceitasSemProduto(){
+  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
+  const el = document.getElementById('receitas-sem-produto-resultado');
+  el.innerHTML = '<div style="padding:12px;color:var(--muted)">⏳ Verificando...</div>';
+
+  const codigosProdutos = new Set(PRODUTOS_DB.map(p=>p.codigo.toUpperCase()));
+  const orfaos = Object.values(RECEITAS_DB).filter(r => r.produto_codigo && !codigosProdutos.has(r.produto_codigo.toUpperCase()));
+
+  if(!orfaos.length){
+    el.innerHTML = '<div style="padding:12px 14px;margin:10px 0;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534;font-size:13px">✅ Todas as receitas cadastradas têm um produto correspondente no catálogo.</div>';
+    return;
+  }
+
+  el.innerHTML = `
+    <div style="padding:12px 14px;margin:10px 0;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;font-size:13px;color:#9a3412">
+      ⚠️ <strong>${orfaos.length} receita(s)</strong> referenciam um código de produto que não existe no catálogo — por isso não aparecem na busca de Produtos &amp; Insumos, mesmo tendo receita de produção definida.
+    </div>
+    <div style="overflow-x:auto;margin-bottom:10px">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead style="background:var(--primary);color:rgba(255,255,255,.85)"><tr>
+        <th style="padding:8px 10px;text-align:left">Código</th>
+        <th style="padding:8px 10px;text-align:left">Nome (na receita)</th>
+        <th style="padding:8px 10px;text-align:center">Itens na receita</th>
+        <th style="padding:8px 10px;text-align:center">Ação</th>
+      </tr></thead>
+      <tbody>
+        ${orfaos.map((r,idx)=>`
+          <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
+            <td style="padding:7px 10px;font-weight:700">${r.produto_codigo}</td>
+            <td style="padding:7px 10px">${r.produto_nome||'—'}</td>
+            <td style="padding:7px 10px;text-align:center">${(r.itens||[]).length}</td>
+            <td style="padding:7px 10px;text-align:center"><button class="btn btn-primary btn-sm" onclick="abrirModalNovoProdutoVendavel('${r.produto_codigo}','${(r.produto_nome||'').replace(/'/g,"\\'")}')">+ Cadastrar</button></td>
+          </tr>`).join('')}
+      </tbody>
+    </table></div>
+  `;
+}
+
 async function renderProdutos(){
   if(!INSUMOS_DB.length) await carregarInsumosFirebase();
   if(!FORNECEDORES_DB.length) await carregarFornecedoresFirebase();
@@ -8353,11 +8393,11 @@ async function salvarEdicaoInsumo(codigo){
 
 // ── Cadastro de novo insumo (botão "+ Novo Insumo" na aba Produtos) ──
 // Cadastro de novo produto vendável — abre o modal de detalhes com código auto-gerado
-function abrirModalNovoProdutoVendavel(){
+function abrirModalNovoProdutoVendavel(codigoPreenchido, nomePreenchido){
   if(!temPermissaoEditar('produtos')){ toast('Acesso restrito','error'); return; }
-  const codigoAuto = gerarProximoCodigo('vendavel');
+  const codigoAuto = codigoPreenchido || gerarProximoCodigo('vendavel');
   // Injeta temporariamente em PRODUTOS_DB para que renderModalProduto encontre o objeto
-  PRODUTOS_DB.unshift({ codigo:codigoAuto, nome:'', unidade:'UN', preco_venda:0, preco_minimo:0, quantidade:0, estoque_minimo:0, localizacao:'', gtin:'', _temp:true });
+  PRODUTOS_DB.unshift({ codigo:codigoAuto, nome:nomePreenchido||'', unidade:'UN', preco_venda:0, preco_minimo:0, quantidade:0, estoque_minimo:0, localizacao:'', gtin:'', _temp:true });
   produtoDetalheModo = 'editar';
   itemDetalheTipo = 'vendavel';
   renderModalProduto(codigoAuto);
@@ -8367,7 +8407,7 @@ function abrirModalNovoProdutoVendavel(){
     if(btnSalvar){ btnSalvar.textContent='💾 Criar Produto'; btnSalvar.onclick=()=>salvarNovoProdutoVendavel(codigoAuto); }
     const btnCancel = document.querySelector('#modal-produto-detalhe-conteudo .btn-outline');
     if(btnCancel){ btnCancel.onclick=()=>{ const i=PRODUTOS_DB.findIndex(p=>p.codigo===codigoAuto&&p._temp); if(i>-1)PRODUTOS_DB.splice(i,1); fecharModal('modal-produto-detalhe'); }; }
-    document.getElementById('modal-produto-detalhe-titulo').textContent = '➕ Novo Produto Vendável';
+    document.getElementById('modal-produto-detalhe-titulo').textContent = codigoPreenchido ? `➕ Cadastrar Produto (receita já existe — código ${codigoAuto})` : '➕ Novo Produto Vendável';
   }, 50);
   abrirModal('modal-produto-detalhe');
 }
