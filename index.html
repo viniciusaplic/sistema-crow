@@ -11340,11 +11340,13 @@ function importarEstoque(){
       let atualizados=0, atualizadosInsumo=0, semMudanca=0;
       const updates = {};
       const movimentos = []; // { codigo, nome, de, para } — só os que realmente mudam viram lançamento de Balanço
+      const codigosEncontrados = new Set();
 
       // Produtos vendáveis (chave = próprio código)
       PRODUTOS_DB.forEach(p=>{
         const est=rows.find(r=>r.codigo.toUpperCase()===p.codigo.toUpperCase());
         if(est){
+          codigosEncontrados.add(est.codigo.toUpperCase());
           const anterior = Number(p.quantidade||0);
           if(anterior !== est.quantidade){
             movimentos.push({ codigo:p.codigo, nome:p.nome, de:anterior, para:est.quantidade });
@@ -11359,6 +11361,7 @@ function importarEstoque(){
       INSUMOS_DB.forEach(i=>{
         const est=rows.find(r=>r.codigo.toUpperCase()===i.codigo.toUpperCase());
         if(est){
+          codigosEncontrados.add(est.codigo.toUpperCase());
           const anterior = Number(i.estoque_atual||0);
           if(anterior !== est.quantidade){
             movimentos.push({ codigo:i.codigo, nome:i.nome, de:anterior, para:est.quantidade });
@@ -11368,6 +11371,8 @@ function importarEstoque(){
           } else semMudanca++;
         }
       });
+
+      const naoEncontrados = rows.filter(r => !codigosEncontrados.has(r.codigo.toUpperCase()));
 
       await db.ref().update(updates);
 
@@ -11385,8 +11390,10 @@ function importarEstoque(){
         );
       }
 
-      const naoEncontrados = rows.length - atualizados - atualizadosInsumo - semMudanca;
-      document.getElementById('import-estoque-result').innerHTML=`<span style="color:var(--success)">✓ ${atualizados} produtos + ${atualizadosInsumo} insumos atualizados (com balanço registrado no histórico)</span><br><span style="color:var(--muted)">${semMudanca} já estavam corretos, sem mudança</span>${naoEncontrados>0?`<br><span style="color:#d97706">⚠ ${naoEncontrados} código(s) da planilha não encontrados no cadastro</span>`:''}`;
+      document.getElementById('import-estoque-result').innerHTML=`<span style="color:var(--success)">✓ ${atualizados} produtos + ${atualizadosInsumo} insumos atualizados (com balanço registrado no histórico)</span><br><span style="color:var(--muted)">${semMudanca} já estavam corretos, sem mudança</span>${naoEncontrados.length>0?`<br><span style="color:#d97706">⚠ ${naoEncontrados.length} código(s) da planilha não encontrados no cadastro:</span>
+        <div style="max-height:180px;overflow-y:auto;margin-top:6px;border:1px solid var(--border);border-radius:6px;padding:8px;font-size:12px">
+          ${naoEncontrados.map(r=>`${r.codigo} — qtd ${r.quantidade}`).join('<br>')}
+        </div>`:''}`;
       toast(`✓ Estoque atualizado — ${movimentos.length} balanço(s) registrado(s)`,'success');
     } catch(err){ document.getElementById('import-estoque-result').innerHTML=`<span style="color:var(--accent)">Erro: ${err.message}</span>`; }
   };
