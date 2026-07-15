@@ -2139,6 +2139,28 @@ function toast(msg, tipo=''){
   setTimeout(()=>{ t.className='toast'; }, 3500);
 }
 function fecharModal(id){ document.getElementById(id).classList.remove('open'); }
+
+// Confirmação própria do sistema — substitui window.confirm() em pontos críticos.
+// Alguns navegadores embutidos (WhatsApp, Instagram, etc.) bloqueiam confirm()/alert() nativos
+// silenciosamente, sem erro nenhum — o clique simplesmente "não faz nada". Isso resolve isso.
+function confirmCustom(mensagem, tituloBotaoOk){
+  return new Promise(resolve=>{
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999999;display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.innerHTML = `
+      <div style="background:#fff;border-radius:12px;padding:20px;max-width:400px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+        <div style="font-size:14px;white-space:pre-line;margin-bottom:18px;color:var(--text)">${mensagem}</div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button id="confirmcustom-cancel" class="btn btn-outline btn-sm">Cancelar</button>
+          <button id="confirmcustom-ok" class="btn btn-primary btn-sm">${tituloBotaoOk||'Confirmar'}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const limpar = (resultado) => { document.body.removeChild(overlay); resolve(resultado); };
+    overlay.querySelector('#confirmcustom-cancel').onclick = () => limpar(false);
+    overlay.querySelector('#confirmcustom-ok').onclick = () => limpar(true);
+  });
+}
 let zIndexModalAtual = 1000;
 function abrirModal(id){
   const el = document.getElementById(id);
@@ -3105,17 +3127,19 @@ async function editarPedido(id){
   const p = snap.val(); if(!p) return;
   if(!podeEditar(p)){ toast('Pedido bloqueado para edição após 1 hora','error'); return; }
 
+  const ehOrcamento = p.status === 'Orçamento';
+
   fecharModal('modal-ver-pedido');
   pedidoAtual = {
     id: id,
     cliente: { codigo:p.cliente_codigo, nome:p.cliente_nome, cpf_cnpj:p.cliente_cpf, cidade:p.cliente_cidade, uf:p.cliente_uf },
     itens: JSON.parse(JSON.stringify(p.itens||[])),
-    isOrcamento: false,
+    isOrcamento: ehOrcamento,
     editando: true,
     numero: p.numero
   };
-  document.getElementById('modal-pedido-titulo').textContent = 'Editar Pedido #'+p.numero;
-  document.getElementById('btn-salvar-orcamento').style.display='none';
+  document.getElementById('modal-pedido-titulo').textContent = (ehOrcamento?'Editar Orçamento #':'Editar Pedido #')+p.numero;
+  document.getElementById('btn-salvar-orcamento').style.display = ehOrcamento ? 'inline-flex' : 'none';
   document.getElementById('pedido-busca-cliente').value = p.cliente_nome;
   document.getElementById('pedido-cliente-selecionado').innerHTML =
     `<div class="alerta alerta-success" style="margin-top:8px">✓ ${p.cliente_nome} · ${p.cliente_cidade||''}/${p.cliente_uf||''}</div>`;
@@ -3685,6 +3709,7 @@ function gerarResumoAlteracoesPedido(original, itensNovos, formaNova, condicaoNo
 }
 
 async function confirmarPedido(){
+ try {
   if(!pedidoAtual.cliente){ toast('Selecione um cliente','error'); return; }
   if(!pedidoAtual.itens.length){ toast('Adicione pelo menos um produto','error'); return; }
   const forma = document.getElementById('pedido-forma').value;
@@ -3695,7 +3720,8 @@ async function confirmarPedido(){
   // Avisa se o cliente ainda não foi cadastrado no W3 (não bloqueia, mas registra)
   const clienteCompleto = CLIENTES_DB.find(x=>x.codigo===pedidoAtual.cliente.codigo);
   if(clienteCompleto?.pendente_w3){
-    if(!confirm(`⚠️ ATENÇÃO: "${pedidoAtual.cliente.nome}" ainda não foi cadastrado no W3.\n\nSem cadastro no W3, este pedido NÃO poderá ser faturado.\n\nDeseja salvar o pedido mesmo assim e cadastrar o cliente no W3 depois?`)) return;
+    const ok = await confirmCustom(`⚠️ ATENÇÃO: "${pedidoAtual.cliente.nome}" ainda não foi cadastrado no W3.\n\nSem cadastro no W3, este pedido NÃO poderá ser faturado.\n\nDeseja salvar o pedido mesmo assim e cadastrar o cliente no W3 depois?`, 'Salvar mesmo assim');
+    if(!ok) return;
   }
 
   const sub = calcSubtotal();
@@ -3703,20 +3729,15 @@ async function confirmarPedido(){
   const total = sub*(1-dg/100);
   const dias = condicao==='AVISTA'?[0]:condicao.split('/').map(Number);
   if(dias.length>1 && total/dias.length < 300){
-    if(!confirm('Parcela abaixo de R$ 300,00. Confirmar?')) return;
+    const ok = await confirmCustom('Parcela abaixo de R$ 300,00. Confirmar mesmo assim?', 'Confirmar');
+    if(!ok) return;
   }
 
   const parcelas = calcularParcelas()||[];
   const c = pedidoAtual.cliente;
 
   try {
-    let numero = pedidoAtual.numero;
-    if(!numero){
-      const snap = await db.ref('contador_pedidos').transaction(v=>(v||0)+1);
-      numero = snap.snapshot.val();
-    }
-
-    // Captura o pedido ORIGINAL inteiro ANTES de sobrescrever — necessário tanto para ajustar a
+    // Captura o pedido/orçamento ORIGINAL inteiro ANTES de sobrescrever — necessário tanto para ajustar a
     // reserva de estoque quanto para PRESERVAR campos que esta tela não edita (data original,
     // status, codigo_w3, dados de bipagem, etc.), evitando apagá-los na hora de salvar.
     let itensAntigos = null;
@@ -3724,6 +3745,16 @@ async function confirmarPedido(){
     if(pedidoAtual.editando && pedidoAtual.id){
       const snapAntigo = await db.ref('pedidos/'+pedidoAtual.id).once('value');
       if(snapAntigo.exists()){ pedidoOriginal = snapAntigo.val(); itensAntigos = pedidoOriginal.itens || []; }
+    }
+
+    // Se o registro original era um Orçamento, "Confirmar Pedido" precisa virar um PEDIDO de
+    // verdade: número novo (orçamento e pedido usam contadores separados) e status inicial —
+    // nunca herdar o status "Orçamento".
+    const convertendoOrcamento = pedidoOriginal?.status === 'Orçamento';
+    let numero = convertendoOrcamento ? null : pedidoAtual.numero;
+    if(!numero){
+      const snap = await db.ref('contador_pedidos').transaction(v=>(v||0)+1);
+      numero = snap.snapshot.val();
     }
 
     // Define o vendedor do pedido:
@@ -3775,7 +3806,7 @@ async function confirmarPedido(){
       itens:pedidoAtual.itens, forma, condicao,
       obs:document.getElementById('pedido-obs').value,
       subtotal:sub, desconto_geral:dg, desconto_total:sub-total, total,
-      parcelas, status: pedidoOriginal?.status || 'AA',
+      parcelas, status: convertendoOrcamento ? 'AA' : (pedidoOriginal?.status || 'AA'),
       historico_edicoes: historicoEdicoes
     };
     await db.ref('pedidos/'+pedido.id).update(pedido);
@@ -3791,6 +3822,7 @@ async function confirmarPedido(){
     toast(`✓ Pedido #${numero} ${pedidoAtual.editando?'atualizado':'confirmado'}!`,'success');
     renderPedidos();
   } catch(e){ toast('Erro ao salvar: '+e.message,'error'); }
+ } catch(e){ toast('Erro inesperado: '+e.message,'error'); }
 }
 
 async function salvarComoOrcamento(){
@@ -3799,11 +3831,24 @@ async function salvarComoOrcamento(){
   const sub=calcSubtotal(); const dg=parseFloat(document.getElementById('desc-geral').value)||0;
   const total=sub*(1-dg/100); const c=pedidoAtual.cliente;
   try {
-    const snap = await db.ref('contador_orcamentos').transaction(v=>(v||0)+1);
-    const numero = snap.snapshot.val();
+    // Editando um orçamento já existente: atualiza o mesmo registro em vez de criar um novo
+    const editandoExistente = pedidoAtual.editando && pedidoAtual.id;
+
+    let numero = pedidoAtual.numero;
+    let id = pedidoAtual.id;
+    let dadosOriginais = {};
+    if(editandoExistente){
+      const snapOriginal = await db.ref('pedidos/'+id).once('value');
+      dadosOriginais = snapOriginal.val() || {};
+    } else {
+      const snap = await db.ref('contador_orcamentos').transaction(v=>(v||0)+1);
+      numero = snap.snapshot.val();
+      id = db.ref('pedidos').push().key;
+    }
+
     // Mesma lógica do pedido: admin pode escolher manualmente o vendedor, sobrescrevendo o do cliente
-    let vendedorIdFinalOrc = c.vendedor_id || usuarioLogado.id;
-    let vendedorNomeFinalOrc = c.vendedor_nome || usuarioLogado.nome;
+    let vendedorIdFinalOrc = dadosOriginais.vendedor_id || c.vendedor_id || usuarioLogado.id;
+    let vendedorNomeFinalOrc = dadosOriginais.vendedor_nome || c.vendedor_nome || usuarioLogado.nome;
     const selVendedorOrc = document.getElementById('pedido-vendedor-select');
     if(usuarioLogado.admin && selVendedorOrc){
       vendedorIdFinalOrc = selVendedorOrc.value || null;
@@ -3811,23 +3856,25 @@ async function salvarComoOrcamento(){
     }
 
     const orcamento = {
-      id: db.ref('pedidos').push().key, numero,
-      data: new Date().toISOString(),
+      ...dadosOriginais,
+      id, numero,
+      data: dadosOriginais.data || new Date().toISOString(),
       cliente_codigo:c.codigo, cliente_nome:c.nome, cliente_cpf:c.cpf_cnpj||'',
       cliente_cidade:c.cidade||'', cliente_uf:c.uf||'',
       cliente_endereco: c.endereco||c.end||'', cliente_cep: c.cep||'',
       cliente_telefone: c.telefone||c.tel||'',
       vendedor_id: vendedorIdFinalOrc,
       vendedor_nome: vendedorNomeFinalOrc,
-      digitado_por_id: usuarioLogado.id, digitado_por_nome: usuarioLogado.nome,
+      digitado_por_id: dadosOriginais.digitado_por_id || usuarioLogado.id,
+      digitado_por_nome: dadosOriginais.digitado_por_nome || usuarioLogado.nome,
       itens:pedidoAtual.itens, forma:'', condicao:'',
       obs:document.getElementById('pedido-obs').value,
       subtotal:sub, desconto_geral:dg, desconto_total:sub-total, total,
       parcelas:[], status:'Orçamento'
     };
-    await db.ref('pedidos/'+orcamento.id).update(orcamento);
+    await db.ref('pedidos/'+id).update(orcamento);
     fecharModal('modal-pedido');
-    toast(`✓ Orçamento #${numero} salvo!`,'success');
+    toast(editandoExistente ? `✓ Orçamento #${numero} atualizado!` : `✓ Orçamento #${numero} salvo!`,'success');
     showTab('orcamentos', document.querySelector('[data-tab="orcamentos"]'));
   } catch(e){ toast('Erro: '+e.message,'error'); }
 }
