@@ -611,7 +611,7 @@ tbody td{padding:11px 16px;font-size:14px}
           <button class="btn btn-primary admin-only" onclick="abrirModalNovoItem()">+ Novo Insumo</button>
           <button class="btn btn-outline btn-sm admin-only" style="color:#d97706;border-color:#d97706" onclick="verificarReceitasSemProduto()">🔍 Receitas sem Cadastro</button>
           <button class="btn btn-outline btn-sm admin-only" style="color:#dc2626;border-color:#dc2626" onclick="verificarProdutosSemNome()">🔍 Produtos Sem Nome (invisíveis)</button>
-          <button class="btn btn-outline btn-sm admin-only" style="color:#b91c1c;border-color:#b91c1c" onclick="verificarPrecosAbaixoMinimo()">🔍 Preço de Venda Abaixo do Mínimo</button>
+          <button class="btn btn-outline btn-sm admin-only" style="color:#b91c1c;border-color:#b91c1c" onclick="verificarPrecosAbaixoMinimo()">🔍 Itens Bloqueados p/ Venda (Preço)</button>
         </div>
       </div>
       <div id="receitas-sem-produto-resultado"></div>
@@ -3715,25 +3715,30 @@ async function carregarPedidosCache(){
 
 function adicionarItem(cod){
   const p = PRODUTOS_DB.find(x=>x.codigo===cod); if(!p) return;
+
+  // Preço sempre parte do cadastro — nunca do histórico do cliente
+  // (o histórico é só visual na busca, não influencia o preço do pedido)
+  const precoMinimo = Number(p.preco_minimo) || 0;
+  const precoUsado = Number(p.preco_venda) || 0;
+
+  // Convenção: Preço de Venda abaixo do Mínimo (ex: 0,00 / 999,00) significa
+  // que o item está BLOQUEADO para venda de propósito (sem estoque/descontinuado).
+  // Admin pode ver o aviso mas ainda decide se quer prosseguir; vendedor não passa disso.
+  if(precoMinimo > 0 && precoUsado < precoMinimo){
+    if(!usuarioLogado?.admin){
+      alert(`🚫 "${p.nome}" (${p.codigo}) não pode ser vendido no momento.\n\nO cadastro está com Preço de Venda travado (${fmtMoeda(precoUsado)}, abaixo do mínimo de ${fmtMoeda(precoMinimo)}) — isso indica que o item está indisponível para venda. Fale com o admin se precisar vender mesmo assim.`);
+      return;
+    } else {
+      if(!confirm(`⚠️ "${p.nome}" (${p.codigo}) está com Preço de Venda travado (${fmtMoeda(precoUsado)}, abaixo do mínimo de ${fmtMoeda(precoMinimo)}) — geralmente isso significa que o item está bloqueado para venda de propósito.\n\nAdicionar mesmo assim?`)) return;
+    }
+  }
+
   const existe = pedidoAtual.itens.find(i=>i.codigo===cod);
   if(existe){
     existe.qtd++;
     toast(`⚠️ "${p.nome}" já estava no pedido — quantidade aumentada para ${existe.qtd}`, 'error');
   }
   else {
-    // Preço sempre parte do cadastro — nunca do histórico do cliente
-    // (o histórico é só visual na busca, não influencia o preço do pedido)
-    const precoMinimo = Number(p.preco_minimo) || 0;
-    let precoUsado = Number(p.preco_venda) || 0;
-
-    // O preço vindo do CADASTRO em si pode estar errado (ex: R$0,00 nunca preenchido).
-    // A trava de desconto só reage a mudança manual do vendedor — sem isso aqui, um
-    // preço de cadastro já abaixo do mínimo passava direto, sem aviso nenhum.
-    if(precoMinimo > 0 && precoUsado < precoMinimo && !usuarioLogado?.admin){
-      alert(`⚠️ ATENÇÃO: o cadastro de "${p.nome}" está com Preço de Venda de ${fmtMoeda(precoUsado)}, abaixo do mínimo de ${fmtMoeda(precoMinimo)}.\n\nO item foi adicionado usando o preço mínimo como segurança. Avise o admin para corrigir o Preço de Venda no cadastro do produto (código ${p.codigo}).`);
-      precoUsado = precoMinimo;
-    }
-
     pedidoAtual.itens.push({
       codigo:p.codigo, nome:p.nome, unidade:p.unidade||'UN',
       qtd:1, preco:precoUsado, preco_minimo:Number(p.preco_minimo),
@@ -7999,20 +8004,20 @@ async function verificarPrecosAbaixoMinimo(){
   const el = document.getElementById('receitas-sem-produto-resultado');
   el.innerHTML = '<div style="padding:12px;color:var(--muted)">⏳ Verificando...</div>';
 
-  const problemas = PRODUTOS_DB.filter(p => {
+  const bloqueados = PRODUTOS_DB.filter(p => {
     const minimo = Number(p.preco_minimo)||0;
     const venda = Number(p.preco_venda)||0;
     return !p.inativo && minimo > 0 && venda < minimo;
   }).sort((a,b)=>(Number(a.preco_venda)||0)-(Number(b.preco_venda)||0));
 
-  if(!problemas.length){
+  if(!bloqueados.length){
     el.innerHTML = '<div style="padding:12px 14px;margin:10px 0;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534;font-size:13px">✅ Nenhum produto ativo com Preço de Venda abaixo do Mínimo.</div>';
     return;
   }
 
   el.innerHTML = `
-    <div style="padding:12px 14px;margin:10px 0;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#991b1b">
-      ⚠️ <strong>${problemas.length} produto(s) ativo(s)</strong> têm Preço de Venda cadastrado ABAIXO do Preço Mínimo — isso deixa o item entrar num pedido nesse valor errado, mesmo sem o vendedor aplicar nenhum desconto. Corrija o Preço de Venda de cada um.
+    <div style="padding:12px 14px;margin:10px 0;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:13px;color:#1e3a5f">
+      ℹ️ <strong>${bloqueados.length} produto(s) ativo(s)</strong> estão com Preço de Venda abaixo do Mínimo — pelo padrão que vocês usam (ex: 0,00 / 999,00), isso bloqueia a venda de propósito. O sistema agora impede o vendedor de adicionar esses itens a um pedido, mostrando esse mesmo bloqueio na hora. Esta lista é só informativa — confira se todos aqui são mesmo pra ficar bloqueados; se algum deveria estar à venda, corrija o Preço de Venda dele.
     </div>
     <div style="overflow-x:auto;margin-bottom:10px">
     <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -8024,13 +8029,13 @@ async function verificarPrecosAbaixoMinimo(){
         <th style="padding:8px 10px;text-align:center">Ação</th>
       </tr></thead>
       <tbody>
-        ${problemas.map((p,idx)=>`
+        ${bloqueados.map((p,idx)=>`
           <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
             <td style="padding:7px 10px;font-weight:700">${p.codigo}</td>
             <td style="padding:7px 10px">${p.nome}</td>
             <td style="padding:7px 10px;text-align:center;color:#dc2626;font-weight:700">${fmtMoeda(p.preco_venda)}</td>
             <td style="padding:7px 10px;text-align:center">${fmtMoeda(p.preco_minimo)}</td>
-            <td style="padding:7px 10px;text-align:center"><button class="btn btn-primary btn-sm" onclick="abrirDetalheItem('${p.codigo}','vendavel')">✏️ Corrigir</button></td>
+            <td style="padding:7px 10px;text-align:center"><button class="btn btn-primary btn-sm" onclick="abrirDetalheItem('${p.codigo}','vendavel')">✏️ Editar</button></td>
           </tr>`).join('')}
       </tbody>
     </table></div>
