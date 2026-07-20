@@ -5550,8 +5550,8 @@ function buscarProdutoMovimento(){
   const lista = document.getElementById('mov-lista-produtos');
   if(q.length<2){ lista.style.display='none'; return; }
 
-  const itensVendaveis = PRODUTOS_DB.map(p=>({codigo:p.codigo, nome:p.nome, quantidade:p.quantidade, _tipo:'vendavel'}));
-  const itensInsumo = INSUMOS_DB.map(i=>({codigo:i.codigo, nome:i.nome, quantidade:i.estoque_atual, _tipo:'insumo', key:i.key}));
+  const itensVendaveis = PRODUTOS_DB.filter(p=>!p.inativo).map(p=>({codigo:p.codigo, nome:p.nome, quantidade:p.quantidade, _tipo:'vendavel'}));
+  const itensInsumo = INSUMOS_DB.filter(i=>!i.inativo).map(i=>({codigo:i.codigo, nome:i.nome, quantidade:i.estoque_atual, _tipo:'insumo', key:i.key}));
   const todos = [...itensVendaveis, ...itensInsumo];
 
   const res = todos.filter(p=>(p.nome||'').toLowerCase().includes(q)||(p.codigo||'').toLowerCase().includes(q)).slice(0,8);
@@ -8029,6 +8029,11 @@ function tituloEstoque(p, estq, reservado, disponivel, estMin, critico, capacida
 // Verifica produtos cujo Preço de Venda cadastrado está abaixo do Preço Mínimo
 // (ou zerado) — o mesmo problema de dado que deixou o 4680 ser vendido a R$0,00
 // sem nenhum desconto, porque a trava de desconto só reage a mudança manual.
+function fecharPainelDiagnostico(){
+  const el = document.getElementById('receitas-sem-produto-resultado');
+  if(el) el.innerHTML = '';
+}
+
 async function verificarPrecosAbaixoMinimo(){
   if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
   const el = document.getElementById('receitas-sem-produto-resultado');
@@ -8041,11 +8046,12 @@ async function verificarPrecosAbaixoMinimo(){
   }).sort((a,b)=>(Number(a.preco_venda)||0)-(Number(b.preco_venda)||0));
 
   if(!bloqueados.length){
-    el.innerHTML = '<div style="padding:12px 14px;margin:10px 0;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534;font-size:13px">✅ Nenhum produto ativo com Preço de Venda abaixo do Mínimo.</div>';
+    el.innerHTML = '<div style="text-align:right;margin-bottom:6px"><button class="btn btn-outline btn-sm" onclick="fecharPainelDiagnostico()">✕ Fechar</button></div><div style="padding:12px 14px;margin:10px 0;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534;font-size:13px">✅ Nenhum produto ativo com Preço de Venda abaixo do Mínimo.</div>';
     return;
   }
 
   el.innerHTML = `
+    <div style="text-align:right;margin-bottom:6px"><button class="btn btn-outline btn-sm" onclick="fecharPainelDiagnostico()">✕ Fechar</button></div>
     <div style="padding:12px 14px;margin:10px 0;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:13px;color:#1e3a5f">
       ℹ️ <strong>${bloqueados.length} produto(s) ativo(s)</strong> estão com Preço de Venda abaixo do Mínimo — pelo padrão que vocês usam (ex: 0,00 / 999,00), isso bloqueia a venda de propósito. O sistema agora impede o vendedor de adicionar esses itens a um pedido, mostrando esse mesmo bloqueio na hora. Esta lista é só informativa — confira se todos aqui são mesmo pra ficar bloqueados; se algum deveria estar à venda, corrija o Preço de Venda dele.
     </div>
@@ -8080,11 +8086,12 @@ async function verificarProdutosSemNome(){
   const semNome = Object.entries(dados).filter(([chave, p]) => !p?.nome || !String(p.nome).trim());
 
   if(!semNome.length){
-    el.innerHTML = '<div style="padding:12px 14px;margin:10px 0;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534;font-size:13px">✅ Nenhum produto com nome vazio encontrado.</div>';
+    el.innerHTML = '<div style="text-align:right;margin-bottom:6px"><button class="btn btn-outline btn-sm" onclick="fecharPainelDiagnostico()">✕ Fechar</button></div><div style="padding:12px 14px;margin:10px 0;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534;font-size:13px">✅ Nenhum produto com nome vazio encontrado.</div>';
     return;
   }
 
   el.innerHTML = `
+    <div style="text-align:right;margin-bottom:6px"><button class="btn btn-outline btn-sm" onclick="fecharPainelDiagnostico()">✕ Fechar</button></div>
     <div style="padding:12px 14px;margin:10px 0;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#991b1b">
       ⚠️ <strong>${semNome.length} produto(s)</strong> existem no banco de dados mas estão com o nome vazio — por isso ficam <strong>invisíveis</strong> na busca e em qualquer lista do sistema. Preencha o nome de cada um pra eles voltarem a aparecer.
     </div>
@@ -8129,11 +8136,12 @@ async function verificarReceitasSemProduto(){
   const orfaos = Object.values(RECEITAS_DB).filter(r => r.produto_codigo && !codigosProdutos.has(r.produto_codigo.toUpperCase()));
 
   if(!orfaos.length){
-    el.innerHTML = '<div style="padding:12px 14px;margin:10px 0;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534;font-size:13px">✅ Todas as receitas cadastradas têm um produto correspondente no catálogo.</div>';
+    el.innerHTML = '<div style="text-align:right;margin-bottom:6px"><button class="btn btn-outline btn-sm" onclick="fecharPainelDiagnostico()">✕ Fechar</button></div><div style="padding:12px 14px;margin:10px 0;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534;font-size:13px">✅ Todas as receitas cadastradas têm um produto correspondente no catálogo.</div>';
     return;
   }
 
   el.innerHTML = `
+    <div style="text-align:right;margin-bottom:6px"><button class="btn btn-outline btn-sm" onclick="fecharPainelDiagnostico()">✕ Fechar</button></div>
     <div style="padding:12px 14px;margin:10px 0;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;font-size:13px;color:#9a3412">
       ⚠️ <strong>${orfaos.length} receita(s)</strong> referenciam um código de produto que não existe no catálogo — por isso não aparecem na busca de Produtos &amp; Insumos, mesmo tendo receita de produção definida.
     </div>
