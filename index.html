@@ -831,6 +831,14 @@ tbody td{padding:11px 16px;font-size:14px}
           <button class="btn btn-primary btn-sm" style="background:#16a34a" onclick="importarMapeamentosJSON()">📥 Importar JSON</button>
           <div id="import-mapeamentos-result" style="margin-top:12px;font-size:13px"></div>
         </div>
+        <div class="table-wrap admin-only" style="padding:24px">
+          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">🧑‍💼 Corrigir Vendedor de Pedidos Importados do W3</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
+            A importação de pedidos do W3 tinha um bug que deixava o vendedor do pedido errado (do usuário que rodou a importação, em vez do vendedor cadastrado no cliente). Já corrigido para novas importações — esta ferramenta encontra e corrige os pedidos que já foram importados antes disso.
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="verificarVendedorPedidosW3()">🔍 Verificar Pedidos com Vendedor Divergente</button>
+          <div id="correcao-vendedor-w3-resultado" style="margin-top:14px"></div>
+        </div>
         <div class="table-wrap" style="padding:24px">
           <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">🗂️ Cadastrar/Atualizar Produtos e Insumos do Bling (por Categoria)</div>
           <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
@@ -3013,6 +3021,102 @@ async function salvarCorrecaoVendedor(){
   fecharModal('modal-corrigir-vendedor');
   toast('✓ Vendedor corrigido','success');
   verPedido(id);
+}
+
+// ══════════════════════════════════════════════
+// ══ CORREÇÃO EM MASSA: VENDEDOR DE PEDIDOS IMPORTADOS DO W3 ══
+// O import do W3 antes deixava o vendedor errado (do usuário que rodou a importação, ou o nome
+// vindo do W3) em vez do vendedor cadastrado no cliente. Isso já foi corrigido para importações
+// futuras — esta ferramenta corrige em massa os pedidos que já foram importados antes da correção.
+// ══════════════════════════════════════════════
+let correcaoVendedorCache = [];
+
+async function verificarVendedorPedidosW3(){
+  if(!usuarioLogado.admin){ toast('Apenas admin pode usar esta ferramenta','error'); return; }
+  const el = document.getElementById('correcao-vendedor-w3-resultado');
+  el.innerHTML = '<div style="padding:12px;color:var(--muted)">⏳ Verificando pedidos importados do W3...</div>';
+
+  if(!CLIENTES_DB.length) await carregarClientesFirebase();
+  const snap = await db.ref('pedidos').once('value');
+  const todos = snap.val() || {};
+
+  const divergentes = [];
+  Object.entries(todos).forEach(([id, p]) => {
+    if(!p.codigo_w3) return; // só pedidos importados do W3
+    const cliente = CLIENTES_DB.find(c => c.codigo === p.cliente_codigo);
+    const vendedorCorretoId = cliente?.vendedor_id || null;
+    const vendedorCorretoNome = cliente?.vendedor_nome || '';
+    if((p.vendedor_id||null) !== vendedorCorretoId){
+      divergentes.push({
+        id, numero: p.numero, cliente_nome: p.cliente_nome,
+        vendedorAtualNome: p.vendedor_nome || '(sem vendedor)',
+        vendedorCorretoId, vendedorCorretoNome: vendedorCorretoNome || '(cliente sem vendedor cadastrado)'
+      });
+    }
+  });
+
+  correcaoVendedorCache = divergentes;
+
+  if(!divergentes.length){
+    el.innerHTML = '<div style="padding:12px 14px;margin-top:10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534;font-size:13px">✅ Nenhum pedido importado do W3 com vendedor divergente do cadastro do cliente.</div>';
+    return;
+  }
+
+  el.innerHTML = `
+    <div style="padding:12px 14px;margin:10px 0;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;font-size:13px;color:#9a3412">
+      ⚠️ <strong>${divergentes.length} pedido(s)</strong> importados do W3 estão com um vendedor diferente do que está cadastrado hoje no cliente.
+    </div>
+    <div style="max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:10px">
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead style="background:var(--primary);color:rgba(255,255,255,.85);position:sticky;top:0"><tr>
+        <th style="padding:6px 8px;text-align:left">Pedido</th>
+        <th style="padding:6px 8px;text-align:left">Cliente</th>
+        <th style="padding:6px 8px;text-align:left">Vendedor Atual (errado)</th>
+        <th style="padding:6px 8px;text-align:left">Vendedor Correto (do cadastro)</th>
+      </tr></thead>
+      <tbody>
+        ${divergentes.map((d,idx)=>`
+          <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
+            <td style="padding:5px 8px;font-weight:700">#${d.numero}</td>
+            <td style="padding:5px 8px">${d.cliente_nome}</td>
+            <td style="padding:5px 8px;color:#dc2626">${d.vendedorAtualNome}</td>
+            <td style="padding:5px 8px;color:#16a34a;font-weight:700">${d.vendedorCorretoNome}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table></div>
+    <button class="btn btn-primary btn-sm" onclick="corrigirVendedorPedidosW3EmMassa()">✅ Corrigir todos os ${divergentes.length} pedido(s)</button>
+  `;
+}
+
+async function corrigirVendedorPedidosW3EmMassa(){
+  if(!usuarioLogado.admin){ toast('Apenas admin pode usar esta ferramenta','error'); return; }
+  const lista = correcaoVendedorCache;
+  if(!lista.length) return;
+  const ok = await confirmCustom(`Corrigir o vendedor de ${lista.length} pedido(s)?\n\nCada um vai passar a usar o vendedor atualmente cadastrado no respectivo cliente. Fica registrado no histórico de cada pedido.`, `Corrigir ${lista.length}`);
+  if(!ok) return;
+
+  const el = document.getElementById('correcao-vendedor-w3-resultado');
+  el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--muted)">⏳ Corrigindo...</div>';
+
+  let count = 0;
+  for(const d of lista){
+    const snap = await db.ref('pedidos/'+d.id).once('value');
+    const p = snap.val(); if(!p) continue;
+    const historico = p.historico_edicoes || [];
+    historico.push({
+      ts: Date.now(), usuario_nome: usuarioLogado.nome, usuario_tipo: 'admin',
+      alteracoes: [`Vendedor corrigido em massa (importação W3): "${p.vendedor_nome||'—'}" → "${d.vendedorCorretoNome}"`]
+    });
+    await db.ref('pedidos/'+d.id).update({
+      vendedor_id: d.vendedorCorretoId, vendedor_nome: d.vendedorCorretoNome === '(cliente sem vendedor cadastrado)' ? '' : d.vendedorCorretoNome,
+      historico_edicoes: historico
+    });
+    count++;
+  }
+
+  correcaoVendedorCache = [];
+  el.innerHTML = `<div style="padding:14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534">✅ ${count} pedido(s) corrigido(s).</div>`;
+  toast(`✓ ${count} pedido(s) corrigido(s)`,'success');
 }
 
 async function verPedido(id){
@@ -11177,8 +11281,8 @@ async function importarPedidosW3(){
           cliente_endereco: clienteEncontrado?.endereco || clienteEncontrado?.end || '',
           cliente_cep: clienteEncontrado?.cep || '',
           cliente_endereco_w3: pCsv.endereco,
-          vendedor_id: clienteEncontrado?.vendedor_id || usuarioLogado.id,
-          vendedor_nome: clienteEncontrado?.vendedor_nome || pCsv.vendedor_w3 || usuarioLogado.nome,
+          vendedor_id: clienteEncontrado?.vendedor_id || null,
+          vendedor_nome: clienteEncontrado?.vendedor_nome || '',
           digitado_por_id: usuarioLogado.id, digitado_por_nome: usuarioLogado.nome,
           itens: itensConvertidos, forma: '', condicao: '',
           obs: 'Importado do W3 (pedido #' + pCsv.codigo_w3 + ')' + (ehHistorico ? ' — histórico' : ''),
@@ -12593,6 +12697,22 @@ function montarLinhaItemHTML(i, idx){
   </tr>`;
 }
 
+// Layout específico do PDF de WhatsApp (gerarImagemPedido) — cabeçalho tem só
+// Produto | Qtd | Unit. | Desc. | Subtotal, diferente do slip de impressão normal
+// (que tem Código e Unidade também). Usar montarLinhaItemHTML aqui desalinhava tudo
+// uma coluna pra direita (Qtd mostrava o Código, Desc. mostrava a Qtd, etc.)
+function montarLinhaItemWhatsAppHTML(i, idx){
+  const sub = i.qtd * i.preco * (1-(i.desconto_item||0)/100);
+  const zebra = idx%2===1 ? 'background:#f5f5f5' : 'background:#fff';
+  return `<tr style="${zebra}">
+    <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc">${i.nome}</td>
+    <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:center">${i.qtd}</td>
+    <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:right">${Number(i.preco).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
+    <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:center">${i.desconto_item||0}%</td>
+    <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:right">${sub.toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
+  </tr>`;
+}
+
 function montarCabecalhoSlipHTML(p, subtitulo){
   // Para pedidos antigos que não têm CEP/telefone no snapshot, busca no cadastro do cliente
   const clienteCadastro = CLIENTES_DB.find(c=>c.codigo===p.cliente_codigo);
@@ -12737,7 +12857,7 @@ async function gerarImagemPedido(id){
   // Mede a altura real de cada linha
   const medidor = document.createElement('div');
   medidor.style.cssText = 'position:fixed;left:-9999px;top:0;width:480px;font-family:Arial,sans-serif;font-size:11.5px';
-  medidor.innerHTML = `<table style="width:100%;border-collapse:collapse"><tbody>${itens.map((i,idx)=>montarLinhaItemHTML(i,idx)).join('')}</tbody></table>`;
+  medidor.innerHTML = `<table style="width:100%;border-collapse:collapse"><tbody>${itens.map((i,idx)=>montarLinhaItemWhatsAppHTML(i,idx)).join('')}</tbody></table>`;
   document.body.appendChild(medidor);
   const alturas = Array.from(medidor.querySelectorAll('tbody > tr')).map(tr=>tr.getBoundingClientRect().height||40);
   document.body.removeChild(medidor);
@@ -12762,7 +12882,7 @@ async function gerarImagemPedido(id){
       const ehUltima = pg === paginasItens.length-1;
       const subtitulo = paginasItens.length>1 ? `Página ${pg+1}/${paginasItens.length}` : '';
 
-      const itensTr = paginasItens[pg].map((i,idx)=>montarLinhaItemHTML(i,idx)).join('');
+      const itensTr = paginasItens[pg].map((i,idx)=>montarLinhaItemWhatsAppHTML(i,idx)).join('');
       const conteudo = `
         ${montarCabecalhoSlipHTML(p, subtitulo)}
         <table style="width:100%;border-collapse:collapse">
