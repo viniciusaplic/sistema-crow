@@ -611,6 +611,7 @@ tbody td{padding:11px 16px;font-size:14px}
           <button class="btn btn-primary admin-only" onclick="abrirModalNovoItem()">+ Novo Insumo</button>
           <button class="btn btn-outline btn-sm admin-only" style="color:#d97706;border-color:#d97706" onclick="verificarReceitasSemProduto()">🔍 Receitas sem Cadastro</button>
           <button class="btn btn-outline btn-sm admin-only" style="color:#dc2626;border-color:#dc2626" onclick="verificarProdutosSemNome()">🔍 Produtos Sem Nome (invisíveis)</button>
+          <button class="btn btn-outline btn-sm admin-only" style="color:#b91c1c;border-color:#b91c1c" onclick="verificarPrecosAbaixoMinimo()">🔍 Preço de Venda Abaixo do Mínimo</button>
         </div>
       </div>
       <div id="receitas-sem-produto-resultado"></div>
@@ -3723,7 +3724,16 @@ function adicionarItem(cod){
     // Preço sempre parte do cadastro — nunca do histórico do cliente
     // (o histórico é só visual na busca, não influencia o preço do pedido)
     const precoMinimo = Number(p.preco_minimo) || 0;
-    const precoUsado = Number(p.preco_venda);
+    let precoUsado = Number(p.preco_venda) || 0;
+
+    // O preço vindo do CADASTRO em si pode estar errado (ex: R$0,00 nunca preenchido).
+    // A trava de desconto só reage a mudança manual do vendedor — sem isso aqui, um
+    // preço de cadastro já abaixo do mínimo passava direto, sem aviso nenhum.
+    if(precoMinimo > 0 && precoUsado < precoMinimo && !usuarioLogado?.admin){
+      alert(`⚠️ ATENÇÃO: o cadastro de "${p.nome}" está com Preço de Venda de ${fmtMoeda(precoUsado)}, abaixo do mínimo de ${fmtMoeda(precoMinimo)}.\n\nO item foi adicionado usando o preço mínimo como segurança. Avise o admin para corrigir o Preço de Venda no cadastro do produto (código ${p.codigo}).`);
+      precoUsado = precoMinimo;
+    }
+
     pedidoAtual.itens.push({
       codigo:p.codigo, nome:p.nome, unidade:p.unidade||'UN',
       qtd:1, preco:precoUsado, preco_minimo:Number(p.preco_minimo),
@@ -7981,6 +7991,52 @@ function tituloEstoque(p, estq, reservado, disponivel, estMin, critico, capacida
 
 // Verifica produtos que existem no Firebase mas ficam INVISÍVEIS no sistema inteiro (busca, listagens,
 // tudo) porque o campo "nome" está vazio — carregarProdutosFirebase() filtra qualquer item sem nome.
+// Verifica produtos cujo Preço de Venda cadastrado está abaixo do Preço Mínimo
+// (ou zerado) — o mesmo problema de dado que deixou o 4680 ser vendido a R$0,00
+// sem nenhum desconto, porque a trava de desconto só reage a mudança manual.
+async function verificarPrecosAbaixoMinimo(){
+  if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
+  const el = document.getElementById('receitas-sem-produto-resultado');
+  el.innerHTML = '<div style="padding:12px;color:var(--muted)">⏳ Verificando...</div>';
+
+  const problemas = PRODUTOS_DB.filter(p => {
+    const minimo = Number(p.preco_minimo)||0;
+    const venda = Number(p.preco_venda)||0;
+    return !p.inativo && minimo > 0 && venda < minimo;
+  }).sort((a,b)=>(Number(a.preco_venda)||0)-(Number(b.preco_venda)||0));
+
+  if(!problemas.length){
+    el.innerHTML = '<div style="padding:12px 14px;margin:10px 0;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534;font-size:13px">✅ Nenhum produto ativo com Preço de Venda abaixo do Mínimo.</div>';
+    return;
+  }
+
+  el.innerHTML = `
+    <div style="padding:12px 14px;margin:10px 0;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#991b1b">
+      ⚠️ <strong>${problemas.length} produto(s) ativo(s)</strong> têm Preço de Venda cadastrado ABAIXO do Preço Mínimo — isso deixa o item entrar num pedido nesse valor errado, mesmo sem o vendedor aplicar nenhum desconto. Corrija o Preço de Venda de cada um.
+    </div>
+    <div style="overflow-x:auto;margin-bottom:10px">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead style="background:var(--primary);color:rgba(255,255,255,.85)"><tr>
+        <th style="padding:8px 10px;text-align:left">Código</th>
+        <th style="padding:8px 10px;text-align:left">Nome</th>
+        <th style="padding:8px 10px;text-align:center">Preço de Venda</th>
+        <th style="padding:8px 10px;text-align:center">Preço Mínimo</th>
+        <th style="padding:8px 10px;text-align:center">Ação</th>
+      </tr></thead>
+      <tbody>
+        ${problemas.map((p,idx)=>`
+          <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
+            <td style="padding:7px 10px;font-weight:700">${p.codigo}</td>
+            <td style="padding:7px 10px">${p.nome}</td>
+            <td style="padding:7px 10px;text-align:center;color:#dc2626;font-weight:700">${fmtMoeda(p.preco_venda)}</td>
+            <td style="padding:7px 10px;text-align:center">${fmtMoeda(p.preco_minimo)}</td>
+            <td style="padding:7px 10px;text-align:center"><button class="btn btn-primary btn-sm" onclick="abrirDetalheItem('${p.codigo}','vendavel')">✏️ Corrigir</button></td>
+          </tr>`).join('')}
+      </tbody>
+    </table></div>
+  `;
+}
+
 async function verificarProdutosSemNome(){
   const el = document.getElementById('receitas-sem-produto-resultado');
   el.innerHTML = '<div style="padding:12px;color:var(--muted)">⏳ Verificando...</div>';
