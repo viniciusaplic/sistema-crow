@@ -5804,6 +5804,7 @@ async function abrirHistoricoEstoque(codigo){
       <button onclick="document.getElementById('hist-f-tipo').value='';document.getElementById('hist-f-ini').value='';document.getElementById('hist-f-fim').value='';renderHistoricoFiltrado()"
         style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:#fff;cursor:pointer">Limpar</button>
     </div>
+    <div id="hist-total-periodo" style="margin-bottom:10px"></div>
     <div id="hist-lista" style="max-height:45vh;overflow-y:auto;border:1px solid var(--border);border-radius:10px"></div>
   `;
   renderHistoricoFiltrado();
@@ -5835,6 +5836,35 @@ function renderHistoricoFiltrado(){
 
   const el = document.getElementById('hist-lista');
   if(!el) return;
+
+  // Total do período filtrado — soma separada por tipo, pra não precisar somar na mão
+  const elTotal = document.getElementById('hist-total-periodo');
+  if(elTotal){
+    let totalEntrada = 0, totalSaida = 0, totalBalancoEntrada = 0, totalBalancoSaida = 0;
+    lista.forEach(m=>{
+      const isBalanco = (m.motivo||'').toLowerCase().includes('balanço') || (m.motivo||'').toLowerCase().includes('balanco') || (m.motivo||'').toLowerCase().includes('ajuste');
+      const qtd = Number(m.qtd)||0;
+      if(isBalanco){
+        if(m.tipo==='entrada') totalBalancoEntrada += qtd; else totalBalancoSaida += qtd;
+      } else {
+        if(m.tipo==='entrada') totalEntrada += qtd; else totalSaida += qtd;
+      }
+    });
+    const totalGeralEntrada = totalEntrada + totalBalancoEntrada;
+    const totalGeralSaida = totalSaida + totalBalancoSaida;
+    const saldo = totalGeralEntrada - totalGeralSaida;
+    if(lista.length){
+      elTotal.innerHTML = `
+        <div style="display:flex;flex-wrap:wrap;gap:14px;padding:10px 14px;background:var(--bg);border-radius:8px;font-size:13px">
+          <div>⬆️ Entradas: <strong style="color:var(--success)">${totalGeralEntrada}</strong></div>
+          <div>⬇️ Saídas: <strong style="color:#dc2626">${totalGeralSaida}</strong></div>
+          <div>Saldo do período: <strong style="color:${saldo>=0?'var(--success)':'#dc2626'}">${saldo>=0?'+':''}${saldo}</strong></div>
+          <div style="color:var(--muted)">(${lista.length} lançamento(s))</div>
+        </div>`;
+    } else {
+      elTotal.innerHTML = '';
+    }
+  }
   el.innerHTML = lista.length ? lista.map(m=>{
     const origemExiste = m.origem_tipo && m.origem_id &&
       (m.origem_tipo !== 'pedido' || origensValidas.has(m.origem_id));
