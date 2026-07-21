@@ -842,6 +842,15 @@ tbody td{padding:11px 16px;font-size:14px}
           <button class="btn btn-primary btn-sm" onclick="verificarVendedorPedidosW3()">🔍 Verificar Pedidos com Vendedor Divergente</button>
           <div id="correcao-vendedor-w3-resultado" style="margin-top:14px"></div>
         </div>
+        <div class="table-wrap admin-only" style="padding:24px">
+          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">👤 Remover Vendedor em Massa</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
+            Sobe uma planilha (Excel) com uma coluna <strong>Cliente</strong> (nome) — ex: o relatório de "Clientes Inativos" exportado pelo sistema. Para cada cliente encontrado no cadastro, o vendedor vinculado é removido, deixando o cliente livre (sem vendedor).
+          </div>
+          <input type="file" id="import-remover-vend-file" accept=".xlsx,.xls" style="font-size:13px;margin-bottom:12px;display:block">
+          <button class="btn btn-primary btn-sm" onclick="preVisualizarRemoverVendedor()">🔍 Pré-visualizar</button>
+          <div id="import-remover-vend-preview" style="margin-top:14px"></div>
+        </div>
         <div class="table-wrap" style="padding:24px">
           <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">🗂️ Cadastrar/Atualizar Produtos e Insumos do Bling (por Categoria)</div>
           <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
@@ -12292,6 +12301,125 @@ async function aplicarImportCategoria(){
   el.innerHTML = `<div style="padding:14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534">✅ ${criados} item(ns) criado(s), ${atualizados} atualizado(s). ${movimentosBalanco.length} balanço(s) de estoque registrado(s) no histórico.</div>`;
   toast(`✓ Importação concluída — ${criados} criado(s), ${atualizados} atualizado(s)`, 'success');
   renderProdutos();
+}
+
+// ══════════════════════════════════════════════
+// ══ REMOÇÃO DE VENDEDOR EM MASSA ══
+// Lê uma planilha com nomes de clientes (ex: relatório de Clientes Inativos exportado
+// pelo próprio sistema) e remove o vendedor vinculado de cada um encontrado no cadastro.
+// ══════════════════════════════════════════════
+let removerVendedorCache = [];
+
+function preVisualizarRemoverVendedor(){
+  if(!temPermissaoEditar('clientes')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  const file = document.getElementById('import-remover-vend-file').files[0];
+  const el = document.getElementById('import-remover-vend-preview');
+  if(!file){ toast('Selecione um arquivo','error'); return; }
+
+  const reader = new FileReader();
+  reader.onload = async e => {
+    try {
+      if(!CLIENTES_DB.length) await carregarClientesFirebase();
+
+      const XLSX = window.XLSX;
+      if(!XLSX) throw new Error('Biblioteca XLS não carregada. Recarregue a página e tente novamente.');
+      const wb = XLSX.read(e.target.result, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const linhas = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      if(!linhas.length) throw new Error('Planilha vazia');
+
+      const header = linhas[0].map(h => String(h||'').toLowerCase().trim());
+      const idxCliente = header.findIndex(h => h.includes('cliente'));
+      if(idxCliente === -1) throw new Error('Não encontrei uma coluna "Cliente" no cabeçalho da planilha.');
+
+      const itens = [];
+      for(let i = 1; i < linhas.length; i++){
+        const nomeLinha = String(linhas[i][idxCliente]||'').trim();
+        if(!nomeLinha) continue;
+
+        const cliente = CLIENTES_DB.find(c => normalizarNomeCliente(c.nome) === normalizarNomeCliente(nomeLinha));
+        if(!cliente){
+          itens.push({ nome: nomeLinha, status: 'naoencontrado' });
+          continue;
+        }
+        if(!cliente.vendedor_id){
+          itens.push({ nome: cliente.nome, codigo: cliente.codigo, status: 'semvendedor' });
+          continue;
+        }
+        itens.push({ nome: cliente.nome, codigo: cliente.codigo, vendedorAtual: cliente.vendedor_nome||'—', status: 'ok' });
+      }
+
+      removerVendedorCache = itens;
+
+      const validos = itens.filter(i=>i.status==='ok');
+      const semVendedor = itens.filter(i=>i.status==='semvendedor');
+      const naoEncontrados = itens.filter(i=>i.status==='naoencontrado');
+
+      if(!itens.length){
+        el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--muted)">Nenhuma linha com nome de cliente encontrada na planilha.</div>';
+        return;
+      }
+
+      el.innerHTML = `
+        <div style="margin-bottom:12px;padding:12px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:13px">
+          <strong>${validos.length}</strong> cliente(s) terão o vendedor removido · <strong>${semVendedor.length}</strong> já estavam sem vendedor · <strong style="color:${naoEncontrados.length?'#dc2626':'inherit'}">${naoEncontrados.length}</strong> não encontrado(s) no cadastro
+        </div>
+        ${naoEncontrados.length ? `
+        <div style="margin-bottom:12px;padding:12px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#991b1b;max-height:150px;overflow-y:auto">
+          ${naoEncontrados.map(n=>`⚠️ ${n.nome}`).join('<br>')}
+        </div>` : ''}
+        ${validos.length ? `
+        <div style="max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead style="background:var(--primary);color:rgba(255,255,255,.85);position:sticky;top:0"><tr>
+            <th style="padding:6px 10px;text-align:left">Código</th>
+            <th style="padding:6px 10px;text-align:left">Cliente</th>
+            <th style="padding:6px 10px;text-align:left">Vendedor Atual (será removido)</th>
+          </tr></thead>
+          <tbody>
+            ${validos.map((it,idx)=>`
+              <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
+                <td style="padding:5px 10px;font-weight:700">${it.codigo}</td>
+                <td style="padding:5px 10px">${it.nome}</td>
+                <td style="padding:5px 10px;color:#dc2626">${it.vendedorAtual}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table></div>
+        <button class="btn btn-primary btn-sm" style="margin-top:14px" onclick="aplicarRemoverVendedor()">✅ Remover Vendedor de ${validos.length} Cliente(s)</button>
+        ` : '<div style="padding:12px;color:var(--muted);text-align:center">Nenhum cliente pra atualizar.</div>'}
+      `;
+    } catch(err){
+      el.innerHTML = `<div style="color:#dc2626;padding:12px">Erro: ${err.message}</div>`;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+async function aplicarRemoverVendedor(){
+  if(!temPermissaoEditar('clientes')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  const validos = removerVendedorCache.filter(i => i.status === 'ok');
+  if(!validos.length){ toast('Nada para aplicar','error'); return; }
+  const ok = await confirmCustom(`Remover o vendedor de ${validos.length} cliente(s)?\n\nEles ficarão sem vendedor vinculado.`, `Remover de ${validos.length}`);
+  if(!ok) return;
+
+  const el = document.getElementById('import-remover-vend-preview');
+  el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--muted)">⏳ Removendo vendedor...</div>';
+
+  let count = 0;
+  for(const it of validos){
+    try {
+      await db.ref('clientes/c'+it.codigo).update({ vendedor_id: null, vendedor_nome: '' });
+      const mem = CLIENTES_DB.find(c=>c.codigo===it.codigo);
+      if(mem){ mem.vendedor_id = null; mem.vendedor_nome = ''; }
+      count++;
+    } catch(e){ /* segue pros próximos mesmo se um falhar */ }
+  }
+
+  removerVendedorCache = [];
+  document.getElementById('import-remover-vend-file').value = '';
+  el.innerHTML = `<div style="padding:14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534">✅ Vendedor removido de ${count} cliente(s).</div>`;
+  toast(`✓ Vendedor removido de ${count} cliente(s)`,'success');
+  renderClientes();
 }
 
 function preVisualizarBalancoImportado(){
