@@ -3369,6 +3369,7 @@ async function exportarPedidosW3(){
   const fCliente = (document.getElementById('f-cliente').value||'').toLowerCase();
   const fProduto = (document.getElementById('f-produto').value||'').toLowerCase();
   const fStatus  = document.getElementById('f-status').value;
+  const fVendedor = (document.getElementById('f-vendedor')?.value || '').toLowerCase().trim();
 
   let pedidos = [];
   try {
@@ -3377,6 +3378,7 @@ async function exportarPedidosW3(){
     for(const k in todos){
       const p = todos[k];
       if(!vejaTudoDoModulo('pedidos') && p.vendedor_id!==usuarioLogado.id) continue;
+      if(fVendedor && !(p.vendedor_nome||'').toLowerCase().includes(fVendedor)) continue;
       if(fStatus==='ativos'){ if(p.status!=='AA' && p.status!=='AP' && p.status!=='EX') continue; }
       else if(fStatus && p.status!==fStatus) continue;
       if(fCliente && !p.cliente_nome.toLowerCase().includes(fCliente)) continue;
