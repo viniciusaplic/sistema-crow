@@ -5289,6 +5289,27 @@ async function registrarMovimentoEstoque(codigo, nome, tipo, qtd, motivo, origem
   });
 }
 
+// Vai direto da tela de Produtos & Insumos pra página de Movimentação de Estoque
+// (aba Estoque → Analisar Movimentações), já filtrada pelo item clicado
+function irParaMovimentacaoEstoque(codigo){
+  showTab('estoque', document.querySelector('[data-tab="estoque"]'));
+  setTimeout(()=>{
+    const viewProdutos = document.getElementById('estoque-view-produtos');
+    const viewMovimentos = document.getElementById('estoque-view-movimentos');
+    if(viewProdutos) viewProdutos.style.display = 'none';
+    if(viewMovimentos) viewMovimentos.style.display = '';
+    const btn = document.getElementById('btn-toggle-estoque-view');
+    if(btn) btn.textContent = '📦 Ver Produtos';
+
+    document.getElementById('mov-f-codigo').value = codigo;
+    if(!document.getElementById('mov-f-data-ini').value){
+      document.getElementById('mov-f-data-ini').value = primeiroDiaMesAtual();
+    }
+    filtroMovimentosJaAplicado = true;
+    renderMovimentosEstoque();
+  }, 100);
+}
+
 function toggleEstoqueView(){
   const viewProdutos = document.getElementById('estoque-view-produtos');
   const viewMovimentos = document.getElementById('estoque-view-movimentos');
@@ -8280,7 +8301,7 @@ async function renderProdutos(){
       <td style="color:var(--muted)">${p._tipo==='vendavel'?fmtMoeda(p.preco_minimo):'—'}</td>
       <td onclick="event.stopPropagation();abrirHistoricoEstoque('${p.codigo}')" style="cursor:pointer">${est} <span style="font-size:10px;color:var(--accent)">📋</span></td>
       <td style="white-space:nowrap" onclick="event.stopPropagation()">
-        <button class="btn btn-outline btn-sm" style="padding:4px 8px;font-size:11px;color:#0369a1;border-color:#0369a1" onclick="abrirHistoricoEstoque('${p.codigo}')" title="Ver histórico de movimentação deste item">📊 Estoque</button>
+        <button class="btn btn-outline btn-sm" style="padding:4px 8px;font-size:11px;color:#0369a1;border-color:#0369a1" onclick="irParaMovimentacaoEstoque('${p.codigo}')" title="Ir para a página de Movimentação de Estoque deste item">📊 Estoque</button>
         <button class="btn btn-outline btn-sm" style="padding:4px 8px;font-size:11px" onclick="imprimirEtiquetaEstoque('${p.codigo}','${p._tipo}')" title="Etiqueta de Estoque (prateleira)">🏷️ Estoque</button>
         <button class="btn btn-outline btn-sm" style="padding:4px 8px;font-size:11px" onclick="imprimirEtiquetaProduto('${p.codigo}','${p._tipo}')" title="Etiqueta de Produto (embalagem)">🏷️ Produto</button>
       </td>
