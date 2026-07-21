@@ -394,6 +394,8 @@ tbody td{padding:11px 16px;font-size:14px}
     <!-- PAINEL -->
     <div id="tab-painel">
       <div class="dashboard-cards" id="dash-cards"></div>
+      <div class="section-header admin-only" id="dash-clientes-novos-header" style="display:none"><div class="section-title">👤 Clientes Novos — Pendentes no W3</div></div>
+      <div id="dash-clientes-novos-wrap" class="admin-only"></div>
       <div class="section-header"><div class="section-title">Pedidos Recentes</div></div>
       <div id="dash-pedidos-wrap"></div>
     </div>
@@ -2587,6 +2589,41 @@ async function renderPainel(){
     <div class="dash-card"><div class="dash-card-label">Total do Mês</div><div class="dash-card-value success">${fmtMoeda(totalMes)}</div></div>
     <div class="dash-card"><div class="dash-card-label">Pedidos do Mês</div><div class="dash-card-value">${pedidosMes}</div></div>
   `;
+
+  // Clientes novos pendentes de cadastro no W3 — visível só pra admin, direto no painel
+  if(usuarioLogado.admin){
+    try {
+      const snapClientes = await db.ref('clientes').once('value');
+      const todosClientes = snapClientes.val() || {};
+      const pendentes = Object.values(todosClientes)
+        .filter(c => c.pendente_w3 && !c.inativo)
+        .sort((a,b) => (b.ts_cadastro||0) - (a.ts_cadastro||0));
+
+      const headerEl = document.getElementById('dash-clientes-novos-header');
+      const wrapEl = document.getElementById('dash-clientes-novos-wrap');
+      if(pendentes.length){
+        headerEl.style.display = '';
+        headerEl.querySelector('.section-title').textContent = `👤 Clientes Novos — Pendentes no W3 (${pendentes.length})`;
+        wrapEl.innerHTML = pendentes.map(c => `
+          <div class="pedido-card" style="border-left:3px solid #f59e0b">
+            <div class="pedido-card-header">
+              <div>
+                <div class="pedido-card-num">${c.nome}</div>
+                <div style="font-size:12px;color:var(--muted);margin-top:2px">
+                  Cadastrado por: <strong>${c.criado_por || c.vendedor_nome || '—'}</strong>
+                  ${c.ts_cadastro ? ' · ' + new Date(c.ts_cadastro).toLocaleString('pt-BR') : ''}
+                </div>
+              </div>
+              <button class="btn btn-outline btn-sm" style="color:#16a34a;border-color:#16a34a" onclick="marcarClienteW3Ok('${c.codigo}')">✅ Cadastrado no W3</button>
+            </div>
+            <div class="pedido-card-info">📄 ${c.cpf_cnpj||'Sem CNPJ/CPF'} ${c.telefone?' · 📞 '+c.telefone:''}</div>
+          </div>`).join('');
+      } else {
+        headerEl.style.display = 'none';
+        wrapEl.innerHTML = '';
+      }
+    } catch(e){ /* silencioso — não deve travar o resto do painel */ }
+  }
 
   // Painel mostra só pedidos ativos (Aguardando Aprovação, Aprovado, Em Separação)
   const statusAtivos = ['AA', 'AP', 'EX'];
@@ -7833,7 +7870,7 @@ async function salvarCliente(){
       toast('✓ Cliente atualizado!','success');
     } else {
       // Modo criação manual: cliente ainda não existe no W3 — marcado como pendente de cadastro lá
-      const novo = { codigo:'N'+Date.now(), ...dados, novo:true, pendente_w3: true, ts_cadastro: Date.now() };
+      const novo = { codigo:'N'+Date.now(), ...dados, novo:true, pendente_w3: true, ts_cadastro: Date.now(), criado_por: usuarioLogado.nome };
       const key = 'c' + novo.codigo;
       await db.ref('clientes/' + key).set(novo);
       CLIENTES_DB.push(novo);
