@@ -3369,10 +3369,33 @@ async function clonarPedido(id){
 
   fecharModal('modal-ver-pedido');
   // Clona itens removendo qualquer marcação de separação/bipagem da OP anterior
-  const itensClonados = JSON.parse(JSON.stringify(p.itens||[])).map(i=>{
+  let itensClonados = JSON.parse(JSON.stringify(p.itens||[])).map(i=>{
     delete i.separado; delete i.qtd_bipada; delete i.bipado;
     return i;
   });
+
+  // Revalida cada item contra o CADASTRO ATUAL — preços podem ter mudado desde o
+  // pedido original, e um item pode ter sido bloqueado pra venda (preço abaixo do
+  // mínimo) depois que aquele pedido antigo foi feito. Sem isso, clonar reproduzia
+  // o preço antigo sem passar pela mesma trava usada ao adicionar item manualmente.
+  const itensBloqueados = [];
+  itensClonados = itensClonados.filter(item => {
+    const cadastro = PRODUTOS_DB.find(x=>x.codigo===item.codigo);
+    if(!cadastro) return true; // item não encontrado no cadastro atual — mantém como estava, sem como validar
+    const precoMinimoAtual = Number(cadastro.preco_minimo) || 0;
+    item.preco_minimo = precoMinimoAtual; // atualiza pro mínimo vigente, não o congelado do pedido antigo
+
+    if(precoMinimoAtual > 0 && Number(cadastro.preco_venda||0) < precoMinimoAtual && !usuarioLogado?.admin){
+      itensBloqueados.push(item.nome);
+      return false; // remove do clone — item está bloqueado pra venda hoje
+    }
+    return true;
+  });
+
+  if(itensBloqueados.length){
+    alert(`🚫 ${itensBloqueados.length} item(ns) não foram clonados porque estão bloqueados para venda hoje (preço abaixo do mínimo):\n\n${itensBloqueados.join('\n')}\n\nFale com o admin se precisar vendê-los mesmo assim.`);
+  }
+
   pedidoAtual = {
     id: null, // sempre cria um pedido novo
     cliente: { codigo:p.cliente_codigo, nome:p.cliente_nome, cpf_cnpj:p.cliente_cpf, cidade:p.cliente_cidade, uf:p.cliente_uf },
@@ -3848,7 +3871,45 @@ function calcTotal(){
   return sub * (1 - dg/100);
 }
 
+// Última trava antes de salvar — confere TODOS os itens do pedido (já com desconto de
+// item e desconto geral aplicados) contra o preço mínimo de cada um. Roda antes de
+// gravar no Firebase, não importa se o item chegou ali por busca manual, clone, ou
+// qualquer outro caminho — garante que não escapa nenhum item abaixo do mínimo.
+function validarPedidoPrecosMinimos(){
+  if(usuarioLogado?.admin) return null; // admin pode vender abaixo do mínimo
+  const dg = parseFloat(document.getElementById('desc-geral')?.value) || 0;
+  for(const item of pedidoAtual.itens){
+    if(!(item.preco_minimo > 0)) continue;
+    const precoComDescItem = item.preco * (1-(item.desconto_item||0)/100);
+    const precoFinal = precoComDescItem * (1 - dg/100);
+    if(precoFinal < item.preco_minimo - 0.001){ // pequena tolerância pra arredondamento
+      return { item, precoFinal };
+    }
+  }
+  return null;
+}
+
 function atualizarTotais(){
+  // Trava o desconto geral se ele derrubar QUALQUER item abaixo do preço mínimo dele —
+  // sem isso, dava pra contornar a trava por item aplicando desconto no total do pedido.
+  if(!usuarioLogado?.admin){
+    const dgEl = document.getElementById('desc-geral');
+    const dg = parseFloat(dgEl.value)||0;
+    if(dg > 0){
+      for(const item of pedidoAtual.itens){
+        if(!(item.preco_minimo > 0)) continue;
+        const precoComDescItem = item.preco * (1-(item.desconto_item||0)/100);
+        const precoFinal = precoComDescItem * (1 - dg/100);
+        if(precoFinal < item.preco_minimo){
+          const dgMaximo = precoComDescItem > 0 ? Math.max(0, ((precoComDescItem - item.preco_minimo) / precoComDescItem * 100)) : 0;
+          alert(`Desconto geral máximo permitido: ${dgMaximo.toFixed(1)}%\n\nCom ${dg}% de desconto geral, "${item.nome}" ficaria em ${fmtMoeda(precoFinal)}, abaixo do mínimo de ${fmtMoeda(item.preco_minimo)}.`);
+          dgEl.value = dgMaximo.toFixed(1);
+          break;
+        }
+      }
+    }
+  }
+
   const sub = calcSubtotal();
   const total = calcTotal();
   document.getElementById('tot-itens').textContent = pedidoAtual.itens.length;
@@ -3939,6 +4000,13 @@ async function confirmarPedido(){
  try {
   if(!pedidoAtual.cliente){ toast('Selecione um cliente','error'); return; }
   if(!pedidoAtual.itens.length){ toast('Adicione pelo menos um produto','error'); return; }
+
+  const violacao = validarPedidoPrecosMinimos();
+  if(violacao){
+    alert(`🚫 Não é possível salvar: "${violacao.item.nome}" ficaria em ${fmtMoeda(violacao.precoFinal)}, abaixo do preço mínimo de ${fmtMoeda(violacao.item.preco_minimo)}.\n\nAjuste o preço/desconto ou fale com o admin.`);
+    return;
+  }
+
   const forma = document.getElementById('pedido-forma').value;
   const condicao = document.getElementById('pedido-condicao').value;
   if(!forma){ toast('Selecione a forma de pagamento','error'); return; }
@@ -4055,6 +4123,13 @@ async function confirmarPedido(){
 async function salvarComoOrcamento(){
   if(!pedidoAtual.cliente){ toast('Selecione um cliente','error'); return; }
   if(!pedidoAtual.itens.length){ toast('Adicione pelo menos um produto','error'); return; }
+
+  const violacao = validarPedidoPrecosMinimos();
+  if(violacao){
+    alert(`🚫 Não é possível salvar: "${violacao.item.nome}" ficaria em ${fmtMoeda(violacao.precoFinal)}, abaixo do preço mínimo de ${fmtMoeda(violacao.item.preco_minimo)}.\n\nAjuste o preço/desconto ou fale com o admin.`);
+    return;
+  }
+
   const sub=calcSubtotal(); const dg=parseFloat(document.getElementById('desc-geral').value)||0;
   const total=sub*(1-dg/100); const c=pedidoAtual.cliente;
   try {
@@ -5428,11 +5503,16 @@ async function renderMovimentosEstoque(){
       <tbody>${pagina.map(m=>{
         const temOrigem = m.origem_tipo && m.origem_id;
         const onclickAttr = temOrigem ? `onclick="abrirOrigemMovimento('${m.origem_tipo}','${m.origem_id}')" style="cursor:pointer"` : '';
+        const isBalanco = /balan[çc]o|ajuste/i.test(m.motivo||'');
+        const tipoLabel = isBalanco
+          ? `⚖️ Balanço (${m.tipo==='entrada'?'+':'-'})`
+          : (m.tipo==='entrada'?'⬆️ Entrada':'⬇️ Saída');
+        const tipoCor = isBalanco ? '#7c3aed' : (m.tipo==='entrada'?'var(--success)':'#dc2626');
         return `<tr ${onclickAttr} style="border-bottom:1px solid var(--border);${temOrigem?'cursor:pointer':''}" ${temOrigem?`onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''"`:''}>
           <td style="padding:10px;white-space:nowrap;font-size:12px">${new Date(m.ts).toLocaleString('pt-BR')}</td>
           <td style="padding:10px"><strong>${m.codigo}</strong></td>
           <td style="padding:10px">${m.nome}</td>
-          <td style="padding:10px;text-align:center;color:${m.tipo==='entrada'?'var(--success)':'#dc2626'};font-weight:600">${m.tipo==='entrada'?'⬆️ Entrada':'⬇️ Saída'}</td>
+          <td style="padding:10px;text-align:center;color:${tipoCor};font-weight:600">${tipoLabel}</td>
           <td style="padding:10px;text-align:center"><strong>${m.qtd}</strong></td>
           <td style="padding:10px;font-size:12px;color:var(--muted)">${m.motivo||''}</td>
         </tr>`;
@@ -12878,8 +12958,9 @@ function montarCabecalhoSlipHTML(p, subtitulo){
   const clienteCadastro = CLIENTES_DB.find(c=>c.codigo===p.cliente_codigo);
   const cep = p.cliente_cep || clienteCadastro?.cep || '';
   const tel = p.cliente_telefone || clienteCadastro?.telefone || clienteCadastro?.tel || '';
+  const enderecoCompleto = p.cliente_endereco || clienteCadastro?.endereco || clienteCadastro?.end || '';
 
-  const endPartes = [p.cliente_endereco, p.cliente_cidade&&p.cliente_uf ? p.cliente_cidade+', '+p.cliente_uf : (p.cliente_cidade||p.cliente_uf||'')].filter(Boolean);
+  const endPartes = [enderecoCompleto, p.cliente_cidade&&p.cliente_uf ? p.cliente_cidade+', '+p.cliente_uf : (p.cliente_cidade||p.cliente_uf||'')].filter(Boolean);
   const endHtml = [
     endPartes.join('<br>'),
     cep ? 'CEP: '+cep : '',
@@ -13049,7 +13130,7 @@ async function gerarImagemPedido(id){
           <thead><tr style="background:#f0f0f0">
             <th style="text-align:left;padding:5px 14px;font-size:9px;color:#555;border-bottom:1px solid #ccc">Produto</th>
             <th style="text-align:center;padding:5px 8px;font-size:9px;color:#555;border-bottom:1px solid #ccc">Qtd</th>
-            <th style="text-align:right;padding:5px 8px;font-size:9px;color:#555;border-bottom:1px solid #ccc">Unit.</th>
+            <th style="text-align:right;padding:5px 8px;font-size:9px;color:#555;border-bottom:1px solid #ccc">Valor Unit.</th>
             <th style="text-align:center;padding:5px 8px;font-size:9px;color:#555;border-bottom:1px solid #ccc">Desc.</th>
             <th style="text-align:right;padding:5px 14px;font-size:9px;color:#555;border-bottom:1px solid #ccc">Subtotal</th>
           </tr></thead>
