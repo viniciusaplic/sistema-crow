@@ -493,6 +493,15 @@ tbody td{padding:11px 16px;font-size:14px}
             <label>Produto</label>
             <input type="text" id="fo-produto" placeholder="Nome ou código...">
           </div>
+          <div class="filtro-group">
+            <label>Situação do Orçamento</label>
+            <select id="fo-status" onchange="renderOrcamentos()">
+              <option value="">Todas</option>
+              <option value="andamento">Em Andamento</option>
+              <option value="aprovado">Aprovado</option>
+              <option value="cancelado">Cancelado</option>
+            </select>
+          </div>
           <div class="filtro-group admin-only" id="fo-vendedor-wrap" style="display:none">
             <label>Vendedor</label>
             <input type="text" id="fo-vendedor" list="lista-vendedores-datalist-orc" placeholder="Digite ou selecione..." oninput="renderOrcamentos()">
@@ -4123,7 +4132,9 @@ async function confirmarPedido(){
       itens:pedidoAtual.itens, forma, condicao,
       obs:document.getElementById('pedido-obs').value,
       subtotal:sub, desconto_geral:dg, desconto_total:sub-total, total,
-      parcelas, status: convertendoOrcamento ? 'AA' : (pedidoOriginal?.status || 'AA'),
+      parcelas, status: convertendoOrcamento ? 'AP' : (pedidoOriginal?.status || 'AA'),
+      veio_de_orcamento: convertendoOrcamento ? true : (pedidoOriginal?.veio_de_orcamento || false),
+      numero_orcamento_origem: convertendoOrcamento ? pedidoOriginal.numero : (pedidoOriginal?.numero_orcamento_origem || null),
       historico_edicoes: historicoEdicoes
     };
     await db.ref('pedidos/'+pedido.id).update(pedido);
@@ -4179,6 +4190,10 @@ async function salvarComoOrcamento(){
       vendedorNomeFinalOrc = selVendedorOrc.value ? selVendedorOrc.options[selVendedorOrc.selectedIndex].dataset.nome : '';
     }
 
+    const forma = document.getElementById('pedido-forma').value;
+    const condicao = document.getElementById('pedido-condicao').value;
+    const parcelas = calcularParcelas()||[];
+
     const orcamento = {
       ...dadosOriginais,
       id, numero,
@@ -4191,10 +4206,10 @@ async function salvarComoOrcamento(){
       vendedor_nome: vendedorNomeFinalOrc,
       digitado_por_id: dadosOriginais.digitado_por_id || usuarioLogado.id,
       digitado_por_nome: dadosOriginais.digitado_por_nome || usuarioLogado.nome,
-      itens:pedidoAtual.itens, forma:'', condicao:'',
+      itens:pedidoAtual.itens, forma, condicao,
       obs:document.getElementById('pedido-obs').value,
       subtotal:sub, desconto_geral:dg, desconto_total:sub-total, total,
-      parcelas:[], status:'Orçamento'
+      parcelas, status:'Orçamento'
     };
     await db.ref('pedidos/'+id).update(orcamento);
     fecharModal('modal-pedido');
@@ -4220,6 +4235,7 @@ async function renderOrcamentos(){
   const fDataIni = document.getElementById('fo-data-ini')?.value;
   const fDataFim = document.getElementById('fo-data-fim')?.value;
   const fVendedor = (document.getElementById('fo-vendedor')?.value || '').toLowerCase().trim();
+  const fStatusOrc = document.getElementById('fo-status')?.value || '';
 
   // Popula a datalist de vendedores (apenas para admin)
   if(usuarioLogado.admin){
@@ -4233,25 +4249,48 @@ async function renderOrcamentos(){
     }
   }
 
-  let orcamentos=[];
+  // Busca tanto orçamentos ainda em andamento quanto os que já foram aprovados (viraram
+  // pedido, campo veio_de_orcamento) ou cancelados ainda como orçamento — três consultas
+  // separadas porque o Firebase só filtra por um campo indexado de cada vez.
+  let mapaOrc = {};
   try {
-    const snap = await db.ref('pedidos').orderByChild('status').equalTo('Orçamento').once('value');
-    const todos=snap.val()||{};
-    for(const k in todos){
-      const p=todos[k];
-      if(!vejaTudoDoModulo('orcamentos') && p.vendedor_id!==usuarioLogado.id) continue;
-      if(fVendedor && !(p.vendedor_nome||'').toLowerCase().includes(fVendedor)) continue;
-      if(fCliente&&!p.cliente_nome.toLowerCase().includes(fCliente)) continue;
-      if(fDataIni && p.data && p.data.split('T')[0] < fDataIni) continue;
-      if(fDataFim && p.data && p.data.split('T')[0] > fDataFim) continue;
-      if(fProduto){
-        const temProduto = (p.itens||[]).some(i=>(i.nome||'').toLowerCase().includes(fProduto)||(i.codigo||'').toLowerCase().includes(fProduto));
-        if(!temProduto) continue;
-      }
-      orcamentos.push(p);
-    }
+    const snap1 = await db.ref('pedidos').orderByChild('status').equalTo('Orçamento').once('value');
+    Object.assign(mapaOrc, snap1.val()||{});
+    const snap2 = await db.ref('pedidos').orderByChild('veio_de_orcamento').equalTo(true).once('value');
+    Object.assign(mapaOrc, snap2.val()||{});
+    const snap3 = await db.ref('pedidos').orderByChild('status_antes_cancelamento').equalTo('Orçamento').once('value');
+    Object.assign(mapaOrc, snap3.val()||{});
   } catch(e){}
+
+  let orcamentos=[];
+  for(const k in mapaOrc){
+    const p=mapaOrc[k];
+    p._key = k;
+
+    // Situação do orçamento, derivada do status real do registro
+    if(p.status === 'Orçamento') p._status_orcamento = 'andamento';
+    else if(p.status === 'Cancelado') p._status_orcamento = 'cancelado';
+    else p._status_orcamento = 'aprovado'; // qualquer status de pedido = orçamento aprovado e convertido
+
+    if(fStatusOrc && p._status_orcamento !== fStatusOrc) continue;
+    if(!vejaTudoDoModulo('orcamentos') && p.vendedor_id!==usuarioLogado.id) continue;
+    if(fVendedor && !(p.vendedor_nome||'').toLowerCase().includes(fVendedor)) continue;
+    if(fCliente&&!p.cliente_nome.toLowerCase().includes(fCliente)) continue;
+    if(fDataIni && p.data && p.data.split('T')[0] < fDataIni) continue;
+    if(fDataFim && p.data && p.data.split('T')[0] > fDataFim) continue;
+    if(fProduto){
+      const temProduto = (p.itens||[]).some(i=>(i.nome||'').toLowerCase().includes(fProduto)||(i.codigo||'').toLowerCase().includes(fProduto));
+      if(!temProduto) continue;
+    }
+    orcamentos.push(p);
+  }
   orcamentos.sort((a,b)=>new Date(b.data)-new Date(a.data));
+
+  const badgesOrc = {
+    andamento: '<span class="tag-orcamento">Em Andamento</span>',
+    aprovado: '<span class="badge" style="background:#dcfce7;color:#16a34a">✓ Aprovado</span>',
+    cancelado: '<span class="badge" style="background:#fef2f2;color:#dc2626">✕ Cancelado</span>'
+  };
 
   const total=orcamentos.length, inicio=(paginaOrcamentos-1)*POR_PAGINA;
   const pagina=orcamentos.slice(inicio,inicio+POR_PAGINA);
@@ -4260,22 +4299,24 @@ async function renderOrcamentos(){
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:nowrap;overflow:hidden">
         <input type="checkbox" class="check-imprimir-orcamento" data-id="${p.id}" ${orcamentosSelecionadosImprimir.has(p.id)?'checked':''} onchange="toggleSelecaoOrcamento('${p.id}',this.checked)" style="flex-shrink:0;width:16px;height:16px;cursor:pointer">
         <div style="flex-shrink:0;min-width:90px">
-          <div style="font-family:'DM Sans',sans-serif;font-weight:700;font-size:14px">#${p.numero}</div>
-          <div style="margin-top:2px"><span class="tag-orcamento">Orçamento</span></div>
+          <div style="font-family:'DM Sans',sans-serif;font-weight:700;font-size:14px">#${p.numero_orcamento_origem || p.numero}</div>
+          <div style="margin-top:2px">${badgesOrc[p._status_orcamento]}</div>
         </div>
         <div style="flex-shrink:0;font-size:12px;color:var(--muted);min-width:70px">${fmtData(p.data)}</div>
         <div style="flex:1;min-width:0;overflow:hidden">
           <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">👤 ${p.cliente_nome}</div>
-          <div style="font-size:11px;color:var(--muted)">📦 ${(p.itens||[]).length} iten(s)</div>
+          <div style="font-size:11px;color:var(--muted)">📦 ${(p.itens||[]).length} iten(s)${p._status_orcamento==='aprovado'?' · virou Pedido #'+p.numero:''}</div>
         </div>
         <div style="flex-shrink:0;text-align:right;min-width:90px">
           <div style="font-family:'DM Sans',sans-serif;font-weight:700;font-size:14px;color:var(--success)">${fmtMoeda(p.total)}</div>
         </div>
         <div style="flex-shrink:0;display:flex;gap:6px;align-items:center">
           <button class="btn btn-outline btn-sm" onclick="verPedido('${p.id}')">Ver</button>
-          <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600;padding:4px 8px" onclick="gerarImagemPedido('${p.id}')">📲 WhatsApp</button>
-          <button class="btn btn-success btn-sm" onclick="confirmarOrcamento('${p.id}')">✓ Confirmar</button>
-          <button class="btn btn-sm" style="background:#ffeef0;color:var(--accent)" onclick="cancelarPedido('${p.id}')">Excluir</button>
+          ${p._status_orcamento==='andamento' ? `
+            <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600;padding:4px 8px" onclick="gerarImagemPedido('${p.id}')">📲 WhatsApp</button>
+            <button class="btn btn-success btn-sm" onclick="confirmarOrcamento('${p.id}')">✓ Confirmar</button>
+            <button class="btn btn-sm" style="background:#ffeef0;color:var(--accent)" onclick="cancelarPedido('${p.id}')">Excluir</button>
+          ` : ''}
         </div>
       </div>
     </div>`).join('')||'<div style="text-align:center;color:var(--muted);padding:24px">Nenhum orçamento</div>';
