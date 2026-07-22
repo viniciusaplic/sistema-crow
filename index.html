@@ -1190,7 +1190,7 @@ tbody td{padding:11px 16px;font-size:14px}
         <div class="search-box">
           <button class="btn btn-outline btn-sm" onclick="exportarEstoqueExcel()">📥 Exportar Excel</button>
           <button class="btn btn-outline btn-sm" id="btn-toggle-estoque-view" onclick="toggleEstoqueView()">🔍 Analisar Movimentações</button>
-          <button class="btn btn-outline btn-sm" style="color:#7c3aed;border-color:#7c3aed" onclick="abrirModalEstornoProducao()">↩️ Estorno de Produção</button>
+          <button class="btn btn-outline btn-sm admin-only" style="color:#7c3aed;border-color:#7c3aed" onclick="abrirModalEstornoProducao()">↩️ Estorno de Produção</button>
           <button class="btn btn-primary" id="btn-lancar-movimento" onclick="abrirModalMovimentoEstoque()">+ Lançar Movimento</button>
         </div>
       </div>
@@ -5846,7 +5846,7 @@ async function abrirReservasItem(codigo){
 let estornoProducaoPreview = null;
 
 async function abrirModalEstornoProducao(){
-  if(!temPermissaoEditar('producao')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  if(!usuarioLogado?.admin){ toast('Acesso restrito — só administradores podem fazer estorno de produção','error'); return; }
   if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
   if(!INSUMOS_DB.length) await carregarInsumosFirebase();
   if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
@@ -5947,7 +5947,7 @@ function preVisualizarEstornoProducao(){
 }
 
 async function confirmarEstornoProducao(){
-  if(!temPermissaoEditar('producao')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  if(!usuarioLogado?.admin){ toast('Acesso restrito — só administradores podem fazer estorno de produção','error'); return; }
   const dados = estornoProducaoPreview;
   if(!dados){ toast('Nada pra confirmar','error'); return; }
 
@@ -7312,6 +7312,7 @@ function preencherDatalistFornecedores(datalistId){
 async function abrirModalDefeito(opKey, opNumero){
   if(!temPermissaoEditar('garantias')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   if(!INSUMOS_DB.length) await carregarInsumosFirebase();
+  if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
   if(!FORNECEDORES_DB.length) await carregarFornecedoresFirebase();
 
   opContextoDefeito = opKey ? { key: opKey, numero: opNumero } : { key: null, numero: null };
@@ -7343,21 +7344,28 @@ function buscarInsumoDefeito(){
   const lista = document.getElementById('defeito-lista-busca');
   if(q.length<2){ lista.style.display='none'; return; }
 
-  const res = INSUMOS_DB.filter(i=>!i.inativo && ((i.nome||'').toLowerCase().includes(q)||(i.codigo||'').toLowerCase().includes(q))).slice(0,8);
-  if(!res.length){ lista.innerHTML='<div style="padding:14px;color:var(--muted);font-size:13px">Nenhum insumo encontrado</div>'; lista.style.display='block'; return; }
+  const resInsumo = INSUMOS_DB.filter(i=>!i.inativo && ((i.nome||'').toLowerCase().includes(q)||(i.codigo||'').toLowerCase().includes(q)))
+    .slice(0,6).map(i=>({...i, _tipo:'insumo', _estoque:i.estoque_atual||0}));
+  const resProduto = PRODUTOS_DB.filter(p=>!p.inativo && ((p.nome||'').toLowerCase().includes(q)||(p.codigo||'').toLowerCase().includes(q)))
+    .slice(0,6).map(p=>({...p, _tipo:'vendavel', _estoque:p.quantidade||0}));
+  const res = [...resProduto, ...resInsumo].slice(0,8);
+
+  if(!res.length){ lista.innerHTML='<div style="padding:14px;color:var(--muted);font-size:13px">Nenhum item encontrado</div>'; lista.style.display='block'; return; }
 
   lista.innerHTML = res.map(i=>`
-    <div onclick="selecionarInsumoDefeito('${i.codigo}')"
+    <div onclick="selecionarInsumoDefeito('${i.codigo}','${i._tipo}')"
       style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px"
       onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">
-      <strong>${i.codigo}</strong> — ${i.nome} <span style="color:var(--muted)">(estoque: ${i.estoque_atual||0})</span>
+      <strong>${i.codigo}</strong> — ${i.nome} ${i._tipo==='vendavel'?'<span class="badge" style="background:#dbeafe;color:#1565c0;font-size:10px">PRODUTO</span>':'<span class="badge" style="background:#ede9fe;color:#7c3aed;font-size:10px">INSUMO</span>'} <span style="color:var(--muted)">(estoque: ${i._estoque})</span>
     </div>`).join('');
   lista.style.display = 'block';
 }
 
-function selecionarInsumoDefeito(codigo){
-  const i = INSUMOS_DB.find(x=>x.codigo===codigo);
+function selecionarInsumoDefeito(codigo, tipo){
+  const i = tipo==='vendavel' ? PRODUTOS_DB.find(x=>x.codigo===codigo) : INSUMOS_DB.find(x=>x.codigo===codigo);
   if(!i) return;
+  i._tipo = tipo || 'insumo';
+  i._estoque = tipo==='vendavel' ? Number(i.quantidade||0) : Number(i.estoque_atual||0);
   insumoDefeitoSelecionado = i;
   document.getElementById('defeito-busca-insumo').value = '';
   document.getElementById('defeito-lista-busca').style.display = 'none';
@@ -7370,8 +7378,8 @@ function selecionarInsumoDefeito(codigo){
 
   document.getElementById('defeito-insumo-selecionado').innerHTML = `
     <div style="background:var(--bg);border-radius:8px;padding:12px 14px;margin-bottom:14px">
-      <strong>${i.codigo}</strong> — ${i.nome}<br>
-      <span style="font-size:12px;color:var(--muted)">Estoque atual: <strong>${i.estoque_atual||0}</strong></span>
+      <strong>${i.codigo}</strong> — ${i.nome} ${i._tipo==='vendavel'?'<span class="badge" style="background:#dbeafe;color:#1565c0;font-size:10px">PRODUTO</span>':''}<br>
+      <span style="font-size:12px;color:var(--muted)">Estoque atual: <strong>${i._estoque}</strong></span>
       <button onclick="insumoDefeitoSelecionado=null;document.getElementById('defeito-insumo-selecionado').innerHTML='';document.getElementById('defeito-form-resto').style.display='none'"
         style="float:right;background:none;border:none;cursor:pointer;color:var(--muted)">✕ trocar</button>
     </div>`;
@@ -7390,14 +7398,23 @@ async function confirmarRegistroDefeito(){
   const i = insumoDefeitoSelecionado;
   const ehManual = !opContextoDefeito?.key;
   const darBaixa = ehManual ? document.getElementById('defeito-dar-baixa').checked : true;
+  const ehProduto = i._tipo === 'vendavel';
 
-  // Dá baixa no estoque do insumo defeituoso (se aplicável)
+  // Dá baixa no estoque do item defeituoso (se aplicável) — produto vendável e insumo
+  // ficam em coleções e campos diferentes no banco
   if(darBaixa){
-    const estoqueAtual = Number(i.estoque_atual||0);
-    const novoEstoque = Math.max(0, estoqueAtual - qtd);
-    const key = i.key || ('ins_'+i.codigo);
-    await db.ref('insumos/'+key+'/estoque_atual').set(novoEstoque);
-    i.estoque_atual = novoEstoque;
+    if(ehProduto){
+      const estoqueAtual = Number(i.quantidade||0);
+      const novoEstoque = Math.max(0, estoqueAtual - qtd);
+      await db.ref('produtos/'+i.codigo+'/quantidade').set(novoEstoque);
+      i.quantidade = novoEstoque;
+    } else {
+      const estoqueAtual = Number(i.estoque_atual||0);
+      const novoEstoque = Math.max(0, estoqueAtual - qtd);
+      const key = i.key || ('ins_'+i.codigo);
+      await db.ref('insumos/'+key+'/estoque_atual').set(novoEstoque);
+      i.estoque_atual = novoEstoque;
+    }
     await registrarMovimentoEstoque(i.codigo, i.nome, 'saida', qtd,
       ehManual ? `Defeito — produto retornado (garantia manual)` : `Defeito identificado na produção — OP #${opContextoDefeito.numero}`,
       ehManual ? null : 'op', ehManual ? null : opContextoDefeito.key);
