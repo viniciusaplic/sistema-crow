@@ -1330,6 +1330,7 @@ tbody td{padding:11px 16px;font-size:14px}
         </div>
       </div>
       <div id="pedido-lista-produtos" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;display:none;background:var(--card);margin-bottom:12px"></div>
+      <div id="pedido-item-staging" style="display:none;margin-bottom:14px"></div>
       <div class="item-row item-row-header">
         <span>Produto</span><span>Qtd</span><span>Preço Unit.</span><span>Desc.%</span><span>Subtotal</span><span></span>
       </div>
@@ -3382,7 +3383,7 @@ async function editarPedido(id){
   document.getElementById('pedido-condicao').value = p.condicao||'';
   document.getElementById('pedido-obs').value = p.obs||'';
   calcularParcelas();
-  abrirModal('modal-pedido');
+  itemEmEstagio = null; document.getElementById('pedido-item-staging').style.display='none'; document.getElementById('pedido-item-staging').innerHTML=''; abrirModal('modal-pedido');
 }
 
 
@@ -3442,7 +3443,7 @@ async function clonarPedido(id){
   document.getElementById('pedido-condicao').value = p.condicao||'';
   document.getElementById('pedido-obs').value = '';
   calcularParcelas();
-  abrirModal('modal-pedido');
+  itemEmEstagio = null; document.getElementById('pedido-item-staging').style.display='none'; document.getElementById('pedido-item-staging').innerHTML=''; abrirModal('modal-pedido');
   toast('Pedido clonado! Revise os dados antes de salvar.','success');
 }
 
@@ -3629,7 +3630,7 @@ async function abrirModalPedido(isOrcamento=false){
   document.getElementById('alerta-parcela').style.display='none';
   document.getElementById('parcelas-container').style.display='none';
   atualizarTotais();
-  abrirModal('modal-pedido');
+  itemEmEstagio = null; document.getElementById('pedido-item-staging').style.display='none'; document.getElementById('pedido-item-staging').innerHTML=''; abrirModal('modal-pedido');
   carregarPedidosCache(); // pré-carrega histórico de preços em background
 
   // Garante que produtos e clientes estejam carregados ANTES do usuário tentar buscar —
@@ -3806,6 +3807,8 @@ async function carregarPedidosCache(){
   } catch(e){ PEDIDOS_CACHE = {}; }
 }
 
+let itemEmEstagio = null;
+
 function adicionarItem(cod){
   const p = PRODUTOS_DB.find(x=>x.codigo===cod); if(!p) return;
 
@@ -3826,21 +3829,102 @@ function adicionarItem(cod){
     }
   }
 
-  const existe = pedidoAtual.itens.find(i=>i.codigo===cod);
-  if(existe){
-    existe.qtd++;
-    toast(`⚠️ "${p.nome}" já estava no pedido — quantidade aumentada para ${existe.qtd}`, 'error');
-  }
-  else {
-    pedidoAtual.itens.push({
-      codigo:p.codigo, nome:p.nome, unidade:p.unidade||'UN',
-      qtd:1, preco:precoUsado, preco_minimo:Number(p.preco_minimo),
-      estoque:Number(p.quantidade||0), desconto_item:0, gtin:p.gtin||''
-    });
-  }
   document.getElementById('pedido-busca-produto').value='';
   document.getElementById('pedido-lista-produtos').style.display='none';
+
+  const existe = pedidoAtual.itens.find(i=>i.codigo===cod);
+  if(existe){
+    // Item repetido: só soma a quantidade direto, sem precisar de estágio —
+    // já está na lista, não tem preço/qtd novo pra revisar antes de incluir.
+    existe.qtd++;
+    toast(`⚠️ "${p.nome}" já estava no pedido — quantidade aumentada para ${existe.qtd}`, 'error');
+    renderItens();
+    return;
+  }
+
+  // Abre a caixinha de edição (estágio) logo abaixo da busca, sem mexer na lista ainda
+  itemEmEstagio = {
+    codigo:p.codigo, nome:p.nome, unidade:p.unidade||'UN',
+    qtd:1, preco:precoUsado, preco_minimo:Number(p.preco_minimo),
+    estoque:Number(p.quantidade||0), desconto_item:0, gtin:p.gtin||''
+  };
+  renderItemStaging();
+}
+
+function renderItemStaging(){
+  const el = document.getElementById('pedido-item-staging');
+  if(!itemEmEstagio){ el.style.display='none'; el.innerHTML=''; return; }
+  const it = itemEmEstagio;
+  const subtotal = it.qtd * it.preco * (1-(it.desconto_item||0)/100);
+  el.style.display='';
+  el.innerHTML = `
+    <div style="border:2px solid var(--accent);border-radius:10px;padding:12px;background:#fff7ed">
+      <div style="font-weight:700;margin-bottom:10px">➕ ${it.nome} <span style="color:var(--muted);font-weight:400;font-size:12px">(${it.codigo})</span></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div class="form-group" style="width:90px;margin:0">
+          <label>Quantidade</label>
+          <input type="number" id="staging-qtd" value="${it.qtd}" min="1" oninput="atualizarItemStaging()">
+        </div>
+        <div class="form-group" style="width:120px;margin:0">
+          <label>Preço Unit.</label>
+          <input type="number" id="staging-preco" value="${it.preco.toFixed(2)}" step="0.01" ${usuarioLogado?.admin?'':`min="${it.preco_minimo}"`} oninput="atualizarItemStaging()">
+        </div>
+        <div class="form-group" style="width:80px;margin:0">
+          <label>Desc. %</label>
+          <input type="number" id="staging-desc" value="${it.desconto_item||0}" min="0" max="100" oninput="atualizarItemStaging()">
+        </div>
+        <div style="font-weight:700;font-size:15px;color:var(--success);white-space:nowrap" id="staging-subtotal">${fmtMoeda(subtotal)}</div>
+        <button class="btn btn-primary btn-sm" onclick="incluirItemEstagiado()">✅ Incluir Item</button>
+        <button class="btn btn-outline btn-sm" onclick="cancelarItemEstagio()">Cancelar</button>
+      </div>
+    </div>`;
+  document.getElementById('staging-qtd')?.focus();
+  document.getElementById('staging-qtd')?.select();
+}
+
+function atualizarItemStaging(){
+  if(!itemEmEstagio) return;
+  const qtd = Math.max(1, parseInt(document.getElementById('staging-qtd').value)||1);
+  let preco = parseFloat(document.getElementById('staging-preco').value)||0;
+  let desc = Math.min(100, Math.max(0, parseFloat(document.getElementById('staging-desc').value)||0));
+
+  // Mesma trava de sempre: vendedor comum não passa do preço mínimo, nem por preço nem por desconto
+  if(!usuarioLogado?.admin && itemEmEstagio.preco_minimo > 0){
+    if(preco < itemEmEstagio.preco_minimo){
+      alert(`Preço mínimo: ${fmtMoeda(itemEmEstagio.preco_minimo)}`);
+      preco = itemEmEstagio.preco_minimo;
+      document.getElementById('staging-preco').value = preco.toFixed(2);
+    }
+    const precoComDesc = preco * (1-desc/100);
+    if(precoComDesc < itemEmEstagio.preco_minimo){
+      const descMax = Math.max(0, ((preco - itemEmEstagio.preco_minimo) / preco * 100));
+      alert(`Desconto máximo permitido: ${descMax.toFixed(1)}% (preço mínimo: ${fmtMoeda(itemEmEstagio.preco_minimo)})`);
+      desc = descMax;
+      document.getElementById('staging-desc').value = desc.toFixed(1);
+    }
+  }
+
+  itemEmEstagio.qtd = qtd;
+  itemEmEstagio.preco = preco;
+  itemEmEstagio.desconto_item = desc;
+  const subtotal = qtd * preco * (1-desc/100);
+  document.getElementById('staging-subtotal').textContent = fmtMoeda(subtotal);
+}
+
+function incluirItemEstagiado(){
+  if(!itemEmEstagio) return;
+  atualizarItemStaging(); // garante que o último valor digitado foi capturado
+  pedidoAtual.itens.push({ ...itemEmEstagio });
+  itemEmEstagio = null;
+  renderItemStaging();
   renderItens();
+  document.getElementById('pedido-busca-produto').focus();
+  toast('✓ Item incluído','success');
+}
+
+function cancelarItemEstagio(){
+  itemEmEstagio = null;
+  renderItemStaging();
 }
 
 function renderItens(){
@@ -4029,6 +4113,9 @@ function gerarResumoAlteracoesPedido(original, itensNovos, formaNova, condicaoNo
 
 async function confirmarPedido(){
  try {
+  if(itemEmEstagio){
+    if(!confirm(`Você selecionou "${itemEmEstagio.nome}" mas ainda não clicou em "Incluir Item" — ele NÃO vai entrar no pedido.\n\nContinuar salvando sem esse item?`)) return;
+  }
   if(!pedidoAtual.cliente){ toast('Selecione um cliente','error'); return; }
   if(!pedidoAtual.itens.length){ toast('Adicione pelo menos um produto','error'); return; }
 
@@ -4154,6 +4241,9 @@ async function confirmarPedido(){
 }
 
 async function salvarComoOrcamento(){
+  if(itemEmEstagio){
+    if(!confirm(`Você selecionou "${itemEmEstagio.nome}" mas ainda não clicou em "Incluir Item" — ele NÃO vai entrar no orçamento.\n\nContinuar salvando sem esse item?`)) return;
+  }
   if(!pedidoAtual.cliente){ toast('Selecione um cliente','error'); return; }
   if(!pedidoAtual.itens.length){ toast('Adicione pelo menos um produto','error'); return; }
 
@@ -4344,7 +4434,7 @@ async function confirmarOrcamento(id){
     document.getElementById('desc-geral').value=p.desconto_geral||0;
     renderItens(); atualizarCondicoes();
     document.getElementById('pedido-obs').value=p.obs||'';
-    abrirModal('modal-pedido');
+    itemEmEstagio = null; document.getElementById('pedido-item-staging').style.display='none'; document.getElementById('pedido-item-staging').innerHTML=''; abrirModal('modal-pedido');
 
   } catch(e){ toast('Erro ao confirmar orçamento: '+e.message,'error'); }
 }
