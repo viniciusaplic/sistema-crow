@@ -1190,6 +1190,7 @@ tbody td{padding:11px 16px;font-size:14px}
         <div class="search-box">
           <button class="btn btn-outline btn-sm" onclick="exportarEstoqueExcel()">📥 Exportar Excel</button>
           <button class="btn btn-outline btn-sm" id="btn-toggle-estoque-view" onclick="toggleEstoqueView()">🔍 Analisar Movimentações</button>
+          <button class="btn btn-outline btn-sm" style="color:#7c3aed;border-color:#7c3aed" onclick="abrirModalEstornoProducao()">↩️ Estorno de Produção</button>
           <button class="btn btn-primary" id="btn-lancar-movimento" onclick="abrirModalMovimentoEstoque()">+ Lançar Movimento</button>
         </div>
       </div>
@@ -1684,6 +1685,21 @@ tbody td{padding:11px 16px;font-size:14px}
     <button class="modal-close" onclick="fecharModal('modal-mesclar-cliente')">×</button>
     <div class="modal-title">🔗 Mesclar Cliente Duplicado</div>
     <div id="mesclar-cliente-conteudo"></div>
+  </div>
+</div>
+
+<!-- MODAL ESTORNO DE PRODUÇÃO (desmontagem de item pronto → devolve insumos ao estoque) -->
+<div class="modal-overlay" id="modal-estorno-producao">
+  <div class="modal" style="max-width:640px">
+    <button class="modal-close" onclick="fecharModal('modal-estorno-producao')">×</button>
+    <div class="modal-title">↩️ Estorno de Produção</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px">
+      Dá baixa no estoque do produto pronto e devolve os insumos da receita ao estoque (na proporção da quantidade) —
+      útil para produção feita a mais por engano, devolução de cliente, ou qualquer situação em que o item precise
+      ser "desmontado" para reaproveitar os insumos. Itens de categoria <strong>Embalagens</strong> (saco, etiqueta)
+      não são devolvidos.
+    </div>
+    <div id="estorno-producao-conteudo"></div>
   </div>
 </div>
 
@@ -5818,6 +5834,164 @@ async function abrirReservasItem(codigo){
     `;
 
   } catch(e){ toast('Erro ao carregar reservas: '+e.message,'error'); }
+}
+
+// ══════════════════════════════════════════════
+// ══ ESTORNO DE PRODUÇÃO ══
+// Desmonta um item pronto: dá saída nele e devolve os insumos da receita ao estoque
+// (entrada), na proporção da quantidade informada. Serve tanto pra produção feita a
+// mais por engano quanto pra devolução de cliente (reaproveitar os insumos do item
+// devolvido pra montar outros produtos). Embalagem/etiqueta não são devolvidas.
+// ══════════════════════════════════════════════
+let estornoProducaoPreview = null;
+
+async function abrirModalEstornoProducao(){
+  if(!temPermissaoEditar('producao')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
+  if(!INSUMOS_DB.length) await carregarInsumosFirebase();
+  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
+
+  estornoProducaoPreview = null;
+  document.getElementById('estorno-producao-conteudo').innerHTML = `
+    <div class="form-row">
+      <div class="form-group" style="flex:1">
+        <label>Código do Produto Pronto</label>
+        <input type="text" id="estorno-codigo" placeholder="ex: 2581" autocomplete="off">
+      </div>
+      <div class="form-group" style="width:110px">
+        <label>Quantidade</label>
+        <input type="number" id="estorno-qtd" value="1" min="1">
+      </div>
+    </div>
+    <div class="form-row single">
+      <div class="form-group">
+        <label>Motivo / Observação</label>
+        <input type="text" id="estorno-motivo" placeholder="ex: produção a mais por engano, devolução do cliente X...">
+      </div>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="preVisualizarEstornoProducao()">🔍 Ver Insumos que serão Devolvidos</button>
+    <div id="estorno-producao-preview" style="margin-top:14px"></div>
+  `;
+  abrirModal('modal-estorno-producao');
+  document.getElementById('estorno-codigo').focus();
+}
+
+function preVisualizarEstornoProducao(){
+  const codigo = document.getElementById('estorno-codigo').value.trim();
+  const qtd = Math.max(1, parseInt(document.getElementById('estorno-qtd').value)||0);
+  const el = document.getElementById('estorno-producao-preview');
+
+  if(!codigo){ toast('Digite o código do produto','error'); return; }
+
+  const produto = PRODUTOS_DB.find(p => p.codigo.toUpperCase() === codigo.toUpperCase());
+  if(!produto){
+    el.innerHTML = `<div style="color:#dc2626;padding:10px">Produto "${codigo}" não encontrado no cadastro.</div>`;
+    return;
+  }
+
+  const receita = RECEITAS_DB[produto.codigo];
+  if(!receita || !(receita.itens||[]).length){
+    el.innerHTML = `<div style="color:#dc2626;padding:10px">"${produto.nome}" não tem receita/composição cadastrada — não há insumos pra devolver.</div>`;
+    return;
+  }
+
+  // Monta a lista de insumos a devolver, pulando os de categoria Embalagens
+  const itensDevolucao = [];
+  const itensEmbalagemIgnorados = [];
+  for(const ri of receita.itens){
+    const insumo = INSUMOS_DB.find(i => i.codigo === ri.codigo);
+    const qtdDevolver = Number(ri.qtd||0) * qtd;
+    if(insumo?.categoria === 'Embalagens'){
+      itensEmbalagemIgnorados.push({ codigo: ri.codigo, nome: ri.nome, qtd: qtdDevolver });
+      continue;
+    }
+    itensDevolucao.push({
+      codigo: ri.codigo, nome: ri.nome, qtdPorUnidade: ri.qtd,
+      qtdDevolver, estoqueAtual: Number(insumo?.estoque_atual||0),
+      key: insumo?.key
+    });
+  }
+
+  estornoProducaoPreview = { produto, qtd, motivo: document.getElementById('estorno-motivo').value.trim(), itensDevolucao };
+
+  el.innerHTML = `
+    <div style="padding:10px 14px;margin-bottom:10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;font-size:13px;color:#9a3412">
+      Isso vai <strong>tirar ${qtd} unidade(s)</strong> de "${produto.nome}" do estoque, e <strong>devolver</strong> os insumos abaixo.
+    </div>
+    ${itensEmbalagemIgnorados.length ? `
+    <div style="padding:8px 12px;margin-bottom:10px;background:var(--bg);border-radius:8px;font-size:12px;color:var(--muted)">
+      Não serão devolvidos (embalagem): ${itensEmbalagemIgnorados.map(i=>`${i.nome} (${i.qtd})`).join(', ')}
+    </div>` : ''}
+    <div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead style="background:var(--primary);color:rgba(255,255,255,.85)"><tr>
+        <th style="padding:7px 10px;text-align:left">Código</th>
+        <th style="padding:7px 10px;text-align:left">Insumo</th>
+        <th style="padding:7px 10px;text-align:center">Estoque Atual</th>
+        <th style="padding:7px 10px;text-align:center">Será Devolvido</th>
+        <th style="padding:7px 10px;text-align:center">Novo Estoque</th>
+      </tr></thead>
+      <tbody>
+        ${itensDevolucao.map((it,idx)=>`
+          <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
+            <td style="padding:6px 10px;font-weight:700">${it.codigo}</td>
+            <td style="padding:6px 10px">${it.nome}</td>
+            <td style="padding:6px 10px;text-align:center">${it.estoqueAtual.toLocaleString('pt-BR')}</td>
+            <td style="padding:6px 10px;text-align:center;color:#16a34a;font-weight:700">+${it.qtdDevolver.toLocaleString('pt-BR')}</td>
+            <td style="padding:6px 10px;text-align:center">${(it.estoqueAtual+it.qtdDevolver).toLocaleString('pt-BR')}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table></div>
+    <button class="btn btn-primary btn-sm" style="margin-top:14px" onclick="confirmarEstornoProducao()">✅ Confirmar Estorno</button>
+  `;
+}
+
+async function confirmarEstornoProducao(){
+  if(!temPermissaoEditar('producao')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  const dados = estornoProducaoPreview;
+  if(!dados){ toast('Nada pra confirmar','error'); return; }
+
+  const motivoTexto = dados.motivo ? ` — ${dados.motivo}` : '';
+  const ok = await confirmCustom(
+    `Confirmar estorno de ${dados.qtd} unidade(s) de "${dados.produto.nome}"?\n\nIsso vai dar saída no produto e devolver ${dados.itensDevolucao.length} insumo(s) ao estoque. Esta ação não pode ser desfeita automaticamente.`,
+    'Confirmar Estorno'
+  );
+  if(!ok) return;
+
+  const el = document.getElementById('estorno-producao-preview');
+  el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--muted)">⏳ Processando estorno...</div>';
+
+  try {
+    // 1) Saída no produto pronto
+    const estoqueAnteriorProduto = Number(dados.produto.quantidade||0);
+    const novoEstoqueProduto = estoqueAnteriorProduto - dados.qtd;
+    await db.ref('produtos/'+dados.produto.codigo+'/quantidade').set(novoEstoqueProduto);
+    dados.produto.quantidade = novoEstoqueProduto;
+    await registrarMovimentoEstoque(
+      dados.produto.codigo, dados.produto.nome, 'saida', dados.qtd,
+      `Estorno de Produção${motivoTexto}`, null, null
+    );
+
+    // 2) Entrada em cada insumo (menos embalagem, já filtrado no preview)
+    for(const it of dados.itensDevolucao){
+      const key = it.key || ('ins_'+it.codigo);
+      const novoEstoqueInsumo = it.estoqueAtual + it.qtdDevolver;
+      await db.ref('insumos/'+key+'/estoque_atual').set(novoEstoqueInsumo);
+      const mem = INSUMOS_DB.find(x=>x.codigo===it.codigo);
+      if(mem) mem.estoque_atual = novoEstoqueInsumo;
+      await registrarMovimentoEstoque(
+        it.codigo, it.nome, 'entrada', it.qtdDevolver,
+        `Estorno de Produção — desmontagem de ${dados.qtd}x ${dados.produto.nome}${motivoTexto}`, null, null
+      );
+    }
+
+    fecharModal('modal-estorno-producao');
+    toast(`✅ Estorno concluído — ${dados.itensDevolucao.length} insumo(s) devolvido(s) ao estoque`, 'success');
+    renderProdutos();
+    renderEstoque();
+  } catch(err){
+    el.innerHTML = `<div style="color:#dc2626;padding:12px">Erro: ${err.message}</div>`;
+  }
 }
 
 async function abrirModalMovimentoEstoque(){
