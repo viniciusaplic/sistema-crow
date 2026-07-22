@@ -8333,7 +8333,7 @@ async function buscarCNPJ(){
 }
 
 async function salvarCliente(){
-  if(!temPermissaoEditar('separacao')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  if(!temPermissaoEditar('clientes')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const nome = document.getElementById('cli-nome').value.trim();
   if(!nome){ toast('Nome é obrigatório','error'); return; }
   const vendedorId = usuarioLogado.admin
