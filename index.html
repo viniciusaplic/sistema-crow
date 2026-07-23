@@ -3479,7 +3479,10 @@ async function clonarPedido(id){
   document.getElementById('btn-salvar-orcamento').style.display='';
   document.getElementById('pedido-busca-cliente').value = p.cliente_nome;
   document.getElementById('pedido-cliente-selecionado').innerHTML =
-    `<div class="alerta alerta-success" style="margin-top:8px">✓ ${p.cliente_nome} · ${p.cliente_cidade||''}/${p.cliente_uf||''}</div>`;
+    `<div class="alerta alerta-success" style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <span>✓ ${p.cliente_nome} · ${p.cliente_cidade||''}/${p.cliente_uf||''}</span>
+      <button type="button" class="btn btn-outline btn-sm" onclick="habilitarTrocaClientePedido()">🔄 Trocar Cliente</button>
+    </div>`;
   document.getElementById('step-cliente-ped').style.display='none';
   document.getElementById('step-itens-ped').style.display='';
   document.getElementById('desc-geral').value = p.desconto_geral||0;
