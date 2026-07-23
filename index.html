@@ -5717,17 +5717,36 @@ async function renderMovimentosEstoque(){
 
   const totalSaidas = movimentos.filter(m=>m.tipo==='saida').reduce((s,m)=>s+Number(m.qtd||0),0);
 
-  // Saldo atual de estoque do(s) produto(s) filtrado(s) por código (soma se o filtro casar mais de um)
+  // Saldo atual de estoque do item filtrado por código — busca em produtos vendáveis E
+  // insumos (antes só olhava produtos vendáveis, por isso nunca achava insumo nenhum e podia
+  // dar match errado por coincidência de substring). Usa código EXATO, não "contém".
   let saldoAtualHtml = '<span style="color:var(--muted);font-size:16px">— filtre por código —</span>';
   if(fCodigo){
-    const produtosFiltrados = PRODUTOS_DB.filter(p=>(p.codigo||'').toLowerCase().includes(fCodigo));
-    if(produtosFiltrados.length===1){
-      saldoAtualHtml = Number(produtosFiltrados[0].quantidade||0).toLocaleString('pt-BR');
-    } else if(produtosFiltrados.length>1){
-      const soma = produtosFiltrados.reduce((s,p)=>s+Number(p.quantidade||0),0);
-      saldoAtualHtml = `${soma.toLocaleString('pt-BR')} <span style="font-size:11px;color:var(--muted)">(${produtosFiltrados.length} produtos)</span>`;
+    if(!INSUMOS_DB.length) await carregarInsumosFirebase();
+    if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
+    const codigoExato = fCodigo.toUpperCase();
+    const produtoExato = PRODUTOS_DB.find(p=>(p.codigo||'').toUpperCase()===codigoExato);
+    const insumoExato = INSUMOS_DB.find(i=>(i.codigo||'').toUpperCase()===codigoExato);
+
+    if(produtoExato){
+      saldoAtualHtml = Number(produtoExato.quantidade||0).toLocaleString('pt-BR');
+    } else if(insumoExato){
+      saldoAtualHtml = Number(insumoExato.estoque_atual||0).toLocaleString('pt-BR') + ' <span class="badge" style="background:#ede9fe;color:#7c3aed;font-size:10px">INSUMO</span>';
     } else {
-      saldoAtualHtml = '<span style="color:var(--muted);font-size:16px">produto não encontrado</span>';
+      // Sem match exato — cai pro comportamento antigo (busca parcial), só em produtos vendáveis
+      const produtosFiltrados = PRODUTOS_DB.filter(p=>(p.codigo||'').toLowerCase().includes(fCodigo));
+      const insumosFiltrados = INSUMOS_DB.filter(i=>(i.codigo||'').toLowerCase().includes(fCodigo));
+      const totalItens = produtosFiltrados.length + insumosFiltrados.length;
+      if(totalItens===1){
+        const item = produtosFiltrados[0] || insumosFiltrados[0];
+        const valor = produtosFiltrados[0] ? item.quantidade : item.estoque_atual;
+        saldoAtualHtml = Number(valor||0).toLocaleString('pt-BR');
+      } else if(totalItens>1){
+        const soma = produtosFiltrados.reduce((s,p)=>s+Number(p.quantidade||0),0) + insumosFiltrados.reduce((s,i)=>s+Number(i.estoque_atual||0),0);
+        saldoAtualHtml = `${soma.toLocaleString('pt-BR')} <span style="font-size:11px;color:var(--muted)">(${totalItens} itens)</span>`;
+      } else {
+        saldoAtualHtml = '<span style="color:var(--muted);font-size:16px">item não encontrado</span>';
+      }
     }
   }
 
@@ -11483,10 +11502,11 @@ async function calcularMRP(){
       consumoPorCodigo[m.codigo] = (consumoPorCodigo[m.codigo]||0) + Number(m.qtd||0);
     });
 
-    // Em trânsito: pedidos de compra de insumo ainda não recebidos
+    // Em trânsito: pedidos de compra de insumo já saíram da negociação (Separação em diante),
+    // ainda não recebidos — negociação é considerada especulativa demais pra contar como garantido
     const snapCompras = await db.ref('pedidos_compra').once('value');
     Object.values(snapCompras.val() || {}).forEach(c=>{
-      if(['recebido','concluido'].includes(c.status)) return;
+      if(!['separacao','importacao','transito'].includes(c.status)) return;
       (c.itens||[]).forEach(it=>{
         if(it.tipo !== 'insumo') return;
         emTransitoPorCodigo[it.codigo] = (emTransitoPorCodigo[it.codigo]||0) + Number(it.qtd||0);
@@ -11506,10 +11526,10 @@ async function calcularMRP(){
       });
     });
 
-    // Em trânsito: pedidos de compra do produto (revenda) + OPs abertas que produzem esse produto
+    // Em trânsito: pedidos de compra do produto (revenda), já saídos da negociação, + OPs abertas
     const snapCompras = await db.ref('pedidos_compra').once('value');
     Object.values(snapCompras.val() || {}).forEach(c=>{
-      if(['recebido','concluido'].includes(c.status)) return;
+      if(!['separacao','importacao','transito'].includes(c.status)) return;
       (c.itens||[]).forEach(it=>{
         if(it.tipo !== 'vendavel') return;
         emTransitoPorCodigo[it.codigo] = (emTransitoPorCodigo[it.codigo]||0) + Number(it.qtd||0);
