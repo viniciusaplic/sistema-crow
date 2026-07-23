@@ -523,8 +523,10 @@ tbody td{padding:11px 16px;font-size:14px}
     <div id="tab-clientes" style="display:none">
       <div class="section-header">
         <div class="section-title">Clientes</div>
+        <button class="btn btn-outline btn-sm admin-only" onclick="verificarClientesDuplicadosCNPJ()">🔍 Clientes Duplicados (CNPJ)</button>
         <button class="btn btn-primary admin-only" onclick="abrirModalCliente()" id="btn-novo-cliente" style="display:none">+ Novo Cliente</button>
       </div>
+      <div id="clientes-duplicados-resultado"></div>
       <div class="filtros-bar">
         <button class="filtros-toggle" onclick="toggleFiltros('filtros-clientes-inner')">
           <span>🔍 Filtros</span><span id="filtros-clientes-arrow">▼</span>
@@ -8456,6 +8458,49 @@ function normalizarNomeCliente(nome){
 // principal com os dados do duplicado, transfere todos os pedidos do duplicado
 // para o principal, e remove o cadastro duplicado.
 // ══════════════════════════════════════════════
+// Varre TODOS os clientes e agrupa por CNPJ/CPF — mostra de uma vez todos os grupos
+// com mais de um cliente cadastrado, em vez de precisar procurar duplicado um por um.
+async function verificarClientesDuplicadosCNPJ(){
+  if(!usuarioLogado?.admin){ toast('Acesso restrito — só administradores','error'); return; }
+  const el = document.getElementById('clientes-duplicados-resultado');
+  el.innerHTML = '<div style="padding:12px;color:var(--muted)">⏳ Verificando...</div>';
+
+  if(!CLIENTES_DB.length) await carregarClientesFirebase();
+
+  const grupos = {};
+  CLIENTES_DB.forEach(c=>{
+    const cnpjLimpo = (c.cpf_cnpj||'').replace(/\D/g,'');
+    if(!cnpjLimpo) return; // sem CNPJ/CPF cadastrado, não dá pra agrupar por esse critério
+    if(!grupos[cnpjLimpo]) grupos[cnpjLimpo] = [];
+    grupos[cnpjLimpo].push(c);
+  });
+
+  const duplicados = Object.entries(grupos).filter(([cnpj, lista]) => lista.length > 1);
+
+  if(!duplicados.length){
+    el.innerHTML = `
+      <div style="text-align:right;margin:10px 0 6px"><button class="btn btn-outline btn-sm" onclick="document.getElementById('clientes-duplicados-resultado').innerHTML=''">✕ Fechar</button></div>
+      <div style="padding:12px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534;font-size:13px">✅ Nenhum cliente com CNPJ/CPF duplicado encontrado.</div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div style="text-align:right;margin:10px 0 6px"><button class="btn btn-outline btn-sm" onclick="document.getElementById('clientes-duplicados-resultado').innerHTML=''">✕ Fechar</button></div>
+    <div style="padding:12px 14px;margin-bottom:12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;font-size:13px;color:#9a3412">
+      ⚠️ <strong>${duplicados.length} CNPJ/CPF</strong> com mais de um cadastro de cliente.
+    </div>
+    ${duplicados.map(([cnpj, lista])=>`
+      <div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:8px">CNPJ/CPF: <strong>${lista[0].cpf_cnpj}</strong> — ${lista.length} cadastro(s)</div>
+        ${lista.map(c=>`
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">
+            <div><strong>${c.nome}</strong> <span style="color:var(--muted)">(código ${c.codigo})</span> ${c.inativo?'<span class="badge badge-gray">Inativo</span>':''}</div>
+            <button class="btn btn-outline btn-sm" onclick="abrirModalMesclarCliente('${c.codigo}')">🔗 Mesclar</button>
+          </div>`).join('')}
+      </div>`).join('')}
+  `;
+}
+
 function abrirModalMesclarCliente(codigoPrincipal){
   try {
     const principal = CLIENTES_DB.find(c => c.codigo === codigoPrincipal);
