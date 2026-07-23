@@ -2527,7 +2527,9 @@ async function carregarClientesFirebase(){
   try {
     const snap = await db.ref('clientes').once('value');
     const dados = snap.val() || {};
-    CLIENTES_DB = Object.values(dados).filter(c => c && c.nome);
+    // _key guarda a chave REAL do Firebase — não dá pra confiar só no campo "codigo" como
+    // identificador único (alguns clientes duplicados têm o mesmo código entre si)
+    CLIENTES_DB = Object.keys(dados).map(k => ({ _key:k, ...dados[k] })).filter(c => c && c.nome);
     console.log('✓ Clientes carregados: ' + CLIENTES_DB.length);
   } catch(e) {
     console.warn('Erro Firebase clientes:', e.message);
@@ -4620,7 +4622,7 @@ async function renderClientes(){
           <button class="btn btn-outline btn-sm" onclick="verHistoricoCliente('${c.codigo}')">Histórico</button>
           ${temPermissaoEditar('clientes')?`<button class="btn btn-outline btn-sm" onclick="abrirModalCliente(null,'${c.codigo}')">✏️ Editar</button>`:''}
           ${c.pendente_w3&&temPermissaoEditar('clientes')?`<button class="btn btn-outline btn-sm" style="color:#16a34a;border-color:#16a34a" onclick="marcarClienteW3Ok('${c.codigo}')">✅ Cadastrado no W3</button>`:''}        ${temPermissaoEditar('clientes')?`<button class="btn btn-outline btn-sm" onclick="clonarCliente('${c.codigo}')">📑 Clonar</button>`:''}
-          ${temPermissaoEditar('clientes')?`<button class="btn btn-outline btn-sm" style="color:#7c3aed;border-color:#7c3aed" onclick="abrirModalMesclarCliente('${c.codigo}')">🔗 Mesclar</button>`:''}
+          ${temPermissaoEditar('clientes')?`<button class="btn btn-outline btn-sm" style="color:#7c3aed;border-color:#7c3aed" onclick="abrirModalMesclarCliente('${c._key}')">🔗 Mesclar</button>`:''}
           ${temPermissaoEditar('clientes')?`<button class="btn btn-outline btn-sm" style="${c.inativo?'':'color:#dc2626;border-color:#dc2626'}" onclick="toggleInativoCliente('${c.codigo}')">${c.inativo?'✅ Reativar':'🚫 Inativar'}</button>`:''}
         </div>
       </div>`;
@@ -8495,21 +8497,21 @@ async function verificarClientesDuplicadosCNPJ(){
         ${lista.map(c=>`
           <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">
             <div><strong>${c.nome}</strong> <span style="color:var(--muted)">(código ${c.codigo})</span> ${c.inativo?'<span class="badge badge-gray">Inativo</span>':''}</div>
-            <button class="btn btn-outline btn-sm" onclick="abrirModalMesclarCliente('${c.codigo}')">🔗 Mesclar</button>
+            <button class="btn btn-outline btn-sm" onclick="abrirModalMesclarCliente('${c._key}')">🔗 Mesclar</button>
           </div>`).join('')}
       </div>`).join('')}
   `;
 }
 
-function abrirModalMesclarCliente(codigoPrincipal){
+function abrirModalMesclarCliente(chavePrincipal){
   try {
-    const principal = CLIENTES_DB.find(c => c.codigo === codigoPrincipal);
+    const principal = CLIENTES_DB.find(c => c._key === chavePrincipal);
     if(!principal){ toast('Cliente não encontrado','error'); return; }
 
     const nomeNorm = normalizarNomeCliente(principal.nome);
     const cnpjNorm = (principal.cpf_cnpj||'').replace(/\D/g,'');
     const candidatos = CLIENTES_DB.filter(c => {
-      if(c.codigo === codigoPrincipal) return false;
+      if(c._key === chavePrincipal) return false; // exclui só o registro exato clicado, não outros com mesmo código
       if(normalizarNomeCliente(c.nome) === nomeNorm) return true;
       if(cnpjNorm && (c.cpf_cnpj||'').replace(/\D/g,'') === cnpjNorm) return true;
       return false;
@@ -8521,7 +8523,7 @@ function abrirModalMesclarCliente(codigoPrincipal){
         <div style="padding:12px;color:var(--muted)">Nenhum outro cliente com o mesmo nome ou CNPJ/CPF foi encontrado automaticamente.</div>
         <div style="margin-top:10px">
           <label style="font-size:13px;font-weight:600">Buscar duplicado manualmente por nome ou CNPJ:</label>
-          <input type="text" id="mesclar-busca-manual" placeholder="Digite parte do nome ou CNPJ..." style="width:100%;margin-top:6px" oninput="buscarCandidatosMesclagem('${codigoPrincipal}')">
+          <input type="text" id="mesclar-busca-manual" placeholder="Digite parte do nome ou CNPJ..." style="width:100%;margin-top:6px" oninput="buscarCandidatosMesclagem('${chavePrincipal}')">
           <div id="mesclar-busca-resultado" style="margin-top:10px"></div>
         </div>`;
     } else {
@@ -8533,12 +8535,12 @@ function abrirModalMesclarCliente(codigoPrincipal){
   }
 }
 
-function buscarCandidatosMesclagem(codigoPrincipal){
-  const principal = CLIENTES_DB.find(c => c.codigo === codigoPrincipal);
+function buscarCandidatosMesclagem(chavePrincipal){
+  const principal = CLIENTES_DB.find(c => c._key === chavePrincipal);
   const termo = (document.getElementById('mesclar-busca-manual').value||'').toLowerCase().trim();
   const resultDiv = document.getElementById('mesclar-busca-resultado');
   if(termo.length < 3){ resultDiv.innerHTML = ''; return; }
-  const candidatos = CLIENTES_DB.filter(c => c.codigo !== codigoPrincipal &&
+  const candidatos = CLIENTES_DB.filter(c => c._key !== chavePrincipal &&
     ((c.nome||'').toLowerCase().includes(termo) || (c.cpf_cnpj||'').replace(/\D/g,'').includes(termo.replace(/\D/g,'')) && termo.replace(/\D/g,'').length>=3));
   resultDiv.innerHTML = renderCandidatosMesclagem(principal, candidatos, true);
 }
@@ -8549,18 +8551,18 @@ function renderCandidatosMesclagem(principal, candidatos, semTitulo){
     ${semTitulo?'':'<div style="font-size:13px;margin-bottom:10px">Encontramos o(s) seguinte(s) cadastro(s) com o mesmo nome. Escolha qual mesclar com <strong>'+principal.nome+'</strong> (código '+principal.codigo+'):</div>'}
     ${candidatos.map(c => `
       <div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;font-size:13px">
-        <div style="font-weight:700">${c.nome} <span style="font-weight:400;color:var(--muted)">(código ${c.codigo})</span></div>
+        <div style="font-weight:700">${c.nome} <span style="font-weight:400;color:var(--muted)">(código ${c.codigo}${c.codigo===principal.codigo?' — mesmo código do principal!':''})</span></div>
         <div>📄 CNPJ/CPF: ${c.cpf_cnpj||'—'} · 📞 ${c.telefone||'—'}</div>
         <div>📍 ${c.cidade||''}/${c.uf||''} ${c.endereco?'— '+c.endereco:''}</div>
-        <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="prepararMesclagem('${principal.codigo}','${c.codigo}')">Mesclar este com o principal →</button>
+        <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="prepararMesclagem('${principal._key}','${c._key}')">Mesclar este com o principal →</button>
       </div>
     `).join('')}
   `;
 }
 
-function prepararMesclagem(codigoPrincipal, codigoDuplicado){
-  const principal = CLIENTES_DB.find(c => c.codigo === codigoPrincipal);
-  const duplicado = CLIENTES_DB.find(c => c.codigo === codigoDuplicado);
+function prepararMesclagem(chavePrincipal, chaveDuplicado){
+  const principal = CLIENTES_DB.find(c => c._key === chavePrincipal);
+  const duplicado = CLIENTES_DB.find(c => c._key === chaveDuplicado);
   if(!principal || !duplicado) return;
 
   // Monta prévia do resultado: principal mantém seus dados preenchidos, completa com o que faltar do duplicado
@@ -8572,6 +8574,7 @@ function prepararMesclagem(codigoPrincipal, codigoDuplicado){
   conteudo.innerHTML = `
     <div style="padding:12px 14px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;font-size:13px;color:#9a3412;margin-bottom:14px">
       ⚠️ O cadastro <strong>${duplicado.codigo} — ${duplicado.nome}</strong> será removido. Todos os pedidos que estavam ligados a ele passam a ficar ligados ao cadastro principal <strong>${principal.codigo}</strong>. Esta ação não pode ser desfeita automaticamente.
+      ${duplicado.codigo===principal.codigo?'<br><br>⚠️ <strong>Os dois cadastros têm o mesmo código</strong> — isso é o que estava impedindo a mesclagem automática antes. Como o código já é igual, os pedidos não precisam de reatribuição, só o cadastro duplicado será removido.':''}
     </div>
     <div style="font-size:13px;font-weight:700;margin-bottom:6px">Resultado final (cadastro principal, código ${principal.codigo}):</div>
     <div style="border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;margin-bottom:14px">
@@ -8581,52 +8584,59 @@ function prepararMesclagem(codigoPrincipal, codigoDuplicado){
       <div>📍 ${resultado.cidade||''}/${resultado.uf||''} ${resultado.endereco?'— '+resultado.endereco:''}</div>
       <div>👤 Vendedor: ${resultado.vendedor_nome||'—'}</div>
     </div>
-    <button class="btn btn-primary btn-sm" onclick="confirmarMesclagemCliente('${codigoPrincipal}','${codigoDuplicado}')">✅ Confirmar Mesclagem</button>
-    <button class="btn btn-outline btn-sm" onclick="abrirModalMesclarCliente('${codigoPrincipal}')">← Voltar</button>
+    <button class="btn btn-primary btn-sm" onclick="confirmarMesclagemCliente('${chavePrincipal}','${chaveDuplicado}')">✅ Confirmar Mesclagem</button>
+    <button class="btn btn-outline btn-sm" onclick="abrirModalMesclarCliente('${chavePrincipal}')">← Voltar</button>
   `;
 }
 
-async function confirmarMesclagemCliente(codigoPrincipal, codigoDuplicado){
+async function confirmarMesclagemCliente(chavePrincipal, chaveDuplicado){
   if(!temPermissaoEditar('clientes')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
-  const principal = CLIENTES_DB.find(c => c.codigo === codigoPrincipal);
-  const duplicado = CLIENTES_DB.find(c => c.codigo === codigoDuplicado);
+  const principal = CLIENTES_DB.find(c => c._key === chavePrincipal);
+  const duplicado = CLIENTES_DB.find(c => c._key === chaveDuplicado);
   if(!principal || !duplicado) return;
-  if(!confirm(`Confirmar mesclagem?\n\n"${duplicado.nome}" (${duplicado.codigo}) será removido e seus pedidos passam a ficar ligados a "${principal.nome}" (${principal.codigo}).`)) return;
+  const ok = await confirmCustom(`Confirmar mesclagem?\n\n"${duplicado.nome}" (${duplicado.codigo}) será removido e seus pedidos passam a ficar ligados a "${principal.nome}" (${principal.codigo}).`, 'Confirmar Mesclagem');
+  if(!ok) return;
 
   const conteudo = document.getElementById('mesclar-cliente-conteudo');
   conteudo.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted)">⏳ Mesclando...</div>';
 
   try {
-    // 1) Completa os campos vazios do principal com os dados do duplicado
+    // 1) Completa os campos vazios do principal com os dados do duplicado — usa a chave
+    // real do Firebase (_key), não o campo "codigo" (que pode ser igual em ambos)
     const campos = ['cpf_cnpj','telefone','email','endereco','cidade','uf','cep','vendedor_id','vendedor_nome'];
     const atualizacoes = {};
     campos.forEach(campo => { if(!principal[campo] && duplicado[campo]) atualizacoes[campo] = duplicado[campo]; });
     if(Object.keys(atualizacoes).length){
-      await db.ref('clientes/c'+principal.codigo).update(atualizacoes);
+      await db.ref('clientes/'+principal._key).update(atualizacoes);
       Object.assign(principal, atualizacoes);
     }
 
-    // 2) Transfere todos os pedidos do duplicado para o principal
-    const snapPedidos = await db.ref('pedidos').orderByChild('cliente_codigo').equalTo(codigoDuplicado).once('value');
-    const pedidosDuplicado = snapPedidos.val() || {};
-    const updatesPedidos = {};
-    Object.keys(pedidosDuplicado).forEach(pid => {
-      updatesPedidos['pedidos/'+pid+'/cliente_codigo'] = principal.codigo;
-      updatesPedidos['pedidos/'+pid+'/cliente_nome'] = principal.nome;
-      updatesPedidos['pedidos/'+pid+'/cliente_cpf'] = principal.cpf_cnpj || '';
-      updatesPedidos['pedidos/'+pid+'/cliente_cidade'] = principal.cidade || '';
-      updatesPedidos['pedidos/'+pid+'/cliente_uf'] = principal.uf || '';
-      updatesPedidos['pedidos/'+pid+'/cliente_endereco'] = principal.endereco || '';
-      updatesPedidos['pedidos/'+pid+'/cliente_cep'] = principal.cep || '';
-    });
-    const qtdPedidosTransferidos = Object.keys(pedidosDuplicado).length;
-    if(Object.keys(updatesPedidos).length){
-      await db.ref().update(updatesPedidos);
+    // 2) Transfere os pedidos do duplicado para o principal — só precisa mesmo se os
+    // códigos forem diferentes (se já for o mesmo código, os pedidos já apontam certo)
+    let qtdPedidosTransferidos = 0;
+    if(principal.codigo !== duplicado.codigo){
+      const snapPedidos = await db.ref('pedidos').orderByChild('cliente_codigo').equalTo(duplicado.codigo).once('value');
+      const pedidosDuplicado = snapPedidos.val() || {};
+      const updatesPedidos = {};
+      Object.keys(pedidosDuplicado).forEach(pid => {
+        updatesPedidos['pedidos/'+pid+'/cliente_codigo'] = principal.codigo;
+        updatesPedidos['pedidos/'+pid+'/cliente_nome'] = principal.nome;
+        updatesPedidos['pedidos/'+pid+'/cliente_cpf'] = principal.cpf_cnpj || '';
+        updatesPedidos['pedidos/'+pid+'/cliente_cidade'] = principal.cidade || '';
+        updatesPedidos['pedidos/'+pid+'/cliente_uf'] = principal.uf || '';
+        updatesPedidos['pedidos/'+pid+'/cliente_endereco'] = principal.endereco || '';
+        updatesPedidos['pedidos/'+pid+'/cliente_cep'] = principal.cep || '';
+      });
+      qtdPedidosTransferidos = Object.keys(pedidosDuplicado).length;
+      if(Object.keys(updatesPedidos).length){
+        await db.ref().update(updatesPedidos);
+      }
     }
 
-    // 3) Remove o cadastro duplicado
-    await db.ref('clientes/c'+duplicado.codigo).remove();
-    const idx = CLIENTES_DB.findIndex(c => c.codigo === duplicado.codigo);
+    // 3) Remove o cadastro duplicado — usa a chave real do Firebase, não 'clientes/c'+codigo
+    // (que pode não ser o caminho real se o registro foi criado por outro fluxo)
+    await db.ref('clientes/'+duplicado._key).remove();
+    const idx = CLIENTES_DB.findIndex(c => c._key === duplicado._key);
     if(idx > -1) CLIENTES_DB.splice(idx, 1);
 
     fecharModal('modal-mesclar-cliente');
