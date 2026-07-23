@@ -11420,6 +11420,13 @@ async function relMRP(el){
   el.innerHTML = `
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
       <div class="form-group" style="margin:0;width:170px">
+        <label>Tipo</label>
+        <select id="mrp-tipo" onchange="calcularMRP()">
+          <option value="insumo">Insumos</option>
+          <option value="vendavel">Produtos Vendáveis</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin:0;width:170px">
         <label>Histórico p/ calcular consumo</label>
         <select id="mrp-dias-historico">
           <option value="30">Últimos 30 dias</option>
@@ -11436,7 +11443,7 @@ async function relMRP(el){
         <label>Mostrar</label>
         <select id="mrp-filtro-status">
           <option value="atencao">Só os que precisam de atenção</option>
-          <option value="todos">Todos os insumos</option>
+          <option value="todos">Todos os itens</option>
         </select>
       </div>
       <button class="btn btn-primary btn-sm" onclick="calcularMRP()">🔄 Recalcular</button>
@@ -11450,49 +11457,88 @@ async function calcularMRP(){
   const el = document.getElementById('mrp-resultado');
   el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px">⏳ Calculando...</div>';
 
+  const tipoMrp = document.getElementById('mrp-tipo').value; // 'insumo' ou 'vendavel'
   const diasHistorico = Number(document.getElementById('mrp-dias-historico').value);
   const diasCobertura = Number(document.getElementById('mrp-dias-cobertura').value) || 30;
   const filtroStatus = document.getElementById('mrp-filtro-status').value;
 
   if(!INSUMOS_DB.length) await carregarInsumosFirebase();
+  if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
   if(!FORNECEDORES_DB.length) await carregarFornecedoresFirebase();
+  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
 
-  // 1) Consumo histórico (saídas reais — ignora balanço/estorno, que não são consumo de verdade)
   const desdeTs = Date.now() - diasHistorico*24*60*60*1000;
-  const snapMov = await db.ref('movimentos_estoque').once('value');
-  const movimentos = Object.values(snapMov.val() || {});
-  const consumoPorInsumo = {}; // codigo -> total saído no período
-  movimentos.forEach(m=>{
-    if(m.tipo !== 'saida') return;
-    if(m.ts < desdeTs) return;
-    const motivoLower = (m.motivo||'').toLowerCase();
-    if(motivoLower.includes('balanço') || motivoLower.includes('balanco') || motivoLower.includes('estorno')) return;
-    consumoPorInsumo[m.codigo] = (consumoPorInsumo[m.codigo]||0) + Number(m.qtd||0);
-  });
+  const consumoPorCodigo = {}; // codigo -> total consumido/vendido no período
+  const emTransitoPorCodigo = {};
 
-  // 2) Estoque já a caminho — soma dos itens de pedidos de compra ainda não recebidos
-  const snapCompras = await db.ref('pedidos_compra').once('value');
-  const compras = Object.values(snapCompras.val() || {});
-  const emTransitoPorInsumo = {};
-  compras.forEach(c=>{
-    if(['recebido','concluido'].includes(c.status)) return;
-    (c.itens||[]).forEach(it=>{
-      if(it.tipo !== 'insumo') return;
-      emTransitoPorInsumo[it.codigo] = (emTransitoPorInsumo[it.codigo]||0) + Number(it.qtd||0);
+  if(tipoMrp === 'insumo'){
+    // Consumo real de insumo: saídas de estoque (produção), ignorando balanço/estorno
+    const snapMov = await db.ref('movimentos_estoque').once('value');
+    const movimentos = Object.values(snapMov.val() || {});
+    movimentos.forEach(m=>{
+      if(m.tipo !== 'saida') return;
+      if(m.ts < desdeTs) return;
+      const motivoLower = (m.motivo||'').toLowerCase();
+      if(motivoLower.includes('balanço') || motivoLower.includes('balanco') || motivoLower.includes('estorno')) return;
+      consumoPorCodigo[m.codigo] = (consumoPorCodigo[m.codigo]||0) + Number(m.qtd||0);
     });
-  });
 
-  // 3) Monta a linha de cada insumo ativo
-  const linhas = INSUMOS_DB.filter(i=>!i.inativo).map(i=>{
-    const consumoTotal = consumoPorInsumo[i.codigo] || 0;
-    const cmd = consumoTotal / diasHistorico; // consumo médio diário
-    const estoqueAtual = Number(i.estoque_atual||0);
-    const emTransito = emTransitoPorInsumo[i.codigo] || 0;
+    // Em trânsito: pedidos de compra de insumo ainda não recebidos
+    const snapCompras = await db.ref('pedidos_compra').once('value');
+    Object.values(snapCompras.val() || {}).forEach(c=>{
+      if(['recebido','concluido'].includes(c.status)) return;
+      (c.itens||[]).forEach(it=>{
+        if(it.tipo !== 'insumo') return;
+        emTransitoPorCodigo[it.codigo] = (emTransitoPorCodigo[it.codigo]||0) + Number(it.qtd||0);
+      });
+    });
+  } else {
+    // Demanda de produto vendável: vendas reais em pedidos confirmados/concluídos no período
+    // (não usa movimento de estoque — vendas são o sinal de demanda real, independente de
+    // como/se o estoque do produto é baixado no sistema)
+    const snapPedidos = await db.ref('pedidos').once('value');
+    Object.values(snapPedidos.val() || {}).forEach(p=>{
+      if(!['AP','EX','CC','Concluído'].includes(p.status)) return;
+      const dataPedido = new Date(p.data).getTime();
+      if(isNaN(dataPedido) || dataPedido < desdeTs) return;
+      (p.itens||[]).forEach(it=>{
+        consumoPorCodigo[it.codigo] = (consumoPorCodigo[it.codigo]||0) + Number(it.qtd||0);
+      });
+    });
 
-    const fornecedorPadrao = (i.fornecedores||[]).find(f=>f.padrao) || (i.fornecedores||[])[0];
-    const nomeFornecedor = fornecedorPadrao?.nome || i.fornecedor || '';
+    // Em trânsito: pedidos de compra do produto (revenda) + OPs abertas que produzem esse produto
+    const snapCompras = await db.ref('pedidos_compra').once('value');
+    Object.values(snapCompras.val() || {}).forEach(c=>{
+      if(['recebido','concluido'].includes(c.status)) return;
+      (c.itens||[]).forEach(it=>{
+        if(it.tipo !== 'vendavel') return;
+        emTransitoPorCodigo[it.codigo] = (emTransitoPorCodigo[it.codigo]||0) + Number(it.qtd||0);
+      });
+    });
+    if(!OPS_DB.length) await carregarOPsFirebase();
+    OPS_DB.filter(op=>op.status!=='concluida').forEach(op=>{
+      emTransitoPorCodigo[op.produto_codigo] = (emTransitoPorCodigo[op.produto_codigo]||0) + Number(op.qtd_solicitada||0);
+    });
+  }
+
+  // Monta a linha de cada item ativo
+  const baseItens = tipoMrp === 'insumo' ? INSUMOS_DB : PRODUTOS_DB;
+  const linhas = baseItens.filter(i=>!i.inativo).map(i=>{
+    const consumoTotal = consumoPorCodigo[i.codigo] || 0;
+    const cmd = consumoTotal / diasHistorico;
+    const estoqueAtual = Number((tipoMrp==='insumo' ? i.estoque_atual : i.quantidade) || 0);
+    const emTransito = emTransitoPorCodigo[i.codigo] || 0;
+
+    let nomeFornecedor, prazoEntrega;
+    if(tipoMrp === 'insumo'){
+      const fornecedorPadrao = (i.fornecedores||[]).find(f=>f.padrao) || (i.fornecedores||[])[0];
+      nomeFornecedor = fornecedorPadrao?.nome || i.fornecedor || '';
+    } else {
+      nomeFornecedor = i.fornecedor || '';
+    }
     const fornecedorCadastro = FORNECEDORES_DB.find(f=>f.nome === nomeFornecedor);
-    const prazoEntrega = fornecedorCadastro?.prazo_entrega_dias || 0;
+    prazoEntrega = fornecedorCadastro?.prazo_entrega_dias || 0;
+    const temReceita = tipoMrp === 'vendavel' && !!(RECEITAS_DB[i.codigo]?.itens?.length);
 
     const coberturaAtualDias = cmd > 0 ? (estoqueAtual / cmd) : Infinity;
     const diasAteComprar = cmd > 0 ? (coberturaAtualDias - prazoEntrega) : Infinity;
@@ -11501,9 +11547,9 @@ async function calcularMRP(){
     if(cmd === 0){
       statusMrp = 'Sem consumo no período'; corStatus = '#9ca3af';
     } else if(diasAteComprar <= 0){
-      statusMrp = 'COMPRAR AGORA'; corStatus = '#dc2626';
+      statusMrp = temReceita ? 'PRODUZIR AGORA' : 'COMPRAR AGORA'; corStatus = '#dc2626';
     } else if(diasAteComprar <= 7){
-      statusMrp = `Comprar em ${Math.ceil(diasAteComprar)} dia(s)`; corStatus = '#d97706';
+      statusMrp = `${temReceita?'Produzir':'Comprar'} em ${Math.ceil(diasAteComprar)} dia(s)`; corStatus = '#d97706';
     } else {
       statusMrp = `OK (${Math.ceil(diasAteComprar)} dias de folga)`; corStatus = '#16a34a';
     }
@@ -11517,13 +11563,13 @@ async function calcularMRP(){
 
     return {
       codigo: i.codigo, nome: i.nome, cmd, estoqueAtual, emTransito,
-      coberturaAtualDias, prazoEntrega, fornecedor: nomeFornecedor || '(sem fornecedor)',
-      diasAteComprar, statusMrp, corStatus, qtdSugerida, dataSugerida,
+      coberturaAtualDias, prazoEntrega, fornecedor: nomeFornecedor || (temReceita?'(produção própria)':'(sem fornecedor)'),
+      temReceita, diasAteComprar, statusMrp, corStatus, qtdSugerida, dataSugerida,
       urgente: cmd > 0 && diasAteComprar <= 7
     };
   });
 
-  let linhasFiltradas = linhas.filter(l => l.cmd > 0); // sem consumo no período não ajuda a planejar
+  let linhasFiltradas = linhas.filter(l => l.cmd > 0);
   if(filtroStatus === 'atencao'){
     linhasFiltradas = linhasFiltradas.filter(l => l.diasAteComprar <= 7);
   }
@@ -11532,26 +11578,27 @@ async function calcularMRP(){
   mrpCache = linhasFiltradas;
 
   if(!linhasFiltradas.length){
-    el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--success)">✅ Nenhum insumo precisando de atenção com esses filtros.</div>';
+    el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--success)">✅ Nenhum item precisando de atenção com esses filtros.</div>';
     return;
   }
 
+  const colunaAcao = tipoMrp==='vendavel' ? 'Produzir/Comprar Até' : 'Comprar Até';
   el.innerHTML = `
     <div style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-      <span style="font-size:13px;color:var(--muted)">${linhasFiltradas.length} insumo(s) na lista</span>
+      <span style="font-size:13px;color:var(--muted)">${linhasFiltradas.length} item(ns) na lista</span>
       <button class="btn btn-outline btn-sm" onclick="exportarMRPExcel()">📥 Exportar Excel</button>
     </div>
     <div style="overflow-x:auto">
     <table style="width:100%;border-collapse:collapse;font-size:12px">
       <thead style="background:var(--primary);color:rgba(255,255,255,.85)"><tr>
         <th style="padding:7px 9px;text-align:left">Código</th>
-        <th style="padding:7px 9px;text-align:left">Insumo</th>
+        <th style="padding:7px 9px;text-align:left">${tipoMrp==='insumo'?'Insumo':'Produto'}</th>
         <th style="padding:7px 9px;text-align:left">Fornecedor</th>
-        <th style="padding:7px 9px;text-align:center">Consumo/dia</th>
+        <th style="padding:7px 9px;text-align:center">${tipoMrp==='insumo'?'Consumo':'Venda'}/dia</th>
         <th style="padding:7px 9px;text-align:center">Estoque</th>
         <th style="padding:7px 9px;text-align:center">A Caminho</th>
-        <th style="padding:7px 9px;text-align:center">Prazo Entrega</th>
-        <th style="padding:7px 9px;text-align:center">Comprar Até</th>
+        <th style="padding:7px 9px;text-align:center">Prazo</th>
+        <th style="padding:7px 9px;text-align:center">${colunaAcao}</th>
         <th style="padding:7px 9px;text-align:center">Qtd Sugerida</th>
         <th style="padding:7px 9px;text-align:center">Situação</th>
       </tr></thead>
@@ -11564,7 +11611,7 @@ async function calcularMRP(){
             <td style="padding:6px 9px;text-align:center">${l.cmd.toFixed(2)}</td>
             <td style="padding:6px 9px;text-align:center">${l.estoqueAtual.toLocaleString('pt-BR')}</td>
             <td style="padding:6px 9px;text-align:center">${l.emTransito.toLocaleString('pt-BR')}</td>
-            <td style="padding:6px 9px;text-align:center">${l.prazoEntrega ? l.prazoEntrega+'d' : '<span style="color:#dc2626">sem prazo</span>'}</td>
+            <td style="padding:6px 9px;text-align:center">${l.prazoEntrega ? l.prazoEntrega+'d' : (l.temReceita?'—':'<span style="color:#dc2626">sem prazo</span>')}</td>
             <td style="padding:6px 9px;text-align:center">${l.dataSugerida ? l.dataSugerida.toLocaleDateString('pt-BR') : '—'}</td>
             <td style="padding:6px 9px;text-align:center;font-weight:700">${l.qtdSugerida.toLocaleString('pt-BR')}</td>
             <td style="padding:6px 9px;text-align:center;color:${l.corStatus};font-weight:700">${l.statusMrp}</td>
@@ -11572,7 +11619,10 @@ async function calcularMRP(){
       </tbody>
     </table></div>
     <div style="font-size:11px;color:var(--muted);margin-top:10px">
-      "Comprar Até" é a data em que o pedido precisa sair pra não faltar estoque, considerando o prazo de entrega do fornecedor. Itens com "sem prazo" estão usando prazo = 0 dias — cadastre o prazo de entrega do fornecedor pra esse cálculo ficar correto.
+      ${tipoMrp==='vendavel'
+        ? '"Produzir/Comprar Até" é a data limite pra agir sem faltar estoque. Produtos com receita própria mostram "produção própria" no fornecedor e "—" no prazo (esse cálculo não considera capacidade de produção — use o relatório de Sugestão Jornal/Capacidade pra isso).'
+        : '"Comprar Até" é a data em que o pedido precisa sair pra não faltar estoque, considerando o prazo de entrega do fornecedor.'}
+      Itens com "sem prazo" estão usando prazo = 0 dias — cadastre o prazo de entrega do fornecedor pra esse cálculo ficar correto.
     </div>
   `;
 }
