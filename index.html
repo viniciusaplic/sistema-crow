@@ -3528,46 +3528,66 @@ async function clonarPedido(id){
 
 // ══ EXPORTAR PEDIDOS PARA W3 ══
 async function exportarPedidosW3(){
-  const fDataIni = document.getElementById('f-data-ini').value;
-  const fDataFim = document.getElementById('f-data-fim').value;
-  const fCliente = (document.getElementById('f-cliente').value||'').toLowerCase();
-  const fProduto = (document.getElementById('f-produto').value||'').toLowerCase();
-  const fStatus  = document.getElementById('f-status').value;
-  const fVendedor = (document.getElementById('f-vendedor')?.value || '').toLowerCase().trim();
-
   let pedidos = [];
-  try {
-    const snap = await db.ref('pedidos').once('value');
-    const todos = snap.val()||{};
-    for(const k in todos){
-      const p = todos[k];
-      if(!vejaTudoDoModulo('pedidos') && p.vendedor_id!==usuarioLogado.id) continue;
-      if(fVendedor && !(p.vendedor_nome||'').toLowerCase().includes(fVendedor)) continue;
-      if(fStatus==='ativos'){ if(p.status!=='AA' && p.status!=='AP' && p.status!=='EX') continue; }
-      else if(fStatus && p.status!==fStatus) continue;
-      if(fCliente && !p.cliente_nome.toLowerCase().includes(fCliente)) continue;
-      if(fProduto){
-        const tem = (p.itens||[]).some(i=>
-          i.nome.toLowerCase().includes(fProduto)||i.codigo.toLowerCase().includes(fProduto)
-        );
-        if(!tem) continue;
-      }
-      if(fDataIni){
-        const d=new Date(p.data); d.setHours(0,0,0,0);
-        if(d<new Date(fDataIni+'T00:00:00')) continue;
-      }
-      if(fDataFim){
-        const d=new Date(p.data); d.setHours(0,0,0,0);
-        if(d>new Date(fDataFim+'T23:59:59')) continue;
-      }
-      pedidos.push(p);
-    }
-  } catch(e){ toast('Erro ao carregar pedidos','error'); return; }
+  let usandoSelecao = pedidosSelecionadosImprimir.size > 0;
 
-  if(!pedidos.length){ toast('Nenhum pedido no filtro atual','error'); return; }
+  if(usandoSelecao){
+    // Tem pedidos marcados na tela — exporta exatamente esses, ignorando o filtro
+    try {
+      for(const id of pedidosSelecionadosImprimir){
+        const snap = await db.ref('pedidos/'+id).once('value');
+        const p = snap.val();
+        if(p) pedidos.push(p);
+      }
+    } catch(e){ toast('Erro ao carregar pedidos selecionados','error'); return; }
+    if(!pedidos.length){ toast('Nenhum dos pedidos marcados foi encontrado','error'); return; }
+  } else {
+    const fDataIni = document.getElementById('f-data-ini').value;
+    const fDataFim = document.getElementById('f-data-fim').value;
+    const fCliente = (document.getElementById('f-cliente').value||'').toLowerCase();
+    const fProduto = (document.getElementById('f-produto').value||'').toLowerCase();
+    const fStatus  = document.getElementById('f-status').value;
+    const fVendedor = (document.getElementById('f-vendedor')?.value || '').toLowerCase().trim();
+
+    try {
+      const snap = await db.ref('pedidos').once('value');
+      const todos = snap.val()||{};
+      for(const k in todos){
+        const p = todos[k];
+        if(!vejaTudoDoModulo('pedidos') && p.vendedor_id!==usuarioLogado.id) continue;
+        if(fVendedor && !(p.vendedor_nome||'').toLowerCase().includes(fVendedor)) continue;
+        if(fStatus==='ativos'){ if(p.status!=='AA' && p.status!=='AP' && p.status!=='EX') continue; }
+        else if(fStatus && p.status!==fStatus) continue;
+        if(fCliente && !p.cliente_nome.toLowerCase().includes(fCliente)) continue;
+        if(fProduto){
+          const tem = (p.itens||[]).some(i=>
+            i.nome.toLowerCase().includes(fProduto)||i.codigo.toLowerCase().includes(fProduto)
+          );
+          if(!tem) continue;
+        }
+        if(fDataIni){
+          const d=new Date(p.data); d.setHours(0,0,0,0);
+          if(d<new Date(fDataIni+'T00:00:00')) continue;
+        }
+        if(fDataFim){
+          const d=new Date(p.data); d.setHours(0,0,0,0);
+          if(d>new Date(fDataFim+'T23:59:59')) continue;
+        }
+        pedidos.push(p);
+      }
+    } catch(e){ toast('Erro ao carregar pedidos','error'); return; }
+
+    if(!pedidos.length){ toast('Nenhum pedido no filtro atual','error'); return; }
+  }
+
+  pedidos.sort((a,b)=>a.numero-b.numero);
+  const numerosLista = pedidos.map(p=>'#'+p.numero).join(', ');
+  const origemTexto = usandoSelecao ? `os ${pedidos.length} pedido(s) MARCADO(S)` : `os ${pedidos.length} pedido(s) do FILTRO atual`;
+  const ok = await confirmCustom(`Confirmar exportação de ${origemTexto}?\n\n${numerosLista}`, 'Exportar');
+  if(!ok) return;
 
   const linhas = [];
-  pedidos.sort((a,b)=>a.numero-b.numero).forEach(p=>{
+  pedidos.forEach(p=>{
     (p.itens||[]).forEach(item=>{
       linhas.push([
         p.numero,
