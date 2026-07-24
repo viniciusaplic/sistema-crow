@@ -1339,8 +1339,8 @@ tbody td{padding:11px 16px;font-size:14px}
         </div>
       </div>
       <div id="pedido-lista-clientes" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;display:none;background:var(--card)"></div>
-      <div id="pedido-cliente-selecionado"></div>
     </div>
+    <div id="pedido-cliente-selecionado"></div>
     <div id="step-itens-ped" style="display:none">
       <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:10px;flex-wrap:wrap">
         <div class="form-group" style="flex:1;min-width:200px">
@@ -3435,6 +3435,7 @@ async function editarPedido(id){
 
 async function clonarPedido(id){
   if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
+  if(!CLIENTES_DB.length) await carregarClientesFirebase();
   const snap = await db.ref('pedidos/'+id).once('value');
   const p = snap.val(); if(!p) return;
 
