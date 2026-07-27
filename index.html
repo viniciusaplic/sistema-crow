@@ -529,6 +529,7 @@ tbody td{padding:11px 16px;font-size:14px}
       <div class="section-header">
         <div class="section-title">Clientes</div>
         <button class="btn btn-outline btn-sm admin-only" onclick="verificarClientesDuplicadosCNPJ()">🔍 Clientes Duplicados (CNPJ)</button>
+        <button class="btn btn-outline btn-sm admin-only" onclick="verificarVendedorNomeDessincronizado()">🔍 Nome de Vendedor Desatualizado</button>
         <button class="btn btn-primary admin-only" onclick="abrirModalCliente()" id="btn-novo-cliente" style="display:none">+ Novo Cliente</button>
       </div>
       <div id="clientes-duplicados-resultado"></div>
@@ -4342,8 +4343,23 @@ async function confirmarPedido(){
       vendedorIdFinal = pedidoOriginal.vendedor_id;
       vendedorNomeFinal = pedidoOriginal.vendedor_nome;
     } else {
-      vendedorIdFinal = c.vendedor_id || usuarioLogado.id;
-      vendedorNomeFinal = c.vendedor_nome || usuarioLogado.nome;
+      // Busca o vendedor ATUAL do cliente direto no banco — não confia na cópia que já
+      // estava na memória (CLIENTES_DB só é carregada uma vez por sessão; se alguém trocar
+      // o vendedor do cliente enquanto esta tela já estava aberta, a cópia em memória fica
+      // desatualizada e o pedido nasceria com o vendedor errado).
+      let vendedorAtualCliente = { vendedor_id: c.vendedor_id, vendedor_nome: c.vendedor_nome };
+      try {
+        if(c._key){
+          const snapCliente = await db.ref('clientes/'+c._key).once('value');
+          const clienteAtual = snapCliente.val();
+          if(clienteAtual){
+            vendedorAtualCliente = { vendedor_id: clienteAtual.vendedor_id, vendedor_nome: clienteAtual.vendedor_nome };
+          }
+        }
+      } catch(e){ /* se falhar, segue com o valor em memória mesmo */ }
+
+      vendedorIdFinal = vendedorAtualCliente.vendedor_id || usuarioLogado.id;
+      vendedorNomeFinal = vendedorAtualCliente.vendedor_nome || usuarioLogado.nome;
       const selVendedor = document.getElementById('pedido-vendedor-select');
       if(usuarioLogado.admin && selVendedor){
         vendedorIdFinal = selVendedor.value || null;
@@ -8506,9 +8522,16 @@ async function salvarCliente(){
   if(!temPermissaoEditar('clientes')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const nome = document.getElementById('cli-nome').value.trim();
   if(!nome){ toast('Nome é obrigatório','error'); return; }
+  const vendSelEl = document.getElementById('cli-vendedor-id');
   const vendedorId = usuarioLogado.admin
-    ? (document.getElementById('cli-vendedor-id').value || null)
+    ? (vendSelEl.value || null)
     : usuarioLogado.id;
+  // Nome do vendedor deve SEMPRE acompanhar o ID escolhido — antes só o ID era salvo,
+  // e o nome ficava com o valor antigo (de um vendedor anterior) parado no cadastro,
+  // vazando esse nome errado pra qualquer pedido novo criado depois pra esse cliente.
+  const vendedorNome = usuarioLogado.admin
+    ? (vendSelEl.value ? vendSelEl.options[vendSelEl.selectedIndex].textContent : '')
+    : usuarioLogado.nome;
 
   if(!vendedorId){
     toast('Selecione um vendedor responsável. Não é permitido cadastrar cliente sem vendedor vinculado.','error');
@@ -8547,7 +8570,8 @@ async function salvarCliente(){
     endereco:document.getElementById('cli-end').value,
     cep:document.getElementById('cli-cep').value,
     alerta:document.getElementById('cli-alerta').value.trim(),
-    vendedor_id: vendedorId
+    vendedor_id: vendedorId,
+    vendedor_nome: vendedorNome
   };
 
   try {
@@ -8598,6 +8622,84 @@ function normalizarNomeCliente(nome){
 // ══════════════════════════════════════════════
 // Varre TODOS os clientes e agrupa por CNPJ/CPF — mostra de uma vez todos os grupos
 // com mais de um cliente cadastrado, em vez de precisar procurar duplicado um por um.
+// Acha clientes cujo "vendedor_nome" (texto salvo) não bate mais com o nome de quem
+// realmente está no "vendedor_id" — o bug que causava pedidos novos herdando o nome
+// de um vendedor antigo, mesmo com o ID já correto. Corrige tudo de uma vez.
+async function verificarVendedorNomeDessincronizado(){
+  if(!usuarioLogado?.admin){ toast('Acesso restrito — só administradores','error'); return; }
+  const el = document.getElementById('clientes-duplicados-resultado');
+  el.innerHTML = '<div style="padding:12px;color:var(--muted)">⏳ Verificando...</div>';
+
+  if(!CLIENTES_DB.length) await carregarClientesFirebase();
+  const snapUsuarios = await db.ref('usuarios').once('value');
+  const usuarios = snapUsuarios.val() || {};
+  const nomePorId = {};
+  Object.values(usuarios).forEach(u => { if(u.id) nomePorId[u.id] = u.nome; });
+
+  const dessincronizados = CLIENTES_DB.filter(c => {
+    if(!c.vendedor_id) return false;
+    const nomeCorreto = nomePorId[c.vendedor_id];
+    return nomeCorreto && nomeCorreto !== c.vendedor_nome;
+  }).map(c => ({ ...c, vendedor_nome_correto: nomePorId[c.vendedor_id] }));
+
+  if(!dessincronizados.length){
+    el.innerHTML = `
+      <div style="text-align:right;margin:10px 0 6px"><button class="btn btn-outline btn-sm" onclick="document.getElementById('clientes-duplicados-resultado').innerHTML=''">✕ Fechar</button></div>
+      <div style="padding:12px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534;font-size:13px">✅ Nenhum cliente com nome de vendedor desatualizado encontrado.</div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div style="text-align:right;margin:10px 0 6px"><button class="btn btn-outline btn-sm" onclick="document.getElementById('clientes-duplicados-resultado').innerHTML=''">✕ Fechar</button></div>
+    <div style="padding:12px 14px;margin-bottom:12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;font-size:13px;color:#9a3412">
+      ⚠️ <strong>${dessincronizados.length} cliente(s)</strong> têm o ID do vendedor certo, mas o nome salvo é de outra pessoa (de uma troca de vendedor anterior a essa correção). Pedidos novos criados pra esses clientes até agora podem ter herdado o nome errado.
+    </div>
+    <div style="max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:10px">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead style="background:var(--primary);color:rgba(255,255,255,.85);position:sticky;top:0"><tr>
+        <th style="padding:6px 10px;text-align:left">Cliente</th>
+        <th style="padding:6px 10px;text-align:left">Nome salvo (errado)</th>
+        <th style="padding:6px 10px;text-align:left">Vendedor correto</th>
+      </tr></thead>
+      <tbody>
+        ${dessincronizados.map((c,idx)=>`
+          <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
+            <td style="padding:5px 10px;font-weight:700">${c.nome}</td>
+            <td style="padding:5px 10px;color:#dc2626">${c.vendedor_nome||'—'}</td>
+            <td style="padding:5px 10px;color:#16a34a;font-weight:700">${c.vendedor_nome_correto}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table></div>
+    <button class="btn btn-primary btn-sm" onclick="corrigirVendedorNomeEmMassa()">✅ Corrigir todos os ${dessincronizados.length}</button>
+  `;
+  window._clientesVendedorDessincCache = dessincronizados;
+}
+
+async function corrigirVendedorNomeEmMassa(){
+  if(!usuarioLogado?.admin){ toast('Acesso restrito — só administradores','error'); return; }
+  const lista = window._clientesVendedorDessincCache || [];
+  if(!lista.length) return;
+  const ok = await confirmCustom(`Corrigir o nome do vendedor de ${lista.length} cliente(s)?\n\nSó atualiza o nome salvo pra bater com o ID já correto — não muda quem é o vendedor responsável.`, `Corrigir ${lista.length}`);
+  if(!ok) return;
+
+  const el = document.getElementById('clientes-duplicados-resultado');
+  el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--muted)">⏳ Corrigindo...</div>';
+
+  let count = 0;
+  for(const c of lista){
+    try {
+      await db.ref('clientes/'+c._key).update({ vendedor_nome: c.vendedor_nome_correto });
+      const mem = CLIENTES_DB.find(x=>x._key===c._key);
+      if(mem) mem.vendedor_nome = c.vendedor_nome_correto;
+      count++;
+    } catch(e){ /* segue mesmo se um falhar */ }
+  }
+
+  window._clientesVendedorDessincCache = [];
+  el.innerHTML = `<div style="padding:14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534">✅ ${count} cliente(s) corrigido(s).</div>`;
+  toast(`✓ ${count} cliente(s) corrigido(s)`,'success');
+}
+
 async function verificarClientesDuplicadosCNPJ(){
   if(!usuarioLogado?.admin){ toast('Acesso restrito — só administradores','error'); return; }
   const el = document.getElementById('clientes-duplicados-resultado');
