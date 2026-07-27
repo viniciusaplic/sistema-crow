@@ -2810,7 +2810,7 @@ function atualizarBotaoImprimirOrcamentos(){
 function abrirJanelaImpressaoPedidos(lista, tituloJanela){
   if(!lista.length){ toast('Nenhum item encontrado para imprimir','error'); return; }
   const win = window.open('', '_blank');
-  const paginasHtml = lista.map(p => `<div class="folha">${montarSlipPedidoHTML(p)}</div>`).join('');
+  const paginasHtml = lista.map(p => `<div class="folha">${montarSlipPedidoHTML(p, lista.length)}</div>`).join('');
   win.document.write(`<!DOCTYPE html>
     <html>
     <head>
@@ -10992,8 +10992,6 @@ async function apagarPedidosW3EmMassa(){
 async function imprimirCapaPedidoVenda(id){
   const snap = await db.ref('pedidos/'+id).once('value');
   const p = snap.val(); if(!p) return;
-  // Usa o mesmo layout novo da folha (logo, CNPJ, endereço, parcelas detalhadas) —
-  // antes essa tela usava um layout antigo e diferente, sem a logo
   abrirJanelaImpressaoPedidos([p], `Pedido #${p.numero}`);
 }
 
@@ -13960,7 +13958,8 @@ function montarLinhaItemWhatsAppHTML(i, idx){
   </tr>`;
 }
 
-function montarCabecalhoSlipHTML(p, subtitulo){
+function montarCabecalhoSlipHTML(p, subtitulo, totalDoc){
+  totalDoc = totalDoc || 1;
   // Para pedidos antigos que não têm CEP/telefone no snapshot, busca no cadastro do cliente
   const clienteCadastro = CLIENTES_DB.find(c=>c.codigo===p.cliente_codigo);
   const cep = p.cliente_cep || clienteCadastro?.cep || '';
@@ -13973,7 +13972,12 @@ function montarCabecalhoSlipHTML(p, subtitulo){
     cep ? 'CEP: '+cep : '',
     tel ? 'Tel: '+tel : ''
   ].filter(Boolean).join('<br>');
+  const tipoDoc = p.status==='Orçamento' ? 'Orçamento' : 'Pedido';
   return `
+    <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#555;margin-bottom:8px">
+      <span>${new Date().toLocaleDateString('pt-BR')}, ${new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</span>
+      <span>Impressão de ${totalDoc} ${tipoDoc}(s)</span>
+    </div>
     <table style="width:100%;border-collapse:collapse;margin-bottom:12px">
       <tr>
         <td style="width:50%;vertical-align:top">
@@ -14089,8 +14093,8 @@ function montarRodapeSlipHTML(p){
 }
 
 
-function montarSlipPedidoHTML(p){
-  return `${montarCabecalhoSlipHTML(p)}${montarRodapeSlipHTML(p)}`;
+function montarSlipPedidoHTML(p, totalDoc){
+  return `${montarCabecalhoSlipHTML(p, null, totalDoc)}${montarRodapeSlipHTML(p)}`;
 }
 
 // ── Geração de imagem para WhatsApp, agora PAGINADA como uma impressão real ──
@@ -14098,14 +14102,13 @@ function montarSlipPedidoHTML(p){
 // impressa, ao invés de gerar uma única imagem gigante e difícil de ver no celular.
 const ALTURA_ALVO_PAGINA_IMG = 850; // px (na escala do div, antes do scale:2 do html2canvas)
 
-async function gerarImagemPedido(id){
-  const snap=await db.ref('pedidos/'+id).once('value');
-  const p=snap.val(); if(!p) return;
-  toast('⏳ Gerando PDF...','');
-
+// Renderiza todas as páginas de UM pedido dentro de um objeto jsPDF já existente —
+// usado tanto pra gerar o PDF de um pedido só quanto pra combinar vários num PDF único
+// (impressão em lote), garantindo que o layout seja sempre idêntico nos dois casos.
+async function adicionarPedidoAoPdf(pdf, p, totalDocs, paginaGlobal){
   const itens = p.itens||[];
+  const PW = 210, PH = 297; // A4 mm
 
-  // Mede a altura real de cada linha
   const medidor = document.createElement('div');
   medidor.style.cssText = 'position:fixed;left:-9999px;top:0;width:480px;font-family:Arial,sans-serif;font-size:11.5px';
   medidor.innerHTML = `<table style="width:100%;border-collapse:collapse"><tbody>${itens.map((i,idx)=>montarLinhaItemHTML(i,idx)).join('')}</tbody></table>`;
@@ -14113,7 +14116,6 @@ async function gerarImagemPedido(id){
   const alturas = Array.from(medidor.querySelectorAll('tbody > tr')).map(tr=>tr.getBoundingClientRect().height||40);
   document.body.removeChild(medidor);
 
-  // Divide em páginas
   const ALTURA_CABECALHO = 230, ALTURA_ALVO = 850;
   const paginasItens = [];
   let paginaAtual = [], alturaAtual = ALTURA_CABECALHO;
@@ -14124,52 +14126,63 @@ async function gerarImagemPedido(id){
   });
   paginasItens.push(paginaAtual);
 
+  for(let pg=0; pg<paginasItens.length; pg++){
+    const ehUltima = pg === paginasItens.length-1;
+    const subtitulo = paginasItens.length>1 ? `Página ${pg+1}/${paginasItens.length}` : '';
+
+    const itensTr = paginasItens[pg].map((i,idx)=>montarLinhaItemHTML(i,idx)).join('');
+    const conteudo = `
+      ${montarCabecalhoSlipHTML(p, subtitulo, totalDocs)}
+      <div style="font-size:10px;font-weight:600;color:#333;margin-bottom:4px;padding:0 14px">Itens do pedido de venda</div>
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="background:#0B3B21;color:#fff">
+          <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:left;font-size:11px">Descrição do produto/serviço</th>
+          <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:center;font-size:11px">Código</th>
+          <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:center;font-size:11px">Un.</th>
+          <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:center;font-size:11px">Qtd.</th>
+          <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:right;font-size:11px">Valor unitário</th>
+          <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:right;font-size:11px">Valor total</th>
+        </tr></thead>
+        <tbody>${itensTr}</tbody>
+      </table>
+      ${ehUltima ? montarSummarySlipHTML(p) : '<div style="padding:8px 14px;font-size:10px;color:#999;text-align:center;border-top:1px solid #eee">▸ continua...</div>'}
+    `;
+
+    const div = document.createElement('div');
+    div.style.cssText = 'position:fixed;left:-9999px;top:0;width:480px;background:#fff;font-family:Arial,sans-serif;color:#1a1a1a;font-size:11.5px;box-sizing:border-box;z-index:-1';
+    div.innerHTML = conteudo;
+    document.body.appendChild(div);
+    const canvas = await html2canvas(div,{scale:2.5,useCORS:true,backgroundColor:'#ffffff',logging:false});
+    document.body.removeChild(div);
+
+    if(paginaGlobal.contador > 0) pdf.addPage();
+    paginaGlobal.contador++;
+    const imgData = canvas.toDataURL('image/jpeg', 0.92);
+    const canvasW = canvas.width, canvasH = canvas.height;
+    const ratio = PW / (canvasW / 2 * 0.2646);
+    const imgH = (canvasH / 2 * 0.2646) * ratio;
+    pdf.addImage(imgData, 'JPEG', 0, 0, PW, Math.min(imgH, PH));
+  }
+}
+
+// Gera um único PDF combinando vários pedidos/orçamentos — substitui a impressão nativa
+// do navegador (que dependia de cada pessoa configurar "sem cabeçalhos e rodapés"),
+// garantindo o mesmo layout pra todo mundo, sempre, sem nenhuma configuração manual.
+async function gerarPdfMultiplosPedidos(lista, tipoDoc){
+  if(!lista.length){ toast('Nenhum item encontrado para gerar o PDF','error'); return; }
+  toast('⏳ Gerando PDF...','');
   try {
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
-    const PW = 210, PH = 297; // A4 mm
-
-    for(let pg=0; pg<paginasItens.length; pg++){
-      const ehUltima = pg === paginasItens.length-1;
-      const subtitulo = paginasItens.length>1 ? `Página ${pg+1}/${paginasItens.length}` : '';
-
-      const itensTr = paginasItens[pg].map((i,idx)=>montarLinhaItemHTML(i,idx)).join('');
-      const conteudo = `
-        ${montarCabecalhoSlipHTML(p, subtitulo)}
-        <div style="font-size:10px;font-weight:600;color:#333;margin-bottom:4px;padding:0 14px">Itens do pedido de venda</div>
-        <table style="width:100%;border-collapse:collapse">
-          <thead><tr style="background:#0B3B21;color:#fff">
-            <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:left;font-size:11px">Descrição do produto/serviço</th>
-            <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:center;font-size:11px">Código</th>
-            <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:center;font-size:11px">Un.</th>
-            <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:center;font-size:11px">Qtd.</th>
-            <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:right;font-size:11px">Valor unitário</th>
-            <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:right;font-size:11px">Valor total</th>
-          </tr></thead>
-          <tbody>${itensTr}</tbody>
-        </table>
-        ${ehUltima ? montarSummarySlipHTML(p) : '<div style="padding:8px 14px;font-size:10px;color:#999;text-align:center;border-top:1px solid #eee">▸ continua...</div>'}
-      `;
-
-      const div = document.createElement('div');
-      div.style.cssText = 'position:fixed;left:-9999px;top:0;width:595px;background:#fff;font-family:Arial,sans-serif;color:#1a1a1a;font-size:11.5px;box-sizing:border-box;z-index:-1';
-      div.innerHTML = conteudo;
-      document.body.appendChild(div);
-      const canvas = await html2canvas(div,{scale:2,useCORS:true,backgroundColor:'#ffffff',logging:false});
-      document.body.removeChild(div);
-
-      if(pg > 0) pdf.addPage();
-      const imgData = canvas.toDataURL('image/jpeg', 0.92);
-      const canvasW = canvas.width, canvasH = canvas.height;
-      const ratio = PW / (canvasW / 2 * 0.2646); // px → mm (96dpi)
-      const imgH = (canvasH / 2 * 0.2646) * ratio;
-      pdf.addImage(imgData, 'JPEG', 0, 0, PW, Math.min(imgH, PH));
+    const paginaGlobal = { contador: 0 };
+    for(const p of lista){
+      await adicionarPedidoAoPdf(pdf, p, lista.length, paginaGlobal);
     }
 
     const pdfBlob = pdf.output('blob');
     const pdfUrl = URL.createObjectURL(pdfBlob);
+    const nomeArquivo = `${tipoDoc}_${lista.length>1?'lote_'+lista.length:lista[0].numero}.pdf`;
 
-    // Modal de download/compartilhamento
     let modal = document.getElementById('modal-whatsapp-img');
     if(!modal){
       modal = document.createElement('div');
@@ -14182,18 +14195,18 @@ async function gerarImagemPedido(id){
         style="position:fixed;top:16px;right:16px;background:#fff;border:none;border-radius:50%;width:44px;height:44px;font-size:22px;cursor:pointer">✕</button>
       <div style="color:#fff;font-size:18px;font-weight:700">✅ PDF gerado!</div>
       <div style="color:rgba(255,255,255,.7);font-size:13px;text-align:center">
-        ${paginasItens.length} página(s) em um único arquivo — pronto para enviar pelo WhatsApp
+        ${lista.length} ${tipoDoc}(s) em um único arquivo
       </div>
-      <a href="${pdfUrl}" download="pedido_${p.numero}.pdf"
+      <a href="${pdfUrl}" download="${nomeArquivo}"
         style="background:#1565c0;color:#fff;font-weight:700;padding:14px 32px;border-radius:10px;font-size:15px;text-decoration:none">
-        ⬇️ Baixar PDF — Pedido #${p.numero}
+        ⬇️ Baixar PDF
       </a>
-      <button onclick="compartilharPDF('${pdfUrl}','${p.numero}')"
-        style="background:#25d366;color:#fff;font-weight:700;padding:14px 32px;border-radius:10px;font-size:15px;border:none;cursor:pointer">
-        📲 Compartilhar no WhatsApp
+      <button onclick="window.open('${pdfUrl}','_blank')"
+        style="background:#374151;color:#fff;font-weight:700;padding:14px 32px;border-radius:10px;font-size:15px;border:none;cursor:pointer">
+        🖨️ Abrir e Imprimir
       </button>
       <div style="color:rgba(255,255,255,.5);font-size:11px;text-align:center;margin-top:4px">
-        No celular: toque em "Compartilhar", escolha o WhatsApp e selecione o contato
+        "Abrir e Imprimir" abre o PDF numa aba nova — use o botão de imprimir do próprio visualizador de PDF
       </div>
     `;
     modal.style.display = 'flex';
@@ -14201,6 +14214,17 @@ async function gerarImagemPedido(id){
   } catch(e){
     toast('Erro ao gerar PDF: '+e.message,'error');
   }
+}
+
+// Antes gerava uma IMAGEM da página (print de tela colado num PDF) — isso sempre distorcia
+// um pouco o texto e a logo, e repetia o cabeçalho inteiro em toda página de pedidos longos.
+// Agora usa exatamente a mesma janela de impressão nativa do "Imprimir Pedido" — garante
+// ficar 100% idêntico, porque é literalmente a mesma renderização, sem conversão pra imagem.
+async function gerarImagemPedido(id){
+  const snap=await db.ref('pedidos/'+id).once('value');
+  const p=snap.val(); if(!p) return;
+  abrirJanelaImpressaoPedidos([p], `Pedido #${p.numero}`);
+  toast('Na tela de impressão, escolha "Salvar como PDF" pra baixar, ou imprima direto.','');
 }
 
 function compartilharPDF(url, numero){
