@@ -3149,7 +3149,7 @@ async function salvarCorrecaoVendedor(){
   const snap = await db.ref('pedidos/'+id).once('value');
   const p = snap.val(); if(!p) return;
 
-  if(novoId === (p.vendedor_id||null) ){ toast('Esse já é o vendedor atual do pedido','error'); return; }
+  if(novoId === (p.vendedor_id||null) && novoNome === (p.vendedor_nome||'') ){ toast('Esse já é o vendedor atual do pedido (nome e ID batem)','error'); return; }
 
   const historico = p.historico_edicoes || [];
   historico.push({
