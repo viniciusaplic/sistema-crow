@@ -13939,8 +13939,8 @@ function montarLinhaItemHTML(i, idx){
     <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:center">${i.codigo}</td>
     <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:center">${i.unidade||'UN'}</td>
     <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:center">${i.qtd}</td>
-    <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:right">${Number(i.preco).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
-    <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:right">${sub.toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
+    <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:right">${Number(i.preco).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+    <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:right">${sub.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
   </tr>`;
 }
 
@@ -13954,9 +13954,9 @@ function montarLinhaItemWhatsAppHTML(i, idx){
   return `<tr style="${zebra}">
     <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc">${i.nome}</td>
     <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:center">${i.qtd}</td>
-    <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:right">${Number(i.preco).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
+    <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:right">${Number(i.preco).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
     <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:center">${i.desconto_item||0}%</td>
-    <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:right">${sub.toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
+    <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:right">${sub.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
   </tr>`;
 }
 
@@ -14016,8 +14016,11 @@ function montarSummarySlipHTML(p){
   const itens = p.itens||[];
   const totalQtd = itens.reduce((s,i)=>s+Number(i.qtd||0),0);
   const totalProd = itens.reduce((s,i)=>s+(i.qtd*i.preco*(1-(i.desconto_item||0)/100)),0);
+  const condicaoHtml = p.condicao ? `
+    <div style="font-size:11px;margin:10px 0 2px"><strong>Condição de Pagamento:</strong> ${p.condicao === 'AVISTA' ? 'À Vista' : p.condicao}</div>` : '';
   const parcelasHtml = p.parcelas&&p.parcelas.length ? `
-    <div style="font-size:10px;font-weight:600;color:#333;margin:10px 0 4px">Parcelas</div>
+    ${condicaoHtml}
+    <div style="font-size:10px;font-weight:600;color:#333;margin:6px 0 4px">Parcelas</div>
     <table style="width:100%;border-collapse:collapse;font-size:11px">
       <thead><tr style="background:#0B3B21;color:#fff">
         <th style="padding:5px 8px;border:1px solid #0B3B21">Dias</th>
@@ -14031,13 +14034,13 @@ function montarSummarySlipHTML(p){
           <td style="padding:5px 8px;border:1px solid #ccc">${pa.label||idx+1}</td>
           <td style="padding:5px 8px;border:1px solid #ccc">${pa.vencimento||'—'}</td>
           <td style="padding:5px 8px;border:1px solid #ccc">${p.forma||'—'}</td>
-          <td style="padding:5px 8px;border:1px solid #ccc;text-align:right">${Number(pa.valor).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
+          <td style="padding:5px 8px;border:1px solid #ccc;text-align:right">${Number(pa.valor).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
           <td style="padding:5px 8px;border:1px solid #ccc"></td>
         </tr>`).join('')}
       </tbody>
     </table>` : (p.forma||p.condicao ? `
     <div style="font-size:10px;font-weight:600;color:#333;margin:10px 0 4px">Pagamento</div>
-    <div style="border:1px solid #ccc;padding:5px 8px;font-size:11px">${[p.forma,p.condicao].filter(Boolean).join(' — ')}</div>` : '');
+    <div style="border:1px solid #ccc;padding:5px 8px;font-size:11px">${[p.forma, p.condicao === 'AVISTA' ? 'À Vista' : p.condicao].filter(Boolean).join(' — ')}</div>` : '');
   return `
     <table style="width:100%;border-collapse:collapse;margin-top:4px">
       <tr>
@@ -14046,9 +14049,9 @@ function montarSummarySlipHTML(p){
           <table style="width:100%;border-collapse:collapse;font-size:11px">
             <tr><td style="padding:3px 8px;text-align:right;color:#555">Nº de itens</td><td style="padding:3px 8px;text-align:right">${itens.length}</td></tr>
             <tr><td style="padding:3px 8px;text-align:right;color:#555">Soma das Qtdes</td><td style="padding:3px 8px;text-align:right">${totalQtd.toLocaleString('pt-BR')}</td></tr>
-            ${p.desconto_total&&p.desconto_total>0?`<tr><td style="padding:3px 8px;text-align:right;color:#555">Desconto</td><td style="padding:3px 8px;text-align:right;color:#dc2626">- ${Number(p.desconto_total).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td></tr>`:''}
-            <tr><td style="padding:3px 8px;text-align:right;color:#555">Total de produtos</td><td style="padding:3px 8px;text-align:right">${totalProd.toLocaleString('pt-BR',{minimumFractionDigits:2})}</td></tr>
-            <tr style="font-weight:700"><td style="padding:3px 8px;text-align:right">Total do pedido</td><td style="padding:3px 8px;text-align:right">${Number(p.total).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td></tr>
+            ${p.desconto_total&&p.desconto_total>0?`<tr><td style="padding:3px 8px;text-align:right;color:#555">Desconto</td><td style="padding:3px 8px;text-align:right;color:#dc2626">- ${Number(p.desconto_total).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td></tr>`:''}
+            <tr><td style="padding:3px 8px;text-align:right;color:#555">Total de produtos</td><td style="padding:3px 8px;text-align:right">${totalProd.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td></tr>
+            <tr style="font-weight:700"><td style="padding:3px 8px;text-align:right">Total do pedido</td><td style="padding:3px 8px;text-align:right">${Number(p.total).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td></tr>
           </table>
         </td>
       </tr>
