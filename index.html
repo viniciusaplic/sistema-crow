@@ -2724,7 +2724,7 @@ async function renderPainel(){
         <div class="pedido-card-info">👤 <span>${p.cliente_nome}</span></div>
         <div class="pedido-card-actions">
           <button class="btn btn-outline btn-sm" onclick="verPedido('${p.id}')">Ver detalhes</button>
-          <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600" onclick="gerarImagemPedido('${p.id}')">📲 WhatsApp</button>
+          <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600" onclick="gerarImagemPedido('${p.id}')">📄 Gerar PDF</button>
           ${!bloqueado&&p.status!=='Cancelado'?`<button class="btn btn-warning btn-sm" onclick="editarPedido('${p.id}')">${lockIcon} Editar</button>`:`<span style="font-size:13px;color:var(--muted)">${lockIcon} Bloqueado</span>`}
           ${usuarioLogado.admin&&p.status!=='Cancelado'?`<button class="btn btn-sm btn-danger" onclick="cancelarPedido('${p.id}')">Cancelar</button>`:''}
         </div>
@@ -2807,9 +2807,17 @@ function atualizarBotaoImprimirOrcamentos(){
 }
 
 // Abre uma janela de impressão com uma ou mais folhas de pedido/orçamento, cada uma em sua própria página
-function abrirJanelaImpressaoPedidos(lista, tituloJanela){
-  if(!lista.length){ toast('Nenhum item encontrado para imprimir','error'); return; }
-  const win = window.open('', '_blank');
+function abrirJanelaImpressaoPedidos(lista, tituloJanela, winPreAberta){
+  if(!lista.length){
+    if(winPreAberta && !winPreAberta.closed) winPreAberta.close();
+    toast('Nenhum item encontrado para imprimir','error');
+    return;
+  }
+  const win = winPreAberta || window.open('', '_blank');
+  if(!win){
+    toast('Não foi possível abrir a janela de impressão. Verifique se o navegador está bloqueando pop-ups.','error');
+    return;
+  }
   const paginasHtml = lista.map(p => `<div class="folha">${montarSlipPedidoHTML(p, lista.length)}</div>`).join('');
   win.document.write(`<!DOCTYPE html>
     <html>
@@ -2834,24 +2842,26 @@ function abrirJanelaImpressaoPedidos(lista, tituloJanela){
 
 async function imprimirPedidosSelecionados(){
   if(!pedidosSelecionadosImprimir.size){ toast('Marque ao menos um pedido para imprimir','error'); return; }
+  const win = window.open('', '_blank'); // abre já, no clique — antes de qualquer busca assíncrona (celular bloqueia senão)
   const lista = [];
   for(const id of pedidosSelecionadosImprimir){
     const snap = await db.ref('pedidos/'+id).once('value');
     const p = snap.val(); if(p) lista.push(p);
   }
   lista.sort((a,b)=>(a.numero||0)-(b.numero||0));
-  abrirJanelaImpressaoPedidos(lista, `Impressão de ${lista.length} Pedido(s)`);
+  abrirJanelaImpressaoPedidos(lista, `Impressão de ${lista.length} Pedido(s)`, win);
 }
 
 async function imprimirOrcamentosSelecionados(){
   if(!orcamentosSelecionadosImprimir.size){ toast('Marque ao menos um orçamento para imprimir','error'); return; }
+  const win = window.open('', '_blank');
   const lista = [];
   for(const id of orcamentosSelecionadosImprimir){
     const snap = await db.ref('pedidos/'+id).once('value');
     const p = snap.val(); if(p) lista.push(p);
   }
   lista.sort((a,b)=>(a.numero||0)-(b.numero||0));
-  abrirJanelaImpressaoPedidos(lista, `Impressão de ${lista.length} Orçamento(s)`);
+  abrirJanelaImpressaoPedidos(lista, `Impressão de ${lista.length} Orçamento(s)`, win);
 }
 
 async function renderPedidos(){
@@ -2971,7 +2981,7 @@ async function renderPedidos(){
         ${p.obs ? `<div style="margin-top:6px;padding:5px 10px;background:#fffbeb;border-left:3px solid #fde68a;border-radius:0 6px 6px 0;font-size:12px;color:#92400e">⚠️ ${p.obs}</div>` : ''}
         <div class="pedido-card-actions">
           <button class="btn btn-outline btn-sm" onclick="verPedido('${p.id}')">Ver detalhes</button>
-          <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600" onclick="gerarImagemPedido('${p.id}')">📲 WhatsApp</button>
+          <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600" onclick="gerarImagemPedido('${p.id}')">📄 Gerar PDF</button>
           ${!bloqueado&&p.status!=='Cancelado'?`<button class="btn btn-warning btn-sm" onclick="editarPedido('${p.id}')">${lockIcon} Editar</button>`:`<span style="font-size:13px;color:var(--muted)">${lockIcon} Bloqueado</span>`}
           ${usuarioLogado.admin&&p.status!=='Cancelado'?`<button class="btn btn-sm btn-danger" onclick="cancelarPedido('${p.id}')">Cancelar</button>`:''}
         </div>
@@ -2998,7 +3008,7 @@ async function renderPedidos(){
         </div>` : ''}
         <div style="flex-shrink:0;display:flex;gap:6px;align-items:center">
           <button class="btn btn-outline btn-sm" onclick="verPedido('${p.id}')">Ver detalhes</button>
-          <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600;padding:4px 8px" onclick="gerarImagemPedido('${p.id}')">📲 WhatsApp</button>
+          <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600;padding:4px 8px" onclick="gerarImagemPedido('${p.id}')">📄 Gerar PDF</button>
           ${!bloqueado&&p.status!=='Cancelado'?`<button class="btn btn-warning btn-sm" onclick="editarPedido('${p.id}')">${lockIcon} Editar</button>`:`<span style="font-size:12px;color:var(--muted)">${lockIcon}</span>`}
           ${usuarioLogado.admin&&p.status!=='Cancelado'?`<button class="btn btn-sm btn-danger" onclick="cancelarPedido('${p.id}')">Cancelar</button>`:''}
         </div>
@@ -3342,7 +3352,7 @@ async function verPedido(id){
         ${usuarioLogado.admin&&p.status==='CC'?`<button class="btn btn-outline btn-sm" style="color:#dc2626;border-color:#dc2626" onclick="cancelarBipagemPedido('${id}')">↺ Cancelar Bipagem</button>`:''}
         <button class="btn btn-outline btn-sm" onclick="clonarPedido('${id}')">📑 Clonar Pedido</button>
         <button class="btn btn-outline btn-sm" onclick="imprimirCapaPedidoVenda('${id}')">🖨️ Imprimir Pedido</button>
-        <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600" onclick="gerarImagemPedido('${id}')">📲 Gerar Imagem WhatsApp</button>
+        <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600" onclick="gerarImagemPedido('${id}')">📄 Gerar PDF p/ Enviar</button>
       </div>
     `;
     abrirModal('modal-ver-pedido');
@@ -4562,7 +4572,7 @@ async function renderOrcamentos(){
         <div style="flex-shrink:0;display:flex;gap:6px;align-items:center">
           <button class="btn btn-outline btn-sm" onclick="verPedido('${p.id}')">Ver</button>
           ${p._status_orcamento==='andamento' ? `
-            <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600;padding:4px 8px" onclick="gerarImagemPedido('${p.id}')">📲 WhatsApp</button>
+            <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600;padding:4px 8px" onclick="gerarImagemPedido('${p.id}')">📄 Gerar PDF</button>
             <button class="btn btn-success btn-sm" onclick="confirmarOrcamento('${p.id}')">✓ Confirmar</button>
             <button class="btn btn-sm" style="background:#ffeef0;color:var(--accent)" onclick="cancelarPedido('${p.id}')">Excluir</button>
           ` : ''}
@@ -10990,9 +11000,10 @@ async function apagarPedidosW3EmMassa(){
 // ══════════════════════════════════════════════
 // ══ IMPRESSÃO DE CAPA DE PEDIDOS ══
 async function imprimirCapaPedidoVenda(id){
+  const win = window.open('', '_blank');
   const snap = await db.ref('pedidos/'+id).once('value');
-  const p = snap.val(); if(!p) return;
-  abrirJanelaImpressaoPedidos([p], `Pedido #${p.numero}`);
+  const p = snap.val(); if(!p){ if(win && !win.closed) win.close(); return; }
+  abrirJanelaImpressaoPedidos([p], `Pedido #${p.numero}`, win);
 }
 
 async function imprimirCapaPedidoCompra(id){
@@ -14221,9 +14232,11 @@ async function gerarPdfMultiplosPedidos(lista, tipoDoc){
 // Agora usa exatamente a mesma janela de impressão nativa do "Imprimir Pedido" — garante
 // ficar 100% idêntico, porque é literalmente a mesma renderização, sem conversão pra imagem.
 async function gerarImagemPedido(id){
-  const snap=await db.ref('pedidos/'+id).once('value');
-  const p=snap.val(); if(!p) return;
-  abrirJanelaImpressaoPedidos([p], `Pedido #${p.numero}`);
+  const win = window.open('', '_blank'); // abre já, no clique — celular bloqueia se abrir só depois da busca
+  const snap = await db.ref('pedidos/'+id).once('value');
+  const p = snap.val();
+  if(!p){ if(win && !win.closed) win.close(); return; }
+  abrirJanelaImpressaoPedidos([p], `Pedido #${p.numero}`, win);
   toast('Na tela de impressão, escolha "Salvar como PDF" pra baixar, ou imprima direto.','');
 }
 
