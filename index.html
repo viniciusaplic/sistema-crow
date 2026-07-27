@@ -3291,7 +3291,7 @@ async function verPedido(id){
           <div class="item-row">
             <span><strong style="color:${i.codigo&&i.codigo!=='reservado'?'var(--accent)':'#dc2626'}">${i.codigo&&i.codigo!=='reservado'?i.codigo:'SEM CÓD.'}</strong> — ${i.nome}</span>
             <span>${i.qtd} ${i.unidade}</span>
-            ${!ocultarVal?`<span>${fmtMoeda(i.preco)}</span><span>${i.desconto_item||0}%</span><span><strong>${fmtMoeda(i.qtd*i.preco*(1-(i.desconto_item||0)/100))}</strong></span>`:''}
+            ${!ocultarVal?`<span>${fmtMoeda(i.preco)}</span><span>${Number(i.desconto_item||0).toFixed(2).replace(/\.?0+$/,'')}%</span><span><strong>${fmtMoeda(i.qtd*i.preco*(1-(i.desconto_item||0)/100))}</strong></span>`:''}
             <span></span>
           </div>`).join('')}
       </div>`;
