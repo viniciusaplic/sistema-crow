@@ -4716,8 +4716,12 @@ async function confirmarOrcamento(id){
     document.getElementById('step-cliente-ped').style.display='none';
     document.getElementById('step-itens-ped').style.display='';
     document.getElementById('desc-geral').value=p.desconto_geral||0;
-    renderItens(); atualizarCondicoes();
+    renderItens();
+    await atualizarCondicoes();
+    document.getElementById('pedido-forma').value = p.forma||'';
+    document.getElementById('pedido-condicao').value = p.condicao||'';
     document.getElementById('pedido-obs').value=p.obs||'';
+    calcularParcelas();
     itemEmEstagio = null; document.getElementById('pedido-item-staging').style.display='none'; document.getElementById('pedido-item-staging').innerHTML=''; abrirModal('modal-pedido');
 
   } catch(e){ toast('Erro ao confirmar orçamento: '+e.message,'error'); }
