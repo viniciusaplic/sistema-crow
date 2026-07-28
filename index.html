@@ -4340,8 +4340,8 @@ async function confirmarPedido(){
     //   (mesmo que diferente do vendedor vinculado ao cliente); senão, usa o vendedor do cliente ou o usuário logado.
     let vendedorIdFinal, vendedorNomeFinal;
     if(pedidoAtual.editando && pedidoOriginal){
-      vendedorIdFinal = pedidoOriginal.vendedor_id;
-      vendedorNomeFinal = pedidoOriginal.vendedor_nome;
+      vendedorIdFinal = pedidoOriginal.vendedor_id || null;
+      vendedorNomeFinal = pedidoOriginal.vendedor_nome || '';
     } else {
       // Busca o vendedor ATUAL do cliente direto no banco — não confia na cópia que já
       // estava na memória (CLIENTES_DB só é carregada uma vez por sessão; se alguém trocar
