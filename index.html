@@ -2644,7 +2644,12 @@ async function renderPainel(){
 
   let meusPedidos=[], total=0, totalMes=0, pedidosMes=0, pedidosHoje=0;
   try {
-    const snap = await db.ref('pedidos').once('value');
+    // Busca só os pedidos deste mês em diante (não a base inteira desde o começo) —
+    // o Painel só precisa de "hoje" e "este mês", baixar tudo era desperdício de dado
+    // e é a maior causa do consumo de banda do Firebase, já que o Painel abre a
+    // cada login. Pedidos ativos de meses anteriores (raro, mas possível) não
+    // aparecem na lista de "ativos" mais abaixo — só os deste mês.
+    const snap = await db.ref('pedidos').orderByChild('data').startAt(mesInicio.toISOString()).once('value');
     const todos = snap.val()||{};
     for(const k in todos){
       const p = todos[k];
@@ -2896,7 +2901,14 @@ async function renderPedidos(){
   let pedidos = [];
   let todosPedidos = []; // todos os pedidos (antes dos filtros) para calcular Total do Mês
   try {
-    const snap = await db.ref('pedidos').once('value');
+    // Usa o filtro de Data Início (já vem preenchido com o começo do mês por padrão) pra
+    // buscar só esse intervalo no banco, em vez de baixar TODO o histórico de pedidos toda
+    // vez que essa tela é aberta ou um filtro muda — essa tela é uma das mais visitadas,
+    // e baixar tudo repetidamente era a maior causa de consumo de banda do Firebase.
+    // Se a pessoa limpar a Data Início de propósito, aí sim busca tudo (ação explícita).
+    let query = db.ref('pedidos');
+    if(fDataIni) query = query.orderByChild('data').startAt(fDataIni+'T00:00:00');
+    const snap = await query.once('value');
     const todos = snap.val()||{};
     for(const k in todos){
       const p = todos[k];
@@ -3799,7 +3811,6 @@ async function abrirModalPedido(isOrcamento=false){
   document.getElementById('parcelas-container').style.display='none';
   atualizarTotais();
   itemEmEstagio = null; document.getElementById('pedido-item-staging').style.display='none'; document.getElementById('pedido-item-staging').innerHTML=''; abrirModal('modal-pedido');
-  carregarPedidosCache(); // pré-carrega histórico de preços em background
 
   // Garante que produtos e clientes estejam carregados ANTES do usuário tentar buscar —
   // sem isso, a busca por código/nome pode falhar silenciosamente se o usuário nunca passou pela aba Produtos.
@@ -3843,6 +3854,7 @@ async function selecionarClientePedido(cod){
   pedidoAtual.cliente = c;
   pedidoAtual.credito_disponivel = Number(c.credito||0);
   pedidoAtual.credito_aplicado = 0;
+  carregarHistoricoPrecosCliente(c.codigo); // busca só o histórico deste cliente, em segundo plano
   document.getElementById('pedido-lista-clientes').style.display='none';
   document.getElementById('pedido-busca-cliente').value=c.nome;
   const alertaHtml = c.alerta ? `
@@ -3928,18 +3940,7 @@ async function buscarProdutoPedido(){
 
   // Buscar histórico de preços deste cliente para os produtos encontrados
   const clienteCod = pedidoAtual.cliente?.codigo;
-  const historicoPrecos = {};
-  if(clienteCod && PEDIDOS_CACHE){
-    for(const pid in PEDIDOS_CACHE){
-      const ped = PEDIDOS_CACHE[pid];
-      if(ped.cliente_codigo !== clienteCod) continue;
-      (ped.itens||[]).forEach(it=>{
-        if(!historicoPrecos[it.codigo] || new Date(ped.data) > new Date(historicoPrecos[it.codigo].data)){
-          historicoPrecos[it.codigo] = { preco: it.preco, data: ped.data };
-        }
-      });
-    }
-  }
+  const historicoPrecos = (clienteCod && HISTORICO_PRECOS_CACHE[clienteCod]) || {};
 
   lista.innerHTML = res.map(p=>{
     const estqFisico = Number(p.quantidade||0);
@@ -3992,14 +3993,26 @@ async function buscarProdutoPedido(){
   lista.style.display='block';
 }
 
-// Cache de pedidos para histórico de preços
-let PEDIDOS_CACHE = null;
-async function carregarPedidosCache(){
-  if(PEDIDOS_CACHE) return;
+// Cache de histórico de preços — antes baixava TODOS os pedidos de TODOS os clientes só
+// pra mostrar "último preço pago" na busca de produto; agora busca só os pedidos DO
+// cliente selecionado (bem mais barato, já que um cliente tem uma fração do total).
+let HISTORICO_PRECOS_CACHE = {}; // { codigoCliente: { codigoProduto: {preco, data} } }
+async function carregarHistoricoPrecosCliente(clienteCodigo){
+  if(!clienteCodigo || HISTORICO_PRECOS_CACHE[clienteCodigo]) return;
+  const historico = {};
   try {
-    const snap = await db.ref('pedidos').once('value');
-    PEDIDOS_CACHE = snap.val() || {};
-  } catch(e){ PEDIDOS_CACHE = {}; }
+    const snap = await db.ref('pedidos').orderByChild('cliente_codigo').equalTo(clienteCodigo).once('value');
+    const pedidosCliente = snap.val() || {};
+    for(const pid in pedidosCliente){
+      const ped = pedidosCliente[pid];
+      (ped.itens||[]).forEach(it=>{
+        if(!historico[it.codigo] || new Date(ped.data) > new Date(historico[it.codigo].data)){
+          historico[it.codigo] = { preco: it.preco, data: ped.data };
+        }
+      });
+    }
+  } catch(e){ /* segue sem histórico se falhar */ }
+  HISTORICO_PRECOS_CACHE[clienteCodigo] = historico;
 }
 
 let itemEmEstagio = null;
@@ -4822,11 +4835,11 @@ function limparFiltrosClientes(){
 
 async function verHistoricoCliente(cod){
   const c = CLIENTES_DB.find(x=>x.codigo===cod); if(!c) return;
-  const snap = await db.ref('pedidos').once('value');
+  const snap = await db.ref('pedidos').orderByChild('cliente_codigo').equalTo(cod).once('value');
   const todos=snap.val()||{};
   const pedidos=Object.keys(todos)
     .map(id=>({ id, ...todos[id] }))
-    .filter(p=>p.cliente_codigo===cod&&p.status!=='Cancelado');
+    .filter(p=>p.status!=='Cancelado');
   const totalVol=pedidos.reduce((s,p)=>s+(p.total||0),0);
   document.getElementById('ver-pedido-conteudo').innerHTML=`
     <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:700;margin-bottom:4px">${c.nome}</div>
@@ -8061,11 +8074,16 @@ async function renderSeparacao(){
     await carregarProdutosFirebase();
     await carregarOPsFirebase();
 
-    const snap = await db.ref('pedidos').once('value');
-    const todos = snap.val() || {};
+    // Busca só os pedidos com status Aprovado ou Em Separação — é tudo que essa tela
+    // usa, então não tem motivo pra baixar o histórico inteiro de pedidos toda vez
+    // que a expedição abre essa tela (que é usada o dia todo).
+    const [snapAP, snapEX] = await Promise.all([
+      db.ref('pedidos').orderByChild('status').equalTo('AP').once('value'),
+      db.ref('pedidos').orderByChild('status').equalTo('EX').once('value')
+    ]);
+    const todos = { ...(snapAP.val()||{}), ...(snapEX.val()||{}) };
     PEDIDOS_SEPARACAO_CACHE = Object.keys(todos)
       .map(id => ({ id, ...todos[id] }))
-      .filter(p => p.status === 'AP' || p.status === 'EX')
       .sort((a,b) => new Date(a.data) - new Date(b.data)); // mais antigo primeiro
 
     if(!PEDIDOS_SEPARACAO_CACHE.length){
