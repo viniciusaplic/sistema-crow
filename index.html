@@ -3859,7 +3859,7 @@ async function selecionarClientePedido(cod){
         <input type="number" id="credito-aplicar-input" min="0" step="0.01" max="${pedidoAtual.credito_disponivel}" value="0"
           style="width:110px;padding:4px 8px;border:1px solid #16a34a;border-radius:6px" oninput="atualizarCreditoAplicado(this.value)">
         <button type="button" class="btn btn-outline btn-sm" style="border-color:#16a34a;color:#16a34a"
-          onclick="document.getElementById('credito-aplicar-input').value=Math.min(${pedidoAtual.credito_disponivel}, calcTotal()+pedidoAtual.credito_aplicado).toFixed(2); atualizarCreditoAplicado(document.getElementById('credito-aplicar-input').value)">Aplicar máximo possível</button>
+          onclick="atualizarCreditoAplicado(${pedidoAtual.credito_disponivel})">Aplicar máximo possível</button>
       </div>
     </div>` : '';
 
@@ -3898,9 +3898,8 @@ async function selecionarClientePedido(cod){
 
 function atualizarCreditoAplicado(valor){
   const disponivel = pedidoAtual.credito_disponivel || 0;
-  const totalAtualSemCredito = calcTotal() + (pedidoAtual.credito_aplicado||0); // total "puro", antes de descontar crédito
   let v = Math.max(0, parseFloat(valor) || 0);
-  v = Math.min(v, disponivel, totalAtualSemCredito); // não deixa aplicar mais que o disponível nem mais que o total do pedido
+  v = Math.min(v, disponivel); // só trava pelo saldo disponível — o total do pedido pode ainda estar em R$0 se os itens não foram adicionados
   pedidoAtual.credito_aplicado = v;
   const input = document.getElementById('credito-aplicar-input');
   if(input && parseFloat(input.value) !== v) input.value = v.toFixed(2);
@@ -4338,6 +4337,20 @@ async function confirmarPedido(){
   if(!forma){ toast('Selecione a forma de pagamento','error'); return; }
   if(!condicao){ toast('Selecione a condição de pagamento','error'); return; }
 
+  // Trava final: o crédito aplicado não pode passar do valor real do pedido (com itens
+  // já somados) — isso pode passar batido se o crédito foi digitado antes de adicionar
+  // os itens, quando o total ainda estava em R$0.
+  if(pedidoAtual.credito_aplicado > 0){
+    const dgAtual = parseFloat(document.getElementById('desc-geral')?.value)||0;
+    const totalSemCredito = calcSubtotal() * (1 - dgAtual/100);
+    if(pedidoAtual.credito_aplicado > totalSemCredito){
+      pedidoAtual.credito_aplicado = Math.max(0, totalSemCredito);
+      toast(`⚠️ Crédito aplicado ajustado para ${fmtMoeda(pedidoAtual.credito_aplicado)} — não pode passar do valor do pedido`,'error');
+      atualizarTotais();
+      return; // deixa a pessoa conferir e clicar em salvar de novo
+    }
+  }
+
   // Avisa se o cliente ainda não foi cadastrado no W3 (não bloqueia, mas registra)
   const clienteCompleto = CLIENTES_DB.find(x=>x.codigo===pedidoAtual.cliente.codigo);
   if(clienteCompleto?.pendente_w3){
@@ -4492,6 +4505,18 @@ async function salvarComoOrcamento(){
   if(violacao){
     alert(`🚫 Não é possível salvar: "${violacao.item.nome}" ficaria em ${fmtMoeda(violacao.precoFinal)}, abaixo do preço mínimo de ${fmtMoeda(violacao.item.preco_minimo)}.\n\nAjuste o preço/desconto ou fale com o admin.`);
     return;
+  }
+
+  // Trava final: o crédito aplicado não pode passar do valor real do orçamento
+  if(pedidoAtual.credito_aplicado > 0){
+    const dgAtualOrc = parseFloat(document.getElementById('desc-geral')?.value)||0;
+    const totalSemCreditoOrc = calcSubtotal() * (1 - dgAtualOrc/100);
+    if(pedidoAtual.credito_aplicado > totalSemCreditoOrc){
+      pedidoAtual.credito_aplicado = Math.max(0, totalSemCreditoOrc);
+      toast(`⚠️ Crédito aplicado ajustado para ${fmtMoeda(pedidoAtual.credito_aplicado)} — não pode passar do valor do orçamento`,'error');
+      atualizarTotais();
+      return;
+    }
   }
 
   const sub=calcSubtotal(); const dg=parseFloat(document.getElementById('desc-geral').value)||0;
