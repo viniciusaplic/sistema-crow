@@ -1372,6 +1372,7 @@ tbody td{padding:11px 16px;font-size:14px}
         <div class="totais-item"><span>Itens</span><strong id="tot-itens">0</strong></div>
         <div class="totais-item"><span>Subtotal</span><strong id="tot-subtotal">R$ 0,00</strong></div>
         <div class="totais-item"><span>Desconto</span><strong id="tot-desconto" style="color:#f87171">- R$ 0,00</strong></div>
+        <div class="totais-item" id="totais-item-credito" style="display:none"><span>Crédito Aplicado</span><strong id="tot-credito" style="color:#f87171">- R$ 0,00</strong></div>
         <div class="totais-item highlight"><span>Total Final</span><strong id="tot-valor">R$ 0,00</strong></div>
       </div>
       <div class="form-row">
@@ -1452,6 +1453,12 @@ tbody td{padding:11px 16px;font-size:14px}
       <div class="form-group">
         <label>Endereço (Rua, Nº, Bairro)</label>
         <input type="text" id="cli-end" placeholder="Rua das Flores, 123, Centro">
+      </div>
+    </div>
+    <div class="form-row admin-only" id="cli-credito-row" style="display:none">
+      <div class="form-group" style="max-width:220px">
+        <label>💰 Crédito Disponível (R$)</label>
+        <input type="number" id="cli-credito" min="0" step="0.01" placeholder="0,00">
       </div>
     </div>
     <div class="form-row single">
@@ -3447,7 +3454,9 @@ async function editarPedido(id){
     itens: JSON.parse(JSON.stringify(p.itens||[])),
     isOrcamento: ehOrcamento,
     editando: true,
-    numero: p.numero
+    numero: p.numero,
+    credito_aplicado: p.credito_aplicado || 0,
+    credito_disponivel: p.credito_aplicado || 0
   };
   document.getElementById('modal-pedido-titulo').textContent = (ehOrcamento?'Editar Orçamento #':'Editar Pedido #')+p.numero;
   document.getElementById('btn-salvar-orcamento').style.display = ehOrcamento ? 'inline-flex' : 'none';
@@ -3772,7 +3781,7 @@ async function removerCondicaoPagamento(idx){
 
 async function abrirModalPedido(isOrcamento=false){
   if(!condicoesCarregadas) await carregarCondicoesPagamento();
-  pedidoAtual = { cliente:null, itens:[], isOrcamento, editando:false };
+  pedidoAtual = { cliente:null, itens:[], isOrcamento, editando:false, credito_aplicado:0, credito_disponivel:0 };
   document.getElementById('modal-pedido-titulo').textContent = isOrcamento?'Novo Orçamento':'Novo Pedido';
   document.getElementById('btn-salvar-orcamento').style.display = 'inline-flex';
   document.getElementById('pedido-busca-cliente').value='';
@@ -3832,12 +3841,26 @@ function buscarClientePedido(){
 async function selecionarClientePedido(cod){
   const c = CLIENTES_DB.find(x=>x.codigo===cod); if(!c) return;
   pedidoAtual.cliente = c;
+  pedidoAtual.credito_disponivel = Number(c.credito||0);
+  pedidoAtual.credito_aplicado = 0;
   document.getElementById('pedido-lista-clientes').style.display='none';
   document.getElementById('pedido-busca-cliente').value=c.nome;
   const alertaHtml = c.alerta ? `
     <div class="alerta alerta-warning" style="margin-top:8px;border:2px solid #d97706;background:#fef3c7;padding:12px 14px;border-radius:8px">
       <div style="font-weight:700;color:#92400e">⚠️ Atenção a este cliente:</div>
       <div style="color:#92400e;margin-top:2px">${c.alerta}</div>
+    </div>` : '';
+
+  const creditoHtml = pedidoAtual.credito_disponivel > 0 ? `
+    <div class="alerta" style="margin-top:8px;border:2px solid #16a34a;background:#f0fdf4;padding:12px 14px;border-radius:8px">
+      <div style="font-weight:700;color:#166534">💰 Este cliente tem ${fmtMoeda(pedidoAtual.credito_disponivel)} de crédito disponível</div>
+      <div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <label style="font-size:13px;color:#166534">Aplicar quanto neste pedido?</label>
+        <input type="number" id="credito-aplicar-input" min="0" step="0.01" max="${pedidoAtual.credito_disponivel}" value="0"
+          style="width:110px;padding:4px 8px;border:1px solid #16a34a;border-radius:6px" oninput="atualizarCreditoAplicado(this.value)">
+        <button type="button" class="btn btn-outline btn-sm" style="border-color:#16a34a;color:#16a34a"
+          onclick="document.getElementById('credito-aplicar-input').value=Math.min(${pedidoAtual.credito_disponivel}, calcTotal()+pedidoAtual.credito_aplicado).toFixed(2); atualizarCreditoAplicado(document.getElementById('credito-aplicar-input').value)">Aplicar máximo possível</button>
+      </div>
     </div>` : '';
 
   let vendedorHtml;
@@ -3868,12 +3891,26 @@ async function selecionarClientePedido(cod){
       <button onclick="trocarCliente()" style="float:right;background:none;border:none;cursor:pointer;color:var(--success);font-weight:600">Trocar</button>
       ${vendedorHtml}
     </div>
-    ${alertaHtml}`;
+    ${alertaHtml}
+    ${creditoHtml}`;
   document.getElementById('step-itens-ped').style.display='';
+}
+
+function atualizarCreditoAplicado(valor){
+  const disponivel = pedidoAtual.credito_disponivel || 0;
+  const totalAtualSemCredito = calcTotal() + (pedidoAtual.credito_aplicado||0); // total "puro", antes de descontar crédito
+  let v = Math.max(0, parseFloat(valor) || 0);
+  v = Math.min(v, disponivel, totalAtualSemCredito); // não deixa aplicar mais que o disponível nem mais que o total do pedido
+  pedidoAtual.credito_aplicado = v;
+  const input = document.getElementById('credito-aplicar-input');
+  if(input && parseFloat(input.value) !== v) input.value = v.toFixed(2);
+  atualizarTotais();
 }
 
 function trocarCliente(){
   pedidoAtual.cliente=null;
+  pedidoAtual.credito_aplicado=0;
+  pedidoAtual.credito_disponivel=0;
   document.getElementById('pedido-busca-cliente').value='';
   document.getElementById('pedido-cliente-selecionado').innerHTML='';
   document.getElementById('step-itens-ped').style.display='none';
@@ -4142,7 +4179,8 @@ function calcSubtotal(){
 function calcTotal(){
   const sub = calcSubtotal();
   const dg = parseFloat(document.getElementById('desc-geral')?.value)||0;
-  return sub * (1 - dg/100);
+  const totalComDesconto = sub * (1 - dg/100);
+  return Math.max(0, totalComDesconto - (pedidoAtual.credito_aplicado||0));
 }
 
 // Última trava antes de salvar — confere TODOS os itens do pedido (já com desconto de
@@ -4188,7 +4226,14 @@ function atualizarTotais(){
   const total = calcTotal();
   document.getElementById('tot-itens').textContent = pedidoAtual.itens.length;
   document.getElementById('tot-subtotal').textContent = fmtMoeda(sub);
-  document.getElementById('tot-desconto').textContent = '- '+fmtMoeda(sub-total);
+  document.getElementById('tot-desconto').textContent = '- '+fmtMoeda(sub-total-(pedidoAtual.credito_aplicado||0));
+  const linhaCredito = document.getElementById('totais-item-credito');
+  if(pedidoAtual.credito_aplicado > 0){
+    linhaCredito.style.display = '';
+    document.getElementById('tot-credito').textContent = '- '+fmtMoeda(pedidoAtual.credito_aplicado);
+  } else {
+    linhaCredito.style.display = 'none';
+  }
   document.getElementById('tot-valor').textContent = fmtMoeda(total);
 }
 
@@ -4397,6 +4442,8 @@ async function confirmarPedido(){
       itens:pedidoAtual.itens, forma, condicao,
       obs:document.getElementById('pedido-obs').value,
       subtotal:sub, desconto_geral:dg, desconto_total:sub-total, total,
+      credito_aplicado: pedidoAtual.credito_aplicado || 0,
+      credito_debitado: (pedidoAtual.credito_aplicado > 0) ? true : (pedidoOriginal?.credito_debitado || false),
       parcelas, status: convertendoOrcamento ? 'AP' : (pedidoOriginal?.status || 'AA'),
       veio_de_orcamento: convertendoOrcamento ? true : (pedidoOriginal?.veio_de_orcamento || false),
       numero_orcamento_origem: convertendoOrcamento ? pedidoOriginal.numero : (pedidoOriginal?.numero_orcamento_origem || null),
@@ -4404,6 +4451,17 @@ async function confirmarPedido(){
       historico_edicoes: historicoEdicoes
     };
     await db.ref('pedidos/'+pedido.id).update(pedido);
+
+    // Desconta o crédito do saldo do cliente — só na primeira vez que este pedido
+    // aplica crédito (evita descontar de novo se o pedido for salvo/editado outra vez)
+    const jaTinhaDebitado = pedidoOriginal?.credito_debitado;
+    if(pedidoAtual.credito_aplicado > 0 && !jaTinhaDebitado && c._key){
+      try {
+        const novoCredito = Math.max(0, Number(c.credito||0) - pedidoAtual.credito_aplicado);
+        await db.ref('clientes/'+c._key).update({ credito: novoCredito });
+        c.credito = novoCredito;
+      } catch(e){ /* não trava o resto do fluxo se o desconto do crédito falhar */ }
+    }
 
     // Reserva de estoque: pedido novo reserva tudo; pedido editado ajusta a diferença
     if(itensAntigos){
@@ -4437,7 +4495,7 @@ async function salvarComoOrcamento(){
   }
 
   const sub=calcSubtotal(); const dg=parseFloat(document.getElementById('desc-geral').value)||0;
-  const total=sub*(1-dg/100); const c=pedidoAtual.cliente;
+  const total=Math.max(0, sub*(1-dg/100) - (pedidoAtual.credito_aplicado||0)); const c=pedidoAtual.cliente;
   try {
     // Editando um orçamento já existente: atualiza o mesmo registro em vez de criar um novo
     const editandoExistente = pedidoAtual.editando && pedidoAtual.id;
@@ -4482,6 +4540,7 @@ async function salvarComoOrcamento(){
       itens:pedidoAtual.itens, forma, condicao,
       obs:document.getElementById('pedido-obs').value,
       subtotal:sub, desconto_geral:dg, desconto_total:sub-total, total,
+      credito_aplicado: pedidoAtual.credito_aplicado || 0,
       parcelas, status:'Orçamento'
     };
     await db.ref('pedidos/'+id).update(orcamento);
@@ -4607,7 +4666,9 @@ async function confirmarOrcamento(id){
     // Abrir modal de pedido com dados do orçamento
     pedidoAtual = {
       id:id, cliente:{codigo:p.cliente_codigo,nome:p.cliente_nome,cpf_cnpj:p.cliente_cpf,cidade:p.cliente_cidade,uf:p.cliente_uf},
-      itens:JSON.parse(JSON.stringify(p.itens||[])), isOrcamento:false, editando:true, numero:p.numero
+      itens:JSON.parse(JSON.stringify(p.itens||[])), isOrcamento:false, editando:true, numero:p.numero,
+      credito_aplicado: p.credito_aplicado || 0,
+      credito_disponivel: p.credito_aplicado || 0
     };
     document.getElementById('modal-pedido-titulo').textContent='Confirmar Orçamento #'+p.numero+' como Pedido';
     document.getElementById('btn-salvar-orcamento').style.display='none';
@@ -4703,6 +4764,7 @@ async function renderClientes(){
           ${end?` — <span style="font-size:12px">${end}</span>`:''}
         </div>
         ${vejaTudoDoModulo('clientes')?`<div class="cliente-card-info">👤 Vendedor: <span>${c.vendedor_nome||'—'}</span></div>`:''}
+        ${c.credito>0?`<div class="cliente-card-info">💰 Crédito disponível: <span style="color:#16a34a;font-weight:700">${fmtMoeda(c.credito)}</span></div>`:''}
         ${c.ts_cadastro?`<div class="cliente-card-info" style="font-size:11px">📅 Cadastrado em ${new Date(c.ts_cadastro).toLocaleDateString('pt-BR')}</div>`:''}
         ${c.alerta?`<div style="background:#fef3c7;color:#92400e;border-radius:6px;padding:6px 10px;margin-top:6px;font-size:12px">⚠️ ${c.alerta}</div>`:''}
         <div class="cliente-card-actions">
@@ -8453,7 +8515,7 @@ async function gerarEImprimirEtiquetas(pedidoId){
 
 async function abrirModalCliente(dadosPre=null, codigoEdicao=null){
   if(!temPermissaoEditar('clientes')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
-  ['cli-cpf','cli-ie','cli-nome','cli-tel','cli-email','cli-cidade','cli-end','cli-cep','cli-alerta'].forEach(id=>document.getElementById(id).value='');
+  ['cli-cpf','cli-ie','cli-nome','cli-tel','cli-email','cli-cidade','cli-end','cli-cep','cli-alerta','cli-credito'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('cli-uf').value='';
   document.getElementById('cnpj-loading').style.display='none';
   document.getElementById('cli-codigo-edicao').value = codigoEdicao || '';
@@ -8485,6 +8547,7 @@ async function abrirModalCliente(dadosPre=null, codigoEdicao=null){
       document.getElementById('cli-end').value = c.endereco || c.end || '';
       document.getElementById('cli-cep').value = c.cep || '';
       document.getElementById('cli-alerta').value = c.alerta || '';
+      document.getElementById('cli-credito').value = c.credito || '';
       if(usuarioLogado.admin) vendSel.value = c.vendedor_id || '';
     }
   } else if(dadosPre){
@@ -8573,6 +8636,9 @@ async function salvarCliente(){
     vendedor_id: vendedorId,
     vendedor_nome: vendedorNome
   };
+  if(usuarioLogado.admin){
+    dados.credito = Number(document.getElementById('cli-credito').value) || 0;
+  }
 
   try {
     if(codigoEdicao){
@@ -14168,6 +14234,7 @@ function montarSummarySlipHTML(p){
             <tr><td style="padding:3px 8px;text-align:right;color:#555">Soma das Qtdes</td><td style="padding:3px 8px;text-align:right">${totalQtd.toLocaleString('pt-BR')}</td></tr>
             ${p.desconto_total&&p.desconto_total>0?`<tr><td style="padding:3px 8px;text-align:right;color:#555">Desconto</td><td style="padding:3px 8px;text-align:right;color:#dc2626">- ${Number(p.desconto_total).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td></tr>`:''}
             <tr><td style="padding:3px 8px;text-align:right;color:#555">Total de produtos</td><td style="padding:3px 8px;text-align:right">${totalProd.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td></tr>
+            ${p.credito_aplicado>0?`<tr><td style="padding:3px 8px;text-align:right;color:#166534">💰 Crédito Aplicado</td><td style="padding:3px 8px;text-align:right;color:#166534">- ${Number(p.credito_aplicado).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td></tr>`:''}
             <tr style="font-weight:700"><td style="padding:3px 8px;text-align:right">Total do pedido</td><td style="padding:3px 8px;text-align:right">${Number(p.total).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td></tr>
           </table>
         </td>
