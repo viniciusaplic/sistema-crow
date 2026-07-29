@@ -3491,7 +3491,7 @@ async function editarPedido(id){
   fecharModal('modal-ver-pedido');
   pedidoAtual = {
     id: id,
-    cliente: { codigo:p.cliente_codigo, nome:p.cliente_nome, cpf_cnpj:p.cliente_cpf, cidade:p.cliente_cidade, uf:p.cliente_uf, credito:creditoAtualCliente },
+    cliente: { codigo:p.cliente_codigo, nome:p.cliente_nome, cpf_cnpj:p.cliente_cpf, cidade:p.cliente_cidade, uf:p.cliente_uf, credito:creditoAtualCliente, _key:clienteCadastro?._key },
     itens: JSON.parse(JSON.stringify(p.itens||[])),
     isOrcamento: ehOrcamento,
     editando: true,
@@ -4346,7 +4346,7 @@ function calcularParcelas(){
 
 // Compara o pedido original com os dados novos e gera uma lista legível do que mudou —
 // usado para montar o histórico de edições do pedido (quem mudou o quê e quando)
-function gerarResumoAlteracoesPedido(original, itensNovos, formaNova, condicaoNova, obsNova, descontoNovo){
+function gerarResumoAlteracoesPedido(original, itensNovos, formaNova, condicaoNova, obsNova, descontoNovo, creditoNovo){
   const mudancas = [];
   const itensAntigos = original.itens || [];
   const mapAntigo = {}; itensAntigos.forEach(i=>{ mapAntigo[i.codigo||i.nome] = i; });
@@ -4370,6 +4370,7 @@ function gerarResumoAlteracoesPedido(original, itensNovos, formaNova, condicaoNo
   if((original.condicao||'') !== (condicaoNova||'')) mudancas.push(`Condição: "${original.condicao||'—'}" → "${condicaoNova||'—'}"`);
   if((original.obs||'') !== (obsNova||'')) mudancas.push(`Observação alterada`);
   if(Number(original.desconto_geral||0) !== Number(descontoNovo||0)) mudancas.push(`Desconto geral: ${original.desconto_geral||0}% → ${descontoNovo||0}%`);
+  if(Number(original.credito_aplicado||0) !== Number(creditoNovo||0)) mudancas.push(`💰 Crédito aplicado: ${fmtMoeda(original.credito_aplicado||0)} → ${fmtMoeda(creditoNovo||0)}`);
 
   return mudancas;
 }
@@ -4488,7 +4489,7 @@ async function confirmarPedido(){
     let historicoEdicoes = pedidoOriginal?.historico_edicoes || [];
     if(pedidoAtual.editando && pedidoOriginal){
       const obsAtual = document.getElementById('pedido-obs').value;
-      const mudancas = gerarResumoAlteracoesPedido(pedidoOriginal, pedidoAtual.itens, forma, condicao, obsAtual, dg);
+      const mudancas = gerarResumoAlteracoesPedido(pedidoOriginal, pedidoAtual.itens, forma, condicao, obsAtual, dg, pedidoAtual.credito_aplicado);
       if(mudancas.length){
         historicoEdicoes = [...historicoEdicoes, {
           ts: Date.now(),
