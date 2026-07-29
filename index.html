@@ -4418,16 +4418,18 @@ async function confirmarPedido(){
       const snapClienteAtual = await db.ref('clientes/'+pedidoAtual.cliente._key).once('value');
       const clienteAtual = snapClienteAtual.val();
       const creditoRealAgora = Number(clienteAtual?.credito || 0);
-      let jaTinhaDebitadoCheck = false, creditoJaAplicadoAntes = 0;
+      let creditoJaDebitadoDeste = 0;
       if(pedidoAtual.editando && pedidoAtual.id){
         const snapPedidoAtual = await db.ref('pedidos/'+pedidoAtual.id).once('value');
         const pedidoAtualDb = snapPedidoAtual.val();
-        jaTinhaDebitadoCheck = pedidoAtualDb?.credito_debitado;
-        creditoJaAplicadoAntes = Number(pedidoAtualDb?.credito_aplicado || 0);
+        // Usa o valor REAL já debitado deste pedido especificamente (não um sim/não) —
+        // isso corrige pedidos presos que ficaram marcados "já debitado" numa tentativa
+        // anterior que, na verdade, tinha falhado silenciosamente por outro bug já corrigido.
+        creditoJaDebitadoDeste = Number(pedidoAtualDb?.credito_debitado_valor ?? (pedidoAtualDb?.credito_debitado ? pedidoAtualDb?.credito_aplicado : 0) ?? 0);
       }
-      // Se este pedido já tinha débito registrado antes, o crédito "livre" pro cliente
-      // hoje já não inclui o que foi usado aqui — soma de volta pra saber o teto real.
-      const tetoReal = jaTinhaDebitadoCheck ? creditoRealAgora + creditoJaAplicadoAntes : creditoRealAgora;
+      // O teto real é o saldo de hoje + o que já foi tirado deste pedido especificamente
+      // (essa parte "volta" porque, se o valor aplicado diminuir, ela é devolvida)
+      const tetoReal = creditoRealAgora + creditoJaDebitadoDeste;
       if(pedidoAtual.credito_aplicado > tetoReal){
         pedidoAtual.credito_aplicado = Math.max(0, tetoReal);
         toast(`🚫 Crédito ajustado para ${fmtMoeda(pedidoAtual.credito_aplicado)} — o cadastro do cliente não tem mais que isso disponível`,'error');
@@ -4557,25 +4559,47 @@ async function confirmarPedido(){
       obs:document.getElementById('pedido-obs').value,
       subtotal:sub, desconto_geral:dg, desconto_total:sub-total, total,
       credito_aplicado: pedidoAtual.credito_aplicado || 0,
-      credito_debitado: (pedidoAtual.credito_aplicado > 0) ? true : (pedidoOriginal?.credito_debitado || false),
       parcelas, status: convertendoOrcamento ? 'AP' : (pedidoOriginal?.status || 'AA'),
       veio_de_orcamento: convertendoOrcamento ? true : (pedidoOriginal?.veio_de_orcamento || false),
       numero_orcamento_origem: convertendoOrcamento ? pedidoOriginal.numero : (pedidoOriginal?.numero_orcamento_origem || null),
       data_orcamento_origem: convertendoOrcamento ? pedidoOriginal.data : (pedidoOriginal?.data_orcamento_origem || null),
       historico_edicoes: historicoEdicoes
     };
-    await db.ref('pedidos/'+pedido.id).update(pedido);
 
-    // Desconta o crédito do saldo do cliente — só na primeira vez que este pedido
-    // aplica crédito (evita descontar de novo se o pedido for salvo/editado outra vez)
-    const jaTinhaDebitado = pedidoOriginal?.credito_debitado;
-    if(pedidoAtual.credito_aplicado > 0 && !jaTinhaDebitado && c._key){
+    // Desconta (ou devolve) do saldo do cliente só a DIFERENÇA entre o que já estava
+    // debitado por este pedido e o que está sendo aplicado agora — em vez de um sim/não
+    // que podia ficar "preso" (ex: se uma tentativa anterior falhou no meio do caminho
+    // por outro bug já corrigido, mas ainda assim marcou como "já debitado"). Guardando o
+    // VALOR exato já debitado, o sistema sempre se autocorrige e também passa a ajustar
+    // corretamente pra cima ou pra baixo quando alguém edita o valor de crédito depois.
+    const creditoJaDebitadoAntes = Number(
+      pedidoOriginal?.credito_debitado_valor ?? (pedidoOriginal?.credito_debitado ? pedidoOriginal?.credito_aplicado : 0) ?? 0
+    );
+    const deltaCredito = (pedidoAtual.credito_aplicado || 0) - creditoJaDebitadoAntes;
+    if(deltaCredito !== 0 && c._key){
       try {
-        const novoCredito = Math.max(0, Number(c.credito||0) - pedidoAtual.credito_aplicado);
+        const snapClienteFresco = await db.ref('clientes/'+c._key).once('value');
+        const creditoClienteFresco = Number(snapClienteFresco.val()?.credito || 0);
+        const novoCredito = Math.max(0, creditoClienteFresco - deltaCredito);
         await db.ref('clientes/'+c._key).update({ credito: novoCredito });
         c.credito = novoCredito;
-      } catch(e){ /* não trava o resto do fluxo se o desconto do crédito falhar */ }
+        const cMem = CLIENTES_DB.find(x=>x.codigo===c.codigo);
+        if(cMem) cMem.credito = novoCredito;
+        pedido.credito_debitado_valor = pedidoAtual.credito_aplicado || 0;
+        pedido.credito_debitado = (pedidoAtual.credito_aplicado || 0) > 0;
+      } catch(e){
+        // Se a dedução falhar, NÃO marca como debitado — assim a próxima tentativa de
+        // salvar tenta de novo, em vez de ficar presa achando que já deu certo.
+        pedido.credito_debitado_valor = creditoJaDebitadoAntes;
+        pedido.credito_debitado = creditoJaDebitadoAntes > 0;
+        toast('⚠️ Pedido salvo, mas houve um erro ao ajustar o crédito do cliente — confira manualmente.','error');
+      }
+    } else {
+      pedido.credito_debitado_valor = creditoJaDebitadoAntes;
+      pedido.credito_debitado = creditoJaDebitadoAntes > 0;
     }
+
+    await db.ref('pedidos/'+pedido.id).update(pedido);
 
     // Reserva de estoque: pedido novo reserva tudo; pedido editado ajusta a diferença
     if(itensAntigos){
