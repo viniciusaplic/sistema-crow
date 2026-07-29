@@ -606,8 +606,8 @@ tbody td{padding:11px 16px;font-size:14px}
             <option value="zero">Sem estoque</option>
           </select>
           <select id="filter-tipo-produto" onchange="renderProdutos()" class="search-input" style="width:auto">
+            <option value="vendavel" selected>Só Vendáveis</option>
             <option value="">Vendáveis + Insumos</option>
-            <option value="vendavel">Só Vendáveis</option>
             <option value="insumo">Só Insumos</option>
           </select>
           <select id="filter-status-produto" onchange="renderProdutos()" class="search-input" style="width:auto">
@@ -9322,7 +9322,7 @@ async function renderProdutos(){
 
   const busca=(document.getElementById('search-produtos')?.value||'').toLowerCase();
   const filtroEst=document.getElementById('filter-estoque')?.value||'todos';
-  const filtroTipo = document.getElementById('filter-tipo-produto')?.value||'';
+  const filtroTipo = document.getElementById('filter-tipo-produto')?.value||'vendavel';
   const filtroStatus = document.getElementById('filter-status-produto')?.value||'ativos';
   const filtroFornecedor=document.getElementById('filter-fornecedor-produto')?.value||'';
   const filtroCategoria=document.getElementById('filter-categoria-produto')?.value||'';
@@ -9393,37 +9393,46 @@ async function renderProdutos(){
     // Disponível para venda = estoque físico disponível + capacidade de produção
     const disponivelParaVenda = disponivel + (capacidadeProducao !== null ? capacidadeProducao : 0);
 
+    // Tooltip detalhado de estoque (ao passar o mouse) fica restrito a admin/expedição —
+    // vendedor comum não deve ver esse detalhe.
+    const podeVerDetalhesProduto = usuarioLogado?.admin || ehExpedicao();
+
     const critico = estq <= estMin;
     let est;
     if(p._tipo==='vendavel' && capacidadeProducao !== null){
       const corTotal = disponivelParaVenda > 0 ? 'var(--success)' : '#dc2626';
-      est = `<span title="${tituloEstoque(p,estq,reservado,disponivel,estMin,critico,capacidadeProducao,gargalhoInfo)}">
+      est = `<span ${podeVerDetalhesProduto?`title="${tituloEstoque(p,estq,reservado,disponivel,estMin,critico,capacidadeProducao,gargalhoInfo)}"`:''}>
         <span style="font-weight:700;color:${corTotal}">${disponivelParaVenda}</span>
         <span style="font-size:10px;color:var(--muted)"> (${disponivel} físico + ${capacidadeProducao} prod.)</span>
       </span>`;
     } else {
-      est = critico?`<span class="estoque-low" title="${tituloEstoque(p,estq,reservado,disponivel,estMin,critico,null,'')}" >⚠ ${estq.toLocaleString('pt-BR')}</span>`:
-            estq>5?`<span class="estoque-ok" title="${tituloEstoque(p,estq,reservado,disponivel,estMin,critico,null,'')}">✓ ${estq.toLocaleString('pt-BR')}</span>`:
-            estq>0?`<span class="estoque-low" title="${tituloEstoque(p,estq,reservado,disponivel,estMin,critico,null,'')}">⚠ ${estq.toLocaleString('pt-BR')}</span>`:
+      const tt = podeVerDetalhesProduto ? `title="${tituloEstoque(p,estq,reservado,disponivel,estMin,critico,null,'')}"` : '';
+      est = critico?`<span class="estoque-low" ${tt}>⚠ ${estq.toLocaleString('pt-BR')}</span>`:
+            estq>5?`<span class="estoque-ok" ${tt}>✓ ${estq.toLocaleString('pt-BR')}</span>`:
+            estq>0?`<span class="estoque-low" ${tt}>⚠ ${estq.toLocaleString('pt-BR')}</span>`:
             `<span class="estoque-zero">Sem estoque</span>`;
     }
 
     const foto=p._tipo==='vendavel'?`<div onclick="event.stopPropagation();ampliarFoto('${p.codigo}')" style="cursor:pointer">${fotoImg(p.codigo,40)}</div>`:`<div style="width:40px;height:40px;border-radius:8px;background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:16px">🧩</div>`;
     const tipoLabel = p._tipo==='insumo' ? '<span class="badge" style="background:#ede9fe;color:#7c3aed;font-size:10px">INSUMO</span>' : '';
     const categoriaLabel = p.categoria ? `<span class="badge" style="background:#e0f2fe;color:#0369a1;font-size:10px">${p.categoria}</span>` : '';
-    const onclickFn = p._tipo==='insumo' ? `abrirDetalheItem('${p.codigo}','insumo')` : `abrirDetalheItem('${p.codigo}','vendavel')`;
-    return `<tr onclick="${onclickFn}" style="cursor:pointer">
+    // Cadastro do produto e as ações de etiqueta/movimentação ficam restritos a
+    // admin/expedição — vendedor comum não abre o cadastro clicando na linha.
+    const onclickFn = podeVerDetalhesProduto ? (p._tipo==='insumo' ? `abrirDetalheItem('${p.codigo}','insumo')` : `abrirDetalheItem('${p.codigo}','vendavel')`) : '';
+    return `<tr ${onclickFn?`onclick="${onclickFn}" style="cursor:pointer"`:''}>
       <td>${foto}</td>
       <td style="font-size:12px;color:var(--muted)">${p.codigo}</td>
       <td style="font-size:13px">${p.nome}${p.inativo?' <span class="badge badge-gray">Inativo</span>':''} ${tipoLabel} ${categoriaLabel}</td>
       <td><span class="badge badge-gray">${p.unidade}</span></td>
       <td><strong>${p._tipo==='vendavel'?fmtMoeda(p.preco_venda):'—'}</strong></td>
       <td style="color:var(--muted)">${p._tipo==='vendavel'?fmtMoeda(p.preco_minimo):'—'}</td>
-      <td onclick="event.stopPropagation();abrirHistoricoEstoque('${p.codigo}')" style="cursor:pointer">${est} <span style="font-size:10px;color:var(--accent)">📋</span></td>
+      <td ${podeVerDetalhesProduto?`onclick="event.stopPropagation();abrirHistoricoEstoque('${p.codigo}')" style="cursor:pointer"`:''}>${est}${podeVerDetalhesProduto?' <span style="font-size:10px;color:var(--accent)">📋</span>':''}</td>
       <td style="white-space:nowrap" onclick="event.stopPropagation()">
+        ${podeVerDetalhesProduto ? `
         <button class="btn btn-outline btn-sm" style="padding:4px 8px;font-size:11px;color:#0369a1;border-color:#0369a1" onclick="irParaMovimentacaoEstoque('${p.codigo}')" title="Ir para a página de Movimentação de Estoque deste item">📊 Estoque</button>
         <button class="btn btn-outline btn-sm" style="padding:4px 8px;font-size:11px" onclick="imprimirEtiquetaEstoque('${p.codigo}','${p._tipo}')" title="Etiqueta de Estoque (prateleira)">🏷️ Estoque</button>
         <button class="btn btn-outline btn-sm" style="padding:4px 8px;font-size:11px" onclick="imprimirEtiquetaProduto('${p.codigo}','${p._tipo}')" title="Etiqueta de Produto (embalagem)">🏷️ Produto</button>
+        ` : ''}
       </td>
     </tr>`;
   }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">Nenhum item encontrado</td></tr>';
