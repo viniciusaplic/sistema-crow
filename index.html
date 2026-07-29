@@ -2525,7 +2525,7 @@ async function iniciarApp(){
   }
   // Vendedor comum só vê Buscar Produto + filtro de estoque na aba Produtos — o resto
   // dos filtros (tipo, status, categoria, fornecedor) fica restrito a admin/expedição.
-  if(!usuarioLogado.admin && !ehExpedicao() && !temPermissaoEditar('produtos')){
+  if(!usuarioLogado.admin && !ehExpedicao() && !(usuarioLogado?.tipo==='personalizado' && !!usuarioLogado.permissoes?.produtos?.ver)){
     ['filter-tipo-produto','filter-status-produto','filter-categoria-produto','filter-fornecedor-produto'].forEach(id=>{
       const el = document.getElementById(id);
       if(el) el.style.display = 'none';
@@ -4214,15 +4214,31 @@ function atualizarQtd(idx,val){ pedidoAtual.itens[idx].qtd=Math.max(1,parseInt(v
 function atualizarDescItem(idx, val){
   const desconto = Math.min(100, Math.max(0, parseFloat(val)||0));
   const item = pedidoAtual.itens[idx];
-  if(!usuarioLogado?.admin && item.preco_minimo > 0){
-    const precoComDesconto = item.preco * (1 - desconto/100);
-    if(precoComDesconto < item.preco_minimo){
-      const descontoMaximo = ((item.preco - item.preco_minimo) / item.preco * 100).toFixed(1);
-      alert(`Desconto máximo permitido: ${descontoMaximo}%\nCom esse desconto o item ficaria em ${fmtMoeda(precoComDesconto)}, abaixo do mínimo de ${fmtMoeda(item.preco_minimo)}.`);
+
+  // Busca o preço mínimo ATUAL do cadastro — o item já tinha um preco_minimo salvo
+  // desde quando foi adicionado ao pedido, mas se o cadastro mudou depois (correção
+  // de preço, por exemplo), esse valor salvo no pedido ficava desatualizado e causava
+  // mensagens confusas (mínimo errado, ou bloqueio baseado num valor que não é mais o real).
+  const cadastroAtual = PRODUTOS_DB.find(x=>x.codigo===item.codigo);
+  const precoMinimoAtual = cadastroAtual ? Number(cadastroAtual.preco_minimo)||0 : Number(item.preco_minimo)||0;
+
+  if(!usuarioLogado?.admin && precoMinimoAtual > 0){
+    // Arredonda pra centavos ANTES de comparar — comparar com todas as casas decimais
+    // da divisão fazia a mensagem dizer "R$10,70 abaixo do mínimo de R$10,70" (valores
+    // que só pareciam iguais por causa do arredondamento na hora de exibir).
+    const precoComDesconto = Math.round(item.preco * (1 - desconto/100) * 100) / 100;
+    const minimoArredondado = Math.round(precoMinimoAtual * 100) / 100;
+    if(precoComDesconto < minimoArredondado){
+      // Arredonda o desconto máximo PARA BAIXO (não para o mais próximo) — assim o
+      // número mostrado é sempre um valor que realmente funciona, nunca um que pareça
+      // válido mas seja bloqueado por causa do arredondamento.
+      const descontoMaximo = Math.floor(((item.preco - minimoArredondado) / item.preco * 1000)) / 10;
+      alert(`Desconto máximo permitido: ${descontoMaximo}%\nCom esse desconto o item ficaria em ${fmtMoeda(precoComDesconto)}, abaixo do mínimo de ${fmtMoeda(minimoArredondado)}.`);
       renderItens();
       return;
     }
   }
+  item.preco_minimo = precoMinimoAtual; // mantém o item sempre com o mínimo mais atual
   item.desconto_item = desconto;
   renderItens();
   calcularParcelas();
@@ -9446,7 +9462,7 @@ async function renderProdutos(){
 
     // Tooltip detalhado de estoque (ao passar o mouse) fica restrito a admin/expedição —
     // vendedor comum não deve ver esse detalhe.
-    const podeVerDetalhesProduto = usuarioLogado?.admin || ehExpedicao() || temPermissaoEditar('produtos');
+    const podeVerDetalhesProduto = usuarioLogado?.admin || ehExpedicao() || (usuarioLogado?.tipo==='personalizado' && !!usuarioLogado.permissoes?.produtos?.ver);
 
     const critico = estq <= estMin;
     let est;
@@ -9656,7 +9672,7 @@ function renderModalProduto(codigo){
         </div>
       </div>
       ${(() => {
-        const podeImprimirEtiqueta = isAdmin || ehExpedicao() || temPermissaoEditar('produtos');
+        const podeImprimirEtiqueta = isAdmin || ehExpedicao() || (usuarioLogado?.tipo==='personalizado' && !!usuarioLogado.permissoes?.produtos?.ver);
         if(!isAdmin && !podeImprimirEtiqueta) return '';
         return `
       <div class="form-actions" style="margin-bottom:${temComposicao?'20':'4'}px">
