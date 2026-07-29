@@ -1430,7 +1430,7 @@ tbody td{padding:11px 16px;font-size:14px}
         </div>
       </div>
       <div class="form-group">
-        <label>Inscrição Estadual</label>
+        <label>Inscrição Estadual *</label>
         <input type="text" id="cli-ie" placeholder="000.000.000/0000 ou ISENTO">
       </div>
     </div>
@@ -1442,17 +1442,17 @@ tbody td{padding:11px 16px;font-size:14px}
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label>Telefone</label>
+        <label>Telefone *</label>
         <input type="text" id="cli-tel" placeholder="(31) 99999-9999">
       </div>
       <div class="form-group">
-        <label>E-mail</label>
+        <label>E-mail *</label>
         <input type="email" id="cli-email" placeholder="email@empresa.com">
       </div>
     </div>
     <div class="form-row single">
       <div class="form-group">
-        <label>Endereço (Rua, Nº, Bairro)</label>
+        <label>Endereço (Rua, Nº, Bairro) *</label>
         <input type="text" id="cli-end" placeholder="Rua das Flores, 123, Centro">
       </div>
     </div>
@@ -1470,18 +1470,18 @@ tbody td{padding:11px 16px;font-size:14px}
     </div>
     <div class="form-row triple">
       <div class="form-group">
-        <label>Cidade</label>
+        <label>Cidade *</label>
         <input type="text" id="cli-cidade" placeholder="Belo Horizonte">
       </div>
       <div class="form-group">
-        <label>UF</label>
+        <label>UF *</label>
         <select id="cli-uf">
           <option value="">UF</option>
           <option>AC</option><option>AL</option><option>AM</option><option>AP</option><option>BA</option><option>CE</option><option>DF</option><option>ES</option><option>GO</option><option>MA</option><option>MG</option><option>MS</option><option>MT</option><option>PA</option><option>PB</option><option>PE</option><option>PI</option><option>PR</option><option>RJ</option><option>RN</option><option>RO</option><option>RR</option><option>RS</option><option>SC</option><option>SE</option><option>SP</option><option>TO</option>
         </select>
       </div>
       <div class="form-group">
-        <label>CEP</label>
+        <label>CEP *</label>
         <input type="text" id="cli-cep" placeholder="00000-000">
       </div>
     </div>
@@ -8774,7 +8774,33 @@ async function buscarCNPJ(){
 async function salvarCliente(){
   if(!temPermissaoEditar('clientes')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const nome = document.getElementById('cli-nome').value.trim();
-  if(!nome){ toast('Nome é obrigatório','error'); return; }
+  const cpfCnpjVal = document.getElementById('cli-cpf').value.trim();
+  const ieVal = document.getElementById('cli-ie').value.trim();
+  const telVal = document.getElementById('cli-tel').value.trim();
+  const emailVal = document.getElementById('cli-email').value.trim();
+  const endVal = document.getElementById('cli-end').value.trim();
+  const cidadeVal = document.getElementById('cli-cidade').value.trim();
+  const ufVal = document.getElementById('cli-uf').value;
+  const cepVal = document.getElementById('cli-cep').value.trim();
+
+  // Todos os campos do cadastro são obrigatórios — não salva faltando nenhum
+  const camposObrigatorios = [
+    { valor: nome, label: 'Nome' },
+    { valor: cpfCnpjVal, label: 'CNPJ/CPF' },
+    { valor: ieVal, label: 'Inscrição Estadual (pode digitar "ISENTO" se for o caso)' },
+    { valor: telVal, label: 'Telefone' },
+    { valor: emailVal, label: 'E-mail' },
+    { valor: endVal, label: 'Endereço' },
+    { valor: cidadeVal, label: 'Cidade' },
+    { valor: ufVal, label: 'UF' },
+    { valor: cepVal, label: 'CEP' },
+  ];
+  const faltando = camposObrigatorios.filter(c => !c.valor).map(c => c.label);
+  if(faltando.length){
+    toast(`Preencha todos os campos obrigatórios: ${faltando.join(', ')}`,'error');
+    return;
+  }
+
   const vendSelEl = document.getElementById('cli-vendedor-id');
   const vendedorId = usuarioLogado.admin
     ? (vendSelEl.value || null)
