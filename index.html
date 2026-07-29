@@ -3476,22 +3476,31 @@ async function cancelarBipagemPedido(id){
 
 async function editarPedido(id){
   if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
+  if(!CLIENTES_DB.length) await carregarClientesFirebase();
   const snap = await db.ref('pedidos/'+id).once('value');
   const p = snap.val(); if(!p) return;
   if(!podeEditar(p)){ toast('Pedido bloqueado para edição após 1 hora','error'); return; }
 
   const ehOrcamento = p.status === 'Orçamento';
+  // Busca o saldo de crédito ATUAL do cliente (não o que já tinha sido aplicado nesse
+  // pedido antes) — sem isso, editar um pedido sem crédito aplicado sempre mostrava
+  // R$0 disponível, mesmo que o cliente tivesse saldo de verdade.
+  const clienteCadastro = CLIENTES_DB.find(x=>x.codigo===p.cliente_codigo);
+  const creditoAtualCliente = Number(clienteCadastro?.credito||0);
 
   fecharModal('modal-ver-pedido');
   pedidoAtual = {
     id: id,
-    cliente: { codigo:p.cliente_codigo, nome:p.cliente_nome, cpf_cnpj:p.cliente_cpf, cidade:p.cliente_cidade, uf:p.cliente_uf },
+    cliente: { codigo:p.cliente_codigo, nome:p.cliente_nome, cpf_cnpj:p.cliente_cpf, cidade:p.cliente_cidade, uf:p.cliente_uf, credito:creditoAtualCliente },
     itens: JSON.parse(JSON.stringify(p.itens||[])),
     isOrcamento: ehOrcamento,
     editando: true,
     numero: p.numero,
     credito_aplicado: p.credito_aplicado || 0,
-    credito_disponivel: p.credito_aplicado || 0
+    // Disponível = o que o cliente tem HOJE + o que já estava aplicado neste pedido
+    // (já que aquele valor já "saiu" do saldo do cliente — se ele quiser reduzir, o
+    // valor volta; se quiser manter ou aumentar, o teto é esse total)
+    credito_disponivel: creditoAtualCliente + (p.credito_aplicado || 0)
   };
   document.getElementById('modal-pedido-titulo').textContent = (ehOrcamento?'Editar Orçamento #':'Editar Pedido #')+p.numero;
   document.getElementById('btn-salvar-orcamento').style.display = ehOrcamento ? 'inline-flex' : 'none';
@@ -3499,11 +3508,23 @@ async function editarPedido(id){
   // Cliente só pode ser trocado se o pedido ainda não avançou (Aguard. Aprovação ou Orçamento) —
   // depois de separação/aprovação, trocar cliente teria implicações fiscais/estoque.
   const podeTrocarCliente = ehOrcamento || p.status === 'AA';
+  const creditoHtmlEdicao = pedidoAtual.credito_disponivel > 0 ? `
+    <div class="alerta" style="margin-top:8px;border:2px solid #16a34a;background:#f0fdf4;padding:12px 14px;border-radius:8px">
+      <div style="font-weight:700;color:#166534">💰 Este cliente tem ${fmtMoeda(pedidoAtual.credito_disponivel)} de crédito disponível (considerando o que já está aplicado neste pedido)</div>
+      <div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <label style="font-size:13px;color:#166534">Aplicar quanto neste pedido?</label>
+        <input type="number" id="credito-aplicar-input" min="0" step="0.01" max="${pedidoAtual.credito_disponivel}" value="${pedidoAtual.credito_aplicado.toFixed(2)}"
+          style="width:110px;padding:4px 8px;border:1px solid #16a34a;border-radius:6px" oninput="atualizarCreditoAplicado(this.value)">
+        <button type="button" class="btn btn-outline btn-sm" style="border-color:#16a34a;color:#16a34a"
+          onclick="atualizarCreditoAplicado(${pedidoAtual.credito_disponivel})">Aplicar máximo possível</button>
+      </div>
+    </div>` : '';
   document.getElementById('pedido-cliente-selecionado').innerHTML =
     `<div class="alerta alerta-success" style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
       <span>✓ ${p.cliente_nome} · ${p.cliente_cidade||''}/${p.cliente_uf||''}</span>
       ${podeTrocarCliente ? `<button type="button" class="btn btn-outline btn-sm" onclick="habilitarTrocaClientePedido()">🔄 Trocar Cliente</button>` : ''}
-    </div>`;
+    </div>
+    ${creditoHtmlEdicao}`;
   document.getElementById('step-cliente-ped').style.display='none';
   document.getElementById('step-itens-ped').style.display='';
   document.getElementById('desc-geral').value = p.desconto_geral||0;
@@ -3513,6 +3534,7 @@ async function editarPedido(id){
   document.getElementById('pedido-condicao').value = p.condicao||'';
   document.getElementById('pedido-obs').value = p.obs||'';
   calcularParcelas();
+  atualizarTotais();
   itemEmEstagio = null; document.getElementById('pedido-item-staging').style.display='none'; document.getElementById('pedido-item-staging').innerHTML=''; abrirModal('modal-pedido');
 }
 
