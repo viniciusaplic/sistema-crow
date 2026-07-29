@@ -630,6 +630,7 @@ tbody td{padding:11px 16px;font-size:14px}
           <button class="btn btn-primary admin-only" onclick="abrirModalNovoItem()">+ Novo Insumo</button>
           <button class="btn btn-outline btn-sm admin-only" style="color:#d97706;border-color:#d97706" onclick="verificarReceitasSemProduto()">🔍 Receitas sem Cadastro</button>
           <button class="btn btn-outline btn-sm admin-only" style="color:#dc2626;border-color:#dc2626" onclick="verificarProdutosSemNome()">🔍 Produtos Sem Nome (invisíveis)</button>
+          <button class="btn btn-outline btn-sm admin-only" style="color:#7c3aed;border-color:#7c3aed" onclick="verificarInsumosSemFornecedor()">🔍 Insumos Sem Fornecedor</button>
           <button class="btn btn-outline btn-sm admin-only" style="color:#b91c1c;border-color:#b91c1c" onclick="verificarPrecosAbaixoMinimo()">🔍 Itens Bloqueados p/ Venda (Preço)</button>
           <button class="btn btn-outline btn-sm" style="color:#1a5c1a;border-color:#1a5c1a" onclick="imprimirEtiquetaLogoAplic()">🏷️ Etiqueta Logo Aplic</button>
         </div>
@@ -2521,6 +2522,14 @@ async function iniciarApp(){
   }
   if(temPermissaoEditar('produtos')){
     document.querySelectorAll('button.admin-only[onclick="abrirModalNovoItem()"]').forEach(el=>el.style.display='inline-flex');
+  }
+  // Vendedor comum só vê Buscar Produto + filtro de estoque na aba Produtos — o resto
+  // dos filtros (tipo, status, categoria, fornecedor) fica restrito a admin/expedição.
+  if(!usuarioLogado.admin && !ehExpedicao()){
+    ['filter-tipo-produto','filter-status-produto','filter-categoria-produto','filter-fornecedor-produto'].forEach(id=>{
+      const el = document.getElementById(id);
+      if(el) el.style.display = 'none';
+    });
   }
   aplicarPermissoesMenu();
   document.getElementById('loading-overlay').style.display='none';
@@ -9215,6 +9224,50 @@ async function verificarPrecosAbaixoMinimo(){
             <td style="padding:7px 10px;text-align:center;color:#dc2626;font-weight:700">${fmtMoeda(p.preco_venda)}</td>
             <td style="padding:7px 10px;text-align:center">${fmtMoeda(p.preco_minimo)}</td>
             <td style="padding:7px 10px;text-align:center"><button class="btn btn-primary btn-sm" onclick="abrirDetalheItem('${p.codigo}','vendavel')">✏️ Editar</button></td>
+          </tr>`).join('')}
+      </tbody>
+    </table></div>
+  `;
+}
+
+// Acha insumos cadastrados sem NENHUM fornecedor vinculado — sem isso, o MRP e as
+// ferramentas de compra não sabem de quem pedir esse insumo.
+async function verificarInsumosSemFornecedor(){
+  const el = document.getElementById('receitas-sem-produto-resultado');
+  el.innerHTML = '<div style="padding:12px;color:var(--muted)">⏳ Verificando...</div>';
+
+  if(!INSUMOS_DB.length) await carregarInsumosFirebase();
+  const semFornecedor = INSUMOS_DB.filter(i => !i.inativo && !i.fornecedor && !(i.fornecedores && i.fornecedores.length));
+
+  if(!semFornecedor.length){
+    el.innerHTML = '<div style="text-align:right;margin-bottom:6px"><button class="btn btn-outline btn-sm" onclick="fecharPainelDiagnostico()">✕ Fechar</button></div><div style="padding:12px 14px;margin:10px 0;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534;font-size:13px">✅ Todos os insumos ativos já têm fornecedor cadastrado.</div>';
+    return;
+  }
+
+  el.innerHTML = `
+    <div style="text-align:right;margin-bottom:6px"><button class="btn btn-outline btn-sm" onclick="fecharPainelDiagnostico()">✕ Fechar</button></div>
+    <div style="padding:12px 14px;margin:10px 0;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#991b1b">
+      ⚠️ <strong>${semFornecedor.length} insumo(s)</strong> estão cadastrados sem nenhum fornecedor vinculado.
+    </div>
+    <div style="overflow-x:auto;margin-bottom:10px">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead style="background:var(--primary);color:rgba(255,255,255,.85)"><tr>
+        <th style="padding:8px 10px;text-align:left">Código</th>
+        <th style="padding:8px 10px;text-align:left">Nome</th>
+        <th style="padding:8px 10px;text-align:center">Categoria</th>
+        <th style="padding:8px 10px;text-align:center">Estoque</th>
+        <th style="padding:8px 10px;text-align:center">Ação</th>
+      </tr></thead>
+      <tbody>
+        ${semFornecedor.map((i,idx)=>`
+          <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
+            <td style="padding:7px 10px;font-weight:700">${i.codigo}</td>
+            <td style="padding:7px 10px">${i.nome}</td>
+            <td style="padding:7px 10px;text-align:center">${i.categoria||'—'}</td>
+            <td style="padding:7px 10px;text-align:center">${Number(i.estoque_atual||0).toLocaleString('pt-BR')}</td>
+            <td style="padding:7px 10px;text-align:center">
+              <button class="btn btn-outline btn-sm" onclick="abrirModalInsumo('${i.key||('ins_'+i.codigo)}')">✏️ Cadastrar fornecedor</button>
+            </td>
           </tr>`).join('')}
       </tbody>
     </table></div>
