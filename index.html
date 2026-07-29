@@ -2284,6 +2284,23 @@ const POR_PAGINA = 20;
 // ══ UTILITÁRIOS ══
 function fmtMoeda(v){ return 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function fmtData(iso){ if(!iso) return ''; return new Date(iso).toLocaleDateString('pt-BR'); }
+// Registra um evento no histórico de um pedido/orçamento (impressão, PDF gerado,
+// aprovação, criação, etc.) — sempre com data/hora exata e quem foi o responsável.
+async function registrarEventoHistorico(pedidoId, textoEvento){
+  try {
+    const ref = db.ref('pedidos/'+pedidoId+'/historico_edicoes');
+    const snap = await ref.once('value');
+    const historico = snap.val() || [];
+    historico.push({
+      ts: Date.now(),
+      usuario_nome: usuarioLogado?.nome || 'Desconhecido',
+      usuario_tipo: usuarioLogado?.admin ? 'admin' : (usuarioLogado?.tipo==='expedicao' ? 'expedicao' : 'vendedor'),
+      alteracoes: [textoEvento]
+    });
+    await ref.set(historico);
+  } catch(e){ /* não trava o fluxo principal (imprimir/gerar pdf) se o registro falhar */ }
+}
+
 function toast(msg, tipo=''){
   const t = document.getElementById('toast');
   t.textContent = msg; t.className = 'toast show' + (tipo?' '+tipo:'');
@@ -2863,6 +2880,7 @@ async function imprimirPedidosSelecionados(){
   }
   lista.sort((a,b)=>(a.numero||0)-(b.numero||0));
   abrirJanelaImpressaoPedidos(lista, `Impressão de ${lista.length} Pedido(s)`, win);
+  for(const id of pedidosSelecionadosImprimir){ registrarEventoHistorico(id, 'Pedido impresso (em lote)'); }
 }
 
 async function imprimirOrcamentosSelecionados(){
@@ -2875,6 +2893,7 @@ async function imprimirOrcamentosSelecionados(){
   }
   lista.sort((a,b)=>(a.numero||0)-(b.numero||0));
   abrirJanelaImpressaoPedidos(lista, `Impressão de ${lista.length} Orçamento(s)`, win);
+  for(const id of orcamentosSelecionadosImprimir){ registrarEventoHistorico(id, 'Orçamento impresso (em lote)'); }
 }
 
 async function renderPedidos(){
@@ -3226,18 +3245,21 @@ async function verificarVendedorPedidosW3(){
   el.innerHTML = `
     <div style="padding:12px 14px;margin:10px 0;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;font-size:13px;color:#9a3412">
       ⚠️ <strong>${divergentes.length} pedido(s)</strong> importados do W3 estão com um vendedor diferente do que está cadastrado hoje no cliente.
+      <br><strong>Confira antes de corrigir</strong> — pode ser um erro de importação, mas também pode ser uma venda legítima feita por outra pessoa (ex: cobrindo férias). Desmarque os que NÃO devem ser alterados.
     </div>
     <div style="max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:10px">
     <table style="width:100%;border-collapse:collapse;font-size:12px">
       <thead style="background:var(--primary);color:rgba(255,255,255,.85);position:sticky;top:0"><tr>
+        <th style="padding:6px 8px"><input type="checkbox" checked onchange="document.querySelectorAll('.check-corr-vend-w3').forEach(c=>c.checked=this.checked)"></th>
         <th style="padding:6px 8px;text-align:left">Pedido</th>
         <th style="padding:6px 8px;text-align:left">Cliente</th>
-        <th style="padding:6px 8px;text-align:left">Vendedor Atual (errado)</th>
-        <th style="padding:6px 8px;text-align:left">Vendedor Correto (do cadastro)</th>
+        <th style="padding:6px 8px;text-align:left">Vendedor Atual (no pedido)</th>
+        <th style="padding:6px 8px;text-align:left">Vendedor do Cadastro do Cliente</th>
       </tr></thead>
       <tbody>
         ${divergentes.map((d,idx)=>`
           <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
+            <td style="padding:5px 8px"><input type="checkbox" class="check-corr-vend-w3" data-idx="${idx}" checked></td>
             <td style="padding:5px 8px;font-weight:700">#${d.numero}</td>
             <td style="padding:5px 8px">${d.cliente_nome}</td>
             <td style="padding:5px 8px;color:#dc2626">${d.vendedorAtualNome}</td>
@@ -3245,15 +3267,16 @@ async function verificarVendedorPedidosW3(){
           </tr>`).join('')}
       </tbody>
     </table></div>
-    <button class="btn btn-primary btn-sm" onclick="corrigirVendedorPedidosW3EmMassa()">✅ Corrigir todos os ${divergentes.length} pedido(s)</button>
+    <button class="btn btn-primary btn-sm" onclick="corrigirVendedorPedidosW3EmMassa()">✅ Corrigir os selecionados</button>
   `;
 }
 
 async function corrigirVendedorPedidosW3EmMassa(){
   if(!usuarioLogado.admin){ toast('Apenas admin pode usar esta ferramenta','error'); return; }
-  const lista = correcaoVendedorCache;
-  if(!lista.length) return;
-  const ok = await confirmCustom(`Corrigir o vendedor de ${lista.length} pedido(s)?\n\nCada um vai passar a usar o vendedor atualmente cadastrado no respectivo cliente. Fica registrado no histórico de cada pedido.`, `Corrigir ${lista.length}`);
+  const marcados = Array.from(document.querySelectorAll('.check-corr-vend-w3')).filter(c=>c.checked).map(c=>Number(c.dataset.idx));
+  const lista = correcaoVendedorCache.filter((d,idx)=>marcados.includes(idx));
+  if(!lista.length){ toast('Nenhum pedido selecionado','error'); return; }
+  const ok = await confirmCustom(`Corrigir o vendedor de ${lista.length} pedido(s) selecionado(s)?\n\nCada um vai passar a usar o vendedor atualmente cadastrado no respectivo cliente. Fica registrado no histórico de cada pedido.`, `Corrigir ${lista.length}`);
   if(!ok) return;
 
   const el = document.getElementById('correcao-vendedor-w3-resultado');
@@ -3348,11 +3371,11 @@ async function verPedido(id){
       }
       ${(p.historico_edicoes||[]).length ? `
         <div style="margin-top:16px;padding:14px 16px;background:var(--bg);border-radius:10px;font-size:13px">
-          <div style="font-weight:700;color:var(--primary);margin-bottom:8px">📝 Histórico de Edições</div>
+          <div style="font-weight:700;color:var(--primary);margin-bottom:8px">📝 Histórico do Pedido</div>
           ${p.historico_edicoes.slice().reverse().map(h=>`
             <div style="padding:8px 0;border-top:1px solid var(--border)">
               <div style="font-size:12px;color:var(--muted)">
-                <strong>${new Date(h.ts).toLocaleString('pt-BR')}</strong> — editado por <strong>${h.usuario_nome}</strong>${h.usuario_tipo?` (${h.usuario_tipo==='admin'?'Admin':h.usuario_tipo==='expedicao'?'Expedição':'Vendedor'})`:''}
+                <strong>${new Date(h.ts).toLocaleString('pt-BR')}</strong> — por <strong>${h.usuario_nome}</strong>${h.usuario_tipo?` (${h.usuario_tipo==='admin'?'Admin':h.usuario_tipo==='expedicao'?'Expedição':'Vendedor'})`:''}
               </div>
               <ul style="margin:4px 0 0 18px;padding:0;font-size:12px;color:var(--text)">
                 ${h.alteracoes.map(a=>`<li>${a}</li>`).join('')}
@@ -4453,6 +4476,21 @@ async function confirmarPedido(){
         }];
       }
     }
+    // Registra a aprovação do orçamento (virando pedido), ou a criação de um pedido novo —
+    // sempre com data/hora exata e quem foi o responsável
+    if(convertendoOrcamento){
+      historicoEdicoes = [...historicoEdicoes, {
+        ts: Date.now(), usuario_nome: usuarioLogado.nome,
+        usuario_tipo: usuarioLogado.admin ? 'admin' : (usuarioLogado.tipo || 'vendedor'),
+        alteracoes: [`Orçamento #${pedidoOriginal.numero} aprovado e convertido em Pedido`]
+      }];
+    } else if(!pedidoAtual.editando){
+      historicoEdicoes = [{
+        ts: Date.now(), usuario_nome: usuarioLogado.nome,
+        usuario_tipo: usuarioLogado.admin ? 'admin' : (usuarioLogado.tipo || 'vendedor'),
+        alteracoes: ['Pedido criado']
+      }];
+    }
 
     const pedido = {
       ...(pedidoOriginal || {}), // preserva tudo que já existia (data original, status, codigo_w3, bipagem, etc.)
@@ -4563,6 +4601,13 @@ async function salvarComoOrcamento(){
     const condicao = document.getElementById('pedido-condicao').value;
     const parcelas = calcularParcelas()||[];
 
+    // Registra a criação do orçamento — só na primeira vez, com data/hora exata e quem criou
+    const historicoOrc = editandoExistente
+      ? (dadosOriginais.historico_edicoes || [])
+      : [{ ts: Date.now(), usuario_nome: usuarioLogado.nome,
+           usuario_tipo: usuarioLogado.admin ? 'admin' : (usuarioLogado.tipo || 'vendedor'),
+           alteracoes: ['Orçamento criado'] }];
+
     const orcamento = {
       ...dadosOriginais,
       id, numero,
@@ -4579,7 +4624,8 @@ async function salvarComoOrcamento(){
       obs:document.getElementById('pedido-obs').value,
       subtotal:sub, desconto_geral:dg, desconto_total:sub-total, total,
       credito_aplicado: pedidoAtual.credito_aplicado || 0,
-      parcelas, status:'Orçamento'
+      parcelas, status:'Orçamento',
+      historico_edicoes: historicoOrc
     };
     await db.ref('pedidos/'+id).update(orcamento);
     fecharModal('modal-pedido');
@@ -11219,6 +11265,7 @@ async function imprimirCapaPedidoVenda(id){
   const snap = await db.ref('pedidos/'+id).once('value');
   const p = snap.val(); if(!p){ if(win && !win.closed) win.close(); return; }
   abrirJanelaImpressaoPedidos([p], `Pedido #${p.numero}`, win);
+  registrarEventoHistorico(id, `${p.status==='Orçamento'?'Orçamento':'Pedido'} impresso`);
 }
 
 async function imprimirCapaPedidoCompra(id){
@@ -14454,6 +14501,7 @@ async function gerarImagemPedido(id){
   if(!p){ if(win && !win.closed) win.close(); return; }
   abrirJanelaImpressaoPedidos([p], `Pedido #${p.numero}`, win);
   toast('Na tela de impressão, escolha "Salvar como PDF" pra baixar, ou imprima direto.','');
+  registrarEventoHistorico(id, `PDF gerado (${p.status==='Orçamento'?'Orçamento':'Pedido'})`);
 }
 
 function compartilharPDF(url, numero){
