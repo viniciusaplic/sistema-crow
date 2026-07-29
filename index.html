@@ -4409,6 +4409,32 @@ async function confirmarPedido(){
       atualizarTotais();
       return; // deixa a pessoa conferir e clicar em salvar de novo
     }
+
+    // Trava final e definitiva: confere o saldo de crédito do cliente DIRETO NO BANCO
+    // DE DADOS, agora — nunca deixa aplicar mais do que o cadastro realmente permite,
+    // mesmo que algo tenha mudado entre abrir a tela e clicar em salvar. Faz sua própria
+    // busca (não depende de variável definida mais adiante na função).
+    if(pedidoAtual.cliente._key){
+      const snapClienteAtual = await db.ref('clientes/'+pedidoAtual.cliente._key).once('value');
+      const clienteAtual = snapClienteAtual.val();
+      const creditoRealAgora = Number(clienteAtual?.credito || 0);
+      let jaTinhaDebitadoCheck = false, creditoJaAplicadoAntes = 0;
+      if(pedidoAtual.editando && pedidoAtual.id){
+        const snapPedidoAtual = await db.ref('pedidos/'+pedidoAtual.id).once('value');
+        const pedidoAtualDb = snapPedidoAtual.val();
+        jaTinhaDebitadoCheck = pedidoAtualDb?.credito_debitado;
+        creditoJaAplicadoAntes = Number(pedidoAtualDb?.credito_aplicado || 0);
+      }
+      // Se este pedido já tinha débito registrado antes, o crédito "livre" pro cliente
+      // hoje já não inclui o que foi usado aqui — soma de volta pra saber o teto real.
+      const tetoReal = jaTinhaDebitadoCheck ? creditoRealAgora + creditoJaAplicadoAntes : creditoRealAgora;
+      if(pedidoAtual.credito_aplicado > tetoReal){
+        pedidoAtual.credito_aplicado = Math.max(0, tetoReal);
+        toast(`🚫 Crédito ajustado para ${fmtMoeda(pedidoAtual.credito_aplicado)} — o cadastro do cliente não tem mais que isso disponível`,'error');
+        atualizarTotais();
+        return;
+      }
+    }
   }
 
   // Avisa se o cliente ainda não foi cadastrado no W3 (não bloqueia, mas registra)
@@ -4420,7 +4446,7 @@ async function confirmarPedido(){
 
   const sub = calcSubtotal();
   const dg = parseFloat(document.getElementById('desc-geral').value)||0;
-  const total = sub*(1-dg/100);
+  const total = Math.max(0, sub*(1-dg/100) - (pedidoAtual.credito_aplicado||0));
   const dias = condicao==='AVISTA'?[0]:condicao.split('/').map(Number);
   if(dias.length>1 && total/dias.length < 300){
     const ok = await confirmCustom('Parcela abaixo de R$ 300,00. Confirmar mesmo assim?', 'Confirmar');
