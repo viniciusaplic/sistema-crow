@@ -3322,7 +3322,7 @@ async function verPedido(id){
     document.getElementById('ver-pedido-conteudo').innerHTML = `
       <div style="font-family:'DM Sans',sans-serif;font-size:20px;font-weight:700;margin-bottom:4px">
         #${p.numero} — ${statusBadge(p.status)}
-        ${p.status==='Orçamento' && usuarioLogado?.admin?'<button class="btn btn-success btn-sm" style="margin-left:12px" onclick="confirmarOrcamento(\''+id+'\')">Confirmar como Pedido</button>':''}
+        ${p.status==='Orçamento'?'<button class="btn btn-success btn-sm" style="margin-left:12px" onclick="confirmarOrcamento(\''+id+'\')">Confirmar como Pedido</button>':''}
       </div>
       <div style="font-size:13px;color:var(--muted);margin-bottom:4px">${fmtData(p.data)} · Vendedor: ${p.vendedor_nome}</div>
       ${p.veio_de_orcamento ? `<div style="font-size:12px;color:#7c3aed;background:#ede9fe;display:inline-block;padding:3px 10px;border-radius:6px;margin-bottom:10px">📋 Convertido do Orçamento #${p.numero_orcamento_origem||'—'}${p.data_orcamento_origem?', feito em '+fmtData(p.data_orcamento_origem):''}</div>` : ''}
@@ -4498,10 +4498,6 @@ async function confirmarPedido(){
     // verdade: número novo (orçamento e pedido usam contadores separados) e status inicial —
     // nunca herdar o status "Orçamento".
     const convertendoOrcamento = pedidoOriginal?.status === 'Orçamento';
-    if(convertendoOrcamento && !usuarioLogado?.admin){
-      toast('Acesso restrito — só administradores podem aprovar orçamentos (após análise financeira)','error');
-      return;
-    }
     let numero = convertendoOrcamento ? null : pedidoAtual.numero;
     if(!numero){
       const snap = await db.ref('contador_pedidos').transaction(v=>(v||0)+1);
@@ -4588,7 +4584,7 @@ async function confirmarPedido(){
       obs:document.getElementById('pedido-obs').value,
       subtotal:sub, desconto_geral:dg, desconto_total:sub-total, total,
       credito_aplicado: pedidoAtual.credito_aplicado || 0,
-      parcelas, status: convertendoOrcamento ? 'AP' : (pedidoOriginal?.status || 'AA'),
+      parcelas, status: convertendoOrcamento ? 'AA' : (pedidoOriginal?.status || 'AA'),
       veio_de_orcamento: convertendoOrcamento ? true : (pedidoOriginal?.veio_de_orcamento || false),
       numero_orcamento_origem: convertendoOrcamento ? pedidoOriginal.numero : (pedidoOriginal?.numero_orcamento_origem || null),
       data_orcamento_origem: convertendoOrcamento ? pedidoOriginal.data : (pedidoOriginal?.data_orcamento_origem || null),
@@ -4835,7 +4831,7 @@ async function renderOrcamentos(){
           <button class="btn btn-outline btn-sm" onclick="verPedido('${p.id}')">Ver</button>
           ${p._status_orcamento==='andamento' ? `
             <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600;padding:4px 8px" onclick="gerarImagemPedido('${p.id}')">📄 Gerar PDF</button>
-            ${usuarioLogado?.admin?`<button class="btn btn-success btn-sm" onclick="confirmarOrcamento('${p.id}')">✓ Confirmar</button>`:''}
+            <button class="btn btn-success btn-sm" onclick="confirmarOrcamento('${p.id}')">✓ Confirmar</button>
             <button class="btn btn-sm" style="background:#ffeef0;color:var(--accent)" onclick="cancelarPedido('${p.id}')">Excluir</button>
           ` : ''}
         </div>
@@ -4846,7 +4842,6 @@ async function renderOrcamentos(){
 }
 
 async function confirmarOrcamento(id){
-  if(!usuarioLogado?.admin){ toast('Acesso restrito — só administradores podem aprovar orçamentos (após análise financeira)','error'); return; }
   try {
     const snap = await db.ref('pedidos/'+id).once('value');
     const p = snap.val(); if(!p) return;
