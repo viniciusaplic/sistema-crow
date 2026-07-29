@@ -7016,24 +7016,22 @@ async function adicionarItemCompra(codigo, tipo){
     if(!confirmou) return;
   }
 
-  // 1. Código do fornecedor — tenta casar pelo nome do fornecedor selecionado
+  // 1. Código do fornecedor — casa pelo NOME exato do fornecedor selecionado no pedido
+  // de compra. Antes, se o fornecedor certo fosse achado mas tivesse o código em
+  // branco, o sistema confundia "código vazio" com "não achei o fornecedor" e trocava
+  // pelo fornecedor padrão por engano — por isso pedidos de fornecedor não-padrão às
+  // vezes saíam com o código do padrão. Agora só cai no padrão se o fornecedor
+  // selecionado realmente não estiver na lista de fornecedores deste item.
   let codigoFornecedor = '';
   const fornecedorSelecionado = (document.getElementById('compra-fornecedor').value||'').trim().toLowerCase();
+  let fInfo = null;
   if(fornecedorSelecionado && p.fornecedores?.length){
-    // Tenta exato primeiro, depois parcial
-    const fInfo = p.fornecedores.find(f=>(f.nome||'').trim().toLowerCase()===fornecedorSelecionado)
-      || p.fornecedores.find(f=>(f.nome||'').trim().toLowerCase().includes(fornecedorSelecionado)
-          || fornecedorSelecionado.includes((f.nome||'').trim().toLowerCase()));
-    if(fInfo) codigoFornecedor = fInfo.codigo_fornecedor || '';
-    // Se não achou pelo nome digitado, usa o fornecedor padrão do produto
-    if(!codigoFornecedor){
-      const fPadrao = p.fornecedores.find(f=>f.padrao) || p.fornecedores[0];
-      if(fPadrao) codigoFornecedor = fPadrao.codigo_fornecedor || '';
-    }
-  } else if(p.fornecedores?.length){
-    const fPadrao = p.fornecedores.find(f=>f.padrao) || p.fornecedores[0];
-    if(fPadrao) codigoFornecedor = fPadrao.codigo_fornecedor || '';
+    fInfo = p.fornecedores.find(f=>(f.nome||'').trim().toLowerCase()===fornecedorSelecionado);
   }
+  if(!fInfo && p.fornecedores?.length){
+    fInfo = p.fornecedores.find(f=>f.padrao) || p.fornecedores[0];
+  }
+  if(fInfo) codigoFornecedor = fInfo.codigo_fornecedor || '';
 
   // 2. Último preço de compra — busca no histórico de pedidos de compra concluídos
   let ultimoPrecoCompra = 0;
@@ -9657,21 +9655,27 @@ function renderModalProduto(codigo){
           ${p.localizacao ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">📍 ${p.localizacao}</div>` : ''}
         </div>
       </div>
-      ${isAdmin ? `
+      ${(() => {
+        const podeImprimirEtiqueta = isAdmin || ehExpedicao() || temPermissaoEditar('produtos');
+        if(!isAdmin && !podeImprimirEtiqueta) return '';
+        return `
       <div class="form-actions" style="margin-bottom:${temComposicao?'20':'4'}px">
+        ${isAdmin ? `
         <button class="btn btn-outline" onclick="produtoDetalheModo='editar';renderModalProduto('${codigo}')">✏️ Editar</button>
-        <button class="btn btn-outline" onclick="clonarItem('${codigo}','${tipo}')">📑 Clonar</button>
+        <button class="btn btn-outline" onclick="clonarItem('${codigo}','${tipo}')">📑 Clonar</button>` : ''}
+        ${podeImprimirEtiqueta ? `
         <button class="btn btn-outline" onclick="imprimirEtiquetaEstoque('${codigo}','${tipo}')">🏷️ Etiqueta Estoque</button>
-        <button class="btn btn-outline" onclick="imprimirEtiquetaProduto('${codigo}','${tipo}')">🏷️ Etiqueta Produto</button>
-        ${tipo==='vendavel' ? `<button class="btn ${p.inativo?'btn-primary':'btn-outline'}" style="${p.inativo?'':'color:#dc2626;border-color:#dc2626'}" onclick="toggleInativoProduto('${codigo}')">
+        <button class="btn btn-outline" onclick="imprimirEtiquetaProduto('${codigo}','${tipo}')">🏷️ Etiqueta Produto</button>` : ''}
+        ${isAdmin ? (tipo==='vendavel' ? `<button class="btn ${p.inativo?'btn-primary':'btn-outline'}" style="${p.inativo?'':'color:#dc2626;border-color:#dc2626'}" onclick="toggleInativoProduto('${codigo}')">
           ${p.inativo?'✅ Reativar':'🚫 Inativar'}
         </button>` : `
           <button class="btn ${p.inativo?'btn-primary':'btn-outline'}" style="${p.inativo?'':'color:#dc2626;border-color:#dc2626'}" onclick="toggleInativoInsumo('${codigo}')">
             ${p.inativo?'✅ Reativar':'🚫 Inativar'}
           </button>
           <button class="btn btn-outline" style="color:#dc2626;border-color:#dc2626" onclick="removerInsumo('${p.key}')">🗑️ Remover Insumo</button>
-        `}
-      </div>` : ''}
+        `) : ''}
+      </div>`;
+      })()}
     `;
   }
 
