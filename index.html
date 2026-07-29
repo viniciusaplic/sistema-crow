@@ -2525,7 +2525,7 @@ async function iniciarApp(){
   }
   // Vendedor comum só vê Buscar Produto + filtro de estoque na aba Produtos — o resto
   // dos filtros (tipo, status, categoria, fornecedor) fica restrito a admin/expedição.
-  if(!usuarioLogado.admin && !ehExpedicao()){
+  if(!usuarioLogado.admin && !ehExpedicao() && !temPermissaoEditar('produtos')){
     ['filter-tipo-produto','filter-status-produto','filter-categoria-produto','filter-fornecedor-produto'].forEach(id=>{
       const el = document.getElementById(id);
       if(el) el.style.display = 'none';
@@ -9448,7 +9448,7 @@ async function renderProdutos(){
 
     // Tooltip detalhado de estoque (ao passar o mouse) fica restrito a admin/expedição —
     // vendedor comum não deve ver esse detalhe.
-    const podeVerDetalhesProduto = usuarioLogado?.admin || ehExpedicao();
+    const podeVerDetalhesProduto = usuarioLogado?.admin || ehExpedicao() || temPermissaoEditar('produtos');
 
     const critico = estq <= estMin;
     let est;
