@@ -411,6 +411,7 @@ tbody td{padding:11px 16px;font-size:14px}
           </label>
           <button class="btn btn-outline btn-sm" onclick="desmarcarTodosPedidos()">✕ Desmarcar todos</button>
           <button class="btn btn-outline btn-sm" id="btn-imprimir-pedidos" onclick="imprimirPedidosSelecionados()">🖨️ Imprimir Pedido (0)</button>
+          <button class="btn btn-outline btn-sm admin-only" style="color:#166534;border-color:#166534" id="btn-faturar-lote" onclick="abrirModalFaturarLote()">💰 Marcar Faturado (0)</button>
           <button class="btn btn-primary" onclick="abrirModalPedido()">+ Novo Pedido</button>
         </div>
       </div>
@@ -454,6 +455,14 @@ tbody td{padding:11px 16px;font-size:14px}
               <option value="EX">Em Separação</option>
               <option value="CC">Concluído</option>
               <option value="Cancelado">Cancelado</option>
+            </select>
+          </div>
+          <div class="filtro-group">
+            <label>Faturamento</label>
+            <select id="f-faturado" onchange="renderPedidos()">
+              <option value="">Todos</option>
+              <option value="sim">✅ Já faturados</option>
+              <option value="nao">⏳ Ainda não faturados</option>
             </select>
           </div>
           <div class="filtros-btns">
@@ -628,11 +637,11 @@ tbody td{padding:11px 16px;font-size:14px}
           </select>
           <button class="btn btn-outline btn-sm admin-only" onclick="abrirModalNovoProdutoVendavel()">+ Novo Produto</button>
           <button class="btn btn-primary admin-only" onclick="abrirModalNovoItem()">+ Novo Insumo</button>
-          <button class="btn btn-outline btn-sm admin-only" style="color:#d97706;border-color:#d97706" onclick="verificarReceitasSemProduto()">🔍 Receitas sem Cadastro</button>
-          <button class="btn btn-outline btn-sm admin-only" style="color:#dc2626;border-color:#dc2626" onclick="verificarProdutosSemNome()">🔍 Produtos Sem Nome (invisíveis)</button>
-          <button class="btn btn-outline btn-sm admin-only" style="color:#7c3aed;border-color:#7c3aed" onclick="verificarInsumosSemFornecedor()">🔍 Insumos Sem Fornecedor</button>
-          <button class="btn btn-outline btn-sm admin-only" style="color:#b91c1c;border-color:#b91c1c" onclick="verificarPrecosAbaixoMinimo()">🔍 Itens Bloqueados p/ Venda (Preço)</button>
-          <button class="btn btn-outline btn-sm" style="color:#1a5c1a;border-color:#1a5c1a" onclick="imprimirEtiquetaLogoAplic()">🏷️ Etiqueta Logo Aplic</button>
+          <button class="btn btn-outline btn-sm admin-only" style="display:none;color:#d97706;border-color:#d97706" onclick="verificarReceitasSemProduto()">🔍 Receitas sem Cadastro</button>
+          <button class="btn btn-outline btn-sm admin-only" style="display:none;color:#dc2626;border-color:#dc2626" onclick="verificarProdutosSemNome()">🔍 Produtos Sem Nome (invisíveis)</button>
+          <button class="btn btn-outline btn-sm admin-only" style="display:none;color:#7c3aed;border-color:#7c3aed" onclick="verificarInsumosSemFornecedor()">🔍 Insumos Sem Fornecedor</button>
+          <button class="btn btn-outline btn-sm admin-only" style="display:none;color:#b91c1c;border-color:#b91c1c" onclick="verificarPrecosAbaixoMinimo()">🔍 Itens Bloqueados p/ Venda (Preço)</button>
+          <button class="btn btn-outline btn-sm admin-only" style="display:none;color:#1a5c1a;border-color:#1a5c1a" onclick="imprimirEtiquetaLogoAplic()">🏷️ Etiqueta Logo Aplic</button>
         </div>
       </div>
       <div id="receitas-sem-produto-resultado"></div>
@@ -665,6 +674,7 @@ tbody td{padding:11px 16px;font-size:14px}
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('estoque-minimo',this)">🔴 Abaixo do Mínimo</button>
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('diagnostico-consumo',this)">🩺 Diagnóstico de Consumo (OPs)</button>
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('mrp',this)">📈 MRP — Necessidade de Compra</button>
+          <button class="btn btn-outline btn-sm rel-btn admin-only" onclick="mostrarRelatorio('comissionamento',this)">💰 Comissionamento</button>
         </div>
 
         <!-- Filtros específicos do relatório Abaixo do Mínimo -->
@@ -1525,6 +1535,12 @@ tbody td{padding:11px 16px;font-size:14px}
         </select>
       </div>
     </div>
+    <div class="form-row" id="vend-comissao-row" style="display:none">
+      <div class="form-group" style="max-width:220px">
+        <label>% de Comissão</label>
+        <input type="number" id="vend-comissao" min="0" max="100" step="0.01" placeholder="ex: 3,5">
+      </div>
+    </div>
     <div id="vend-permissoes-wrap" style="display:none;margin-top:6px;border:1px solid var(--border);border-radius:10px;padding:12px;max-height:280px;overflow-y:auto">
       <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Marque o que esse usuário pode <strong>ver</strong> e/ou <strong>editar</strong> em cada área do sistema. "Editar" sem "Ver" não faz sentido — marcando Editar, o Ver é marcado automaticamente.</div>
       <table style="width:100%;font-size:12px;border-collapse:collapse">
@@ -1718,6 +1734,20 @@ tbody td{padding:11px 16px;font-size:14px}
 </div>
 
 <!-- MODAL MESCLAR CLIENTES DUPLICADOS -->
+<div class="modal-overlay" id="modal-faturar-pedido">
+  <div class="modal" style="max-width:420px">
+    <button class="modal-close" onclick="fecharModal('modal-faturar-pedido')">×</button>
+    <div class="modal-title">💰 Marcar Pedido como Faturado</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px">Informe a data em que a nota fiscal foi emitida no W3 — pode ser diferente de hoje.</div>
+    <input type="hidden" id="faturar-pedido-id">
+    <div class="form-group">
+      <label>Data do Faturamento</label>
+      <input type="date" id="faturar-pedido-data">
+    </div>
+    <button class="btn btn-primary" style="margin-top:10px" onclick="confirmarFaturamentoPedido()">✅ Confirmar</button>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-mesclar-cliente">
   <div class="modal" style="max-width:640px">
     <button class="modal-close" onclick="fecharModal('modal-mesclar-cliente')">×</button>
@@ -2166,6 +2196,7 @@ function lerPermissoesTabela(){
 function atualizarVisibilidadePermissoes(){
   const tipo = document.getElementById('vend-tipo').value;
   document.getElementById('vend-permissoes-wrap').style.display = tipo==='personalizado' ? 'block' : 'none';
+  document.getElementById('vend-comissao-row').style.display = tipo==='vendedor' ? 'flex' : 'none';
 }
 
 // Aplica visibilidade do menu lateral (e dos grupos) conforme as permissões do usuário logado
@@ -2692,6 +2723,25 @@ async function renderPainel(){
     }
   } catch(e){}
 
+  // Total faturado do PRÓPRIO vendedor no mês — visível só pra quem não é admin/expedição
+  // (vendedor comum), e mostra só as vendas dele mesmo, nunca da empresa toda.
+  let totalFaturadoMeu = 0, pedidosFaturadosMeu = 0;
+  const mostrarFaturadoMeu = !usuarioLogado.admin && !ehExpedicao();
+  if(mostrarFaturadoMeu){
+    try {
+      const snapFat = await db.ref('pedidos').orderByChild('faturado').equalTo(true).once('value');
+      const todosFat = snapFat.val() || {};
+      Object.values(todosFat).forEach(p => {
+        if(p.vendedor_id !== usuarioLogado.id) return;
+        if(!p.data_faturamento) return;
+        const df = new Date(p.data_faturamento); df.setHours(0,0,0,0);
+        if(df < mesInicio) return;
+        totalFaturadoMeu += Number(p.total||0);
+        pedidosFaturadosMeu++;
+      });
+    } catch(e){}
+  }
+
   const ocultarValoresPainel = ehExpedicao();
   document.getElementById('dash-cards').innerHTML = ocultarValoresPainel ? `
     <div class="dash-card"><div class="dash-card-label">Pedidos Hoje</div><div class="dash-card-value accent">${pedidosHoje}</div></div>
@@ -2700,6 +2750,7 @@ async function renderPainel(){
     <div class="dash-card"><div class="dash-card-label">Pedidos Hoje</div><div class="dash-card-value accent">${pedidosHoje}</div></div>
     <div class="dash-card"><div class="dash-card-label">Total do Mês</div><div class="dash-card-value success">${fmtMoeda(totalMes)}</div></div>
     <div class="dash-card"><div class="dash-card-label">Pedidos do Mês</div><div class="dash-card-value">${pedidosMes}</div></div>
+    ${mostrarFaturadoMeu ? `<div class="dash-card"><div class="dash-card-label">💰 Faturado no Mês (Minhas Vendas)</div><div class="dash-card-value success">${fmtMoeda(totalFaturadoMeu)}</div><div style="font-size:11px;color:var(--muted);margin-top:2px">${pedidosFaturadosMeu} pedido(s)</div></div>` : ''}
   `;
 
   // Clientes novos pendentes de cadastro no W3 — visível só pra admin, direto no painel
@@ -2752,7 +2803,7 @@ async function renderPainel(){
       <div class="pedido-card">
         <div class="pedido-card-header">
           <div>
-            <div class="pedido-card-num">#${p.numero} ${statusBadge(p.status)}</div>
+            <div class="pedido-card-num">#${p.numero} ${statusBadge(p.status)} ${p.faturado?'<span class="badge" style="background:#dcfce7;color:#16a34a;font-size:10px">💰</span>':''}</div>
             <div style="font-size:12px;color:var(--muted);margin-top:2px">${fmtData(p.data)}</div>
           </div>
           <div style="text-align:right">
@@ -2818,6 +2869,8 @@ function toggleSelecaoPedido(id, checked){
 function atualizarBotaoImprimirPedidos(){
   const btn = document.getElementById('btn-imprimir-pedidos');
   if(btn) btn.textContent = `🖨️ Imprimir Pedido (${pedidosSelecionadosImprimir.size})`;
+  const btnFat = document.getElementById('btn-faturar-lote');
+  if(btnFat) btnFat.textContent = `💰 Marcar Faturado (${pedidosSelecionadosImprimir.size})`;
 }
 
 let pedidosPaginaAtual = []; // ids da página/filtro atualmente exibida, pra marcar/desmarcar todos
@@ -2912,6 +2965,7 @@ async function renderPedidos(){
   const fCliente = (document.getElementById('f-cliente').value||'').toLowerCase();
   const fProduto = (document.getElementById('f-produto').value||'').toLowerCase();
   const fStatus  = document.getElementById('f-status').value;
+  const fFaturado = document.getElementById('f-faturado')?.value || '';
   const fVendedor = (document.getElementById('f-vendedor')?.value || '').toLowerCase().trim();
 
   // Popula a datalist de vendedores (apenas para admin) uma vez, com base nos usuários cadastrados
@@ -2955,6 +3009,8 @@ async function renderPedidos(){
     }
     if(fStatus==='ativos'){ if(p.status!=='AA' && p.status!=='AP' && p.status!=='EX') return false; }
     else if(fStatus && p.status!==fStatus) return false;
+    if(fFaturado==='sim' && !p.faturado) return false;
+    if(fFaturado==='nao' && p.faturado) return false;
     if(fVendedor && !(p.vendedor_nome||'').toLowerCase().includes(fVendedor)) return false;
     if(fCliente && !p.cliente_nome.toLowerCase().includes(fCliente)) return false;
     if(fProduto){
@@ -2978,19 +3034,40 @@ async function renderPedidos(){
   const totalValor = pedidos.filter(p=>p.status!=='Cancelado').reduce((s,p)=>s+(p.total||0),0);
   const mesAtual = new Date().getMonth();
   const anoAtual = new Date().getFullYear();
-  // Total do mês = TODOS os pedidos do mês vigente não cancelados (ignora filtros ativos)
+  // Pedidos colocados no mês = TODOS os pedidos CRIADOS no mês vigente, não cancelados
+  // (ignora filtros ativos na tela) — isso é diferente de "faturado", que é calculado à parte.
   const totalMes = todosPedidos.filter(p=>{
     if(p.status==='Cancelado') return false;
     const d = new Date(p.data);
     return d.getMonth()===mesAtual && d.getFullYear()===anoAtual;
   }).reduce((s,p)=>s+(p.total||0),0);
+
+  // Faturado no mês — busca própria, separada da lista principal (que é filtrada pela
+  // data de CRIAÇÃO do pedido, não pela de faturamento — um pedido criado mês passado
+  // mas faturado agora não apareceria na lista principal, por isso essa conta é à parte).
+  let totalFaturadoMes = 0, qtdFaturadosMes = 0;
+  try {
+    const mesInicioStr = new Date(anoAtual, mesAtual, 1).toISOString().split('T')[0];
+    const snapFat = await db.ref('pedidos').orderByChild('faturado').equalTo(true).once('value');
+    const todosFat = snapFat.val() || {};
+    Object.values(todosFat).forEach(p => {
+      if(!vejaTudoDoModulo('pedidos') && p.vendedor_id!==usuarioLogado.id) return;
+      if(!p.data_faturamento) return;
+      const df = p.data_faturamento.split('T')[0];
+      if(df < mesInicioStr) return;
+      totalFaturadoMes += Number(p.total||0);
+      qtdFaturadosMes++;
+    });
+  } catch(e){}
+
   // Usuários sem permissão de ver valores financeiros
   const ocultarValores = ehExpedicao();
 
   document.getElementById('resumo-pedidos').innerHTML = ocultarValores ? '' : `
     <div class="resumo-card"><span>Pedidos no filtro</span><strong>${pedidos.length}</strong></div>
     <div class="resumo-card destaque"><span>Valor total filtro</span><strong>${fmtMoeda(totalValor)}</strong></div>
-    <div class="resumo-card destaque"><span>Total do mês</span><strong>${fmtMoeda(totalMes)}</strong></div>
+    <div class="resumo-card destaque"><span>Pedidos colocados no mês</span><strong>${fmtMoeda(totalMes)}</strong></div>
+    <div class="resumo-card destaque"><span>💰 Faturado no mês</span><strong>${fmtMoeda(totalFaturadoMes)}</strong><div style="font-size:11px;color:var(--muted);margin-top:2px">${qtdFaturadosMes} pedido(s)</div></div>
   `;
 
   const total = pedidos.length;
@@ -3015,7 +3092,7 @@ async function renderPedidos(){
           <div style="display:flex;align-items:flex-start;gap:8px">
             <input type="checkbox" class="check-imprimir-pedido" data-id="${p.id}" ${pedidosSelecionadosImprimir.has(p.id)?'checked':''} onchange="toggleSelecaoPedido('${p.id}',this.checked)" style="margin-top:4px;width:16px;height:16px;cursor:pointer;flex-shrink:0">
             <div>
-              <div class="pedido-card-num">#${p.numero} ${statusBadge(p.status)}</div>
+              <div class="pedido-card-num">#${p.numero} ${statusBadge(p.status)} ${p.faturado?'<span class="badge" style="background:#dcfce7;color:#16a34a;font-size:10px">💰 Faturado</span>':''}</div>
               <div style="font-size:12px;color:var(--muted);margin-top:2px">${fmtData(p.data)}</div>
             </div>
           </div>
@@ -3325,6 +3402,10 @@ async function verPedido(id){
         ${p.status==='Orçamento'?'<button class="btn btn-success btn-sm" style="margin-left:12px" onclick="confirmarOrcamento(\''+id+'\')">Confirmar como Pedido</button>':''}
       </div>
       <div style="font-size:13px;color:var(--muted);margin-bottom:4px">${fmtData(p.data)} · Vendedor: ${p.vendedor_nome}</div>
+      ${p.faturado ? `<div style="font-size:12px;color:#166534;background:#f0fdf4;border:1px solid #bbf7d0;display:inline-flex;align-items:center;gap:8px;padding:4px 10px;border-radius:6px;margin-bottom:10px">
+        💰 Faturado em ${fmtData(p.data_faturamento)}
+        ${usuarioLogado.admin?`<button style="background:none;border:none;color:#166534;text-decoration:underline;cursor:pointer;font-size:12px;padding:0" onclick="abrirModalFaturarPedido('${id}')">editar data</button>`:''}
+      </div>` : ''}
       ${p.veio_de_orcamento ? `<div style="font-size:12px;color:#7c3aed;background:#ede9fe;display:inline-block;padding:3px 10px;border-radius:6px;margin-bottom:10px">📋 Convertido do Orçamento #${p.numero_orcamento_origem||'—'}${p.data_orcamento_origem?', feito em '+fmtData(p.data_orcamento_origem):''}</div>` : ''}
       <div class="edit-lock ${bloqueado?'locked':'can-edit'}" style="margin-bottom:16px">
         ${bloqueado?'🔒 Bloqueado para edição':(tempoRestante>0?'✏️ Editável por mais '+tempoRestante+' min':'✏️ Editável (prazo normal de 1h já passou — liberado para Admin/Expedição)')}
@@ -3402,6 +3483,7 @@ async function verPedido(id){
         ${usuarioLogado.admin&&p.status==='AA'?`<button class="btn btn-primary btn-sm" onclick="aprovarPedido('${id}')">✅ Aprovar Pedido</button>`:''}
         ${(usuarioLogado.admin||ehExpedicao())&&(p.status==='EX'||p.status==='CC')?`<button class="btn btn-outline btn-sm" style="color:#7c3aed;border-color:#7c3aed" onclick="fecharModal('modal-ver-pedido');abrirModalEtiqueta('${id}')">🏷️ Imprimir Etiqueta</button>`:''}
         ${usuarioLogado.admin&&p.status==='CC'?`<button class="btn btn-outline btn-sm" style="color:#dc2626;border-color:#dc2626" onclick="cancelarBipagemPedido('${id}')">↺ Cancelar Bipagem</button>`:''}
+        ${usuarioLogado.admin&&p.status!=='Cancelado'&&p.status!=='Orçamento'&&!p.faturado?`<button class="btn btn-outline btn-sm" style="color:#166534;border-color:#166534" onclick="abrirModalFaturarPedido('${id}')">💰 Marcar como Faturado</button>`:''}
         <button class="btn btn-outline btn-sm" onclick="clonarPedido('${id}')">📑 Clonar Pedido</button>
         <button class="btn btn-outline btn-sm" onclick="imprimirCapaPedidoVenda('${id}')">🖨️ Imprimir Pedido</button>
         <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600" onclick="gerarImagemPedido('${id}')">📄 Gerar PDF p/ Enviar</button>
@@ -3437,6 +3519,86 @@ async function abrirLogBipagem(pedidoId){
     </div>
   `;
   abrirModal('modal-etiqueta');
+}
+
+// Marca um pedido como Faturado (nota fiscal emitida no W3) — data ajustável,
+// já que a emissão pode ter acontecido em dia diferente de quando é registrada aqui.
+async function abrirModalFaturarPedido(id){
+  if(!usuarioLogado?.admin){ toast('Acesso restrito — só administradores','error'); return; }
+  faturarLoteIds = null;
+  const snap = await db.ref('pedidos/'+id).once('value');
+  const p = snap.val(); if(!p) return;
+  document.getElementById('faturar-pedido-id').value = id;
+  document.getElementById('faturar-pedido-data').value = p.data_faturamento ? p.data_faturamento.split('T')[0] : new Date().toISOString().split('T')[0];
+  document.querySelector('#modal-faturar-pedido .modal-title').textContent = '💰 Marcar Pedido como Faturado';
+  abrirModal('modal-faturar-pedido');
+}
+
+// Marca vários pedidos como Faturado de uma vez, todos com a MESMA data — reaproveita
+// a seleção de checkboxes já usada pra imprimir em lote.
+let faturarLoteIds = null;
+async function abrirModalFaturarLote(){
+  if(!usuarioLogado?.admin){ toast('Acesso restrito — só administradores','error'); return; }
+  if(!pedidosSelecionadosImprimir.size){ toast('Marque ao menos um pedido para marcar como faturado','error'); return; }
+  faturarLoteIds = Array.from(pedidosSelecionadosImprimir);
+  document.getElementById('faturar-pedido-id').value = '';
+  document.getElementById('faturar-pedido-data').value = new Date().toISOString().split('T')[0];
+  document.querySelector('#modal-faturar-pedido .modal-title').textContent = `💰 Marcar ${faturarLoteIds.length} Pedido(s) como Faturado`;
+  abrirModal('modal-faturar-pedido');
+}
+
+async function confirmarFaturamentoPedido(){
+  if(!usuarioLogado?.admin){ toast('Acesso restrito — só administradores','error'); return; }
+  const dataEscolhida = document.getElementById('faturar-pedido-data').value;
+  if(!dataEscolhida){ toast('Escolha a data do faturamento','error'); return; }
+
+  // Modo em lote — vários pedidos, mesma data
+  if(faturarLoteIds && faturarLoteIds.length){
+    let count = 0;
+    for(const id of faturarLoteIds){
+      try {
+        const snap = await db.ref('pedidos/'+id).once('value');
+        const p = snap.val(); if(!p) continue;
+        const jaEstavaFaturado = !!p.faturado;
+        const historico = p.historico_edicoes || [];
+        historico.push({
+          ts: Date.now(), usuario_nome: usuarioLogado.nome, usuario_tipo: 'admin',
+          alteracoes: [jaEstavaFaturado
+            ? `💰 Data de faturamento alterada (em lote): ${fmtData(p.data_faturamento)} → ${fmtData(dataEscolhida)}`
+            : `💰 Pedido marcado como Faturado em lote, em ${fmtData(dataEscolhida)}`]
+        });
+        await db.ref('pedidos/'+id).update({ faturado: true, data_faturamento: dataEscolhida, historico_edicoes: historico });
+        count++;
+      } catch(e){ /* segue pros próximos mesmo se um falhar */ }
+    }
+    faturarLoteIds = null;
+    pedidosSelecionadosImprimir.clear();
+    fecharModal('modal-faturar-pedido');
+    toast(`✓ ${count} pedido(s) marcado(s) como faturado(s)`,'success');
+    renderPedidos();
+    return;
+  }
+
+  // Modo individual — um único pedido (aberto pela tela de detalhes)
+  const id = document.getElementById('faturar-pedido-id').value;
+  if(!id) return;
+  try {
+    const snap = await db.ref('pedidos/'+id).once('value');
+    const p = snap.val(); if(!p) return;
+    const jaEstavaFaturado = !!p.faturado;
+    const historico = p.historico_edicoes || [];
+    historico.push({
+      ts: Date.now(), usuario_nome: usuarioLogado.nome,
+      usuario_tipo: usuarioLogado.admin ? 'admin' : (usuarioLogado.tipo || 'vendedor'),
+      alteracoes: [jaEstavaFaturado
+        ? `💰 Data de faturamento alterada: ${fmtData(p.data_faturamento)} → ${fmtData(dataEscolhida)}`
+        : `💰 Pedido marcado como Faturado em ${fmtData(dataEscolhida)}`]
+    });
+    await db.ref('pedidos/'+id).update({ faturado: true, data_faturamento: dataEscolhida, historico_edicoes: historico });
+    fecharModal('modal-faturar-pedido');
+    toast('✓ Faturamento registrado','success');
+    verPedido(id);
+  } catch(e){ toast('Erro ao registrar faturamento: '+e.message,'error'); }
 }
 
 async function aprovarPedido(id){
@@ -5380,7 +5542,7 @@ async function renderProducao(){
         <span class="badge" style="background:${si.bg};color:${si.cor}">${si.label}</span>
       </div>
       <div class="pedido-card-info">📦 Quantidade: <span>${op.qtd_produzida||0} / ${op.qtd_solicitada}</span> (${pct}%)</div>
-      <div class="pedido-card-info">📅 Criada em: <span>${new Date(op.ts_criacao).toLocaleDateString('pt-BR')}</span></div>
+      <div class="pedido-card-info">📅 Criada em: <span>${new Date(op.ts_criacao).toLocaleString('pt-BR')}</span></div>
       <div style="background:#f0f0f0;border-radius:6px;height:6px;margin-top:8px;overflow:hidden">
         <div style="background:${urgentePendente?'#dc2626':si.cor};height:100%;width:${pct}%"></div>
       </div>
@@ -5702,6 +5864,11 @@ async function verDetalheOP(key){
       <span class="badge" style="background:${si.bg};color:${si.cor}">${si.label}</span>
       ${op.pedido_origem?` · Pedido de origem: <strong>${op.pedido_origem}</strong>`:''}
     </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.8">
+      📅 Criada em: <strong>${op.ts_criacao?new Date(op.ts_criacao).toLocaleString('pt-BR'):'—'}</strong><br>
+      ▶️ Iniciada em: <strong>${op.ts_iniciada?new Date(op.ts_iniciada).toLocaleString('pt-BR'):'—'}</strong><br>
+      ✅ Concluída em: <strong>${op.ts_conclusao?new Date(op.ts_conclusao).toLocaleString('pt-BR'):'—'}</strong>
+    </div>
     <div class="dashboard-cards" style="margin-bottom:16px">
       <div class="dash-card"><div class="dash-card-label">Código</div><div class="dash-card-value" style="font-size:16px">${op.produto_codigo}</div></div>
       ${blocoQuantidade}
@@ -5746,7 +5913,8 @@ async function salvarQtdEIniciar(key){
   await db.ref('ordens_producao/'+key).update({
     qtd_solicitada: novaQtd,
     status: 'em_producao',
-    responsavel_producao: responsavelProducao
+    responsavel_producao: responsavelProducao,
+    ts_iniciada: Date.now()
   });
   fecharModal('modal-op-detalhe');
   await renderProducao();
@@ -10241,7 +10409,7 @@ async function renderVendedores(){
 
 function abrirModalVendedor(){
   if(!temPermissaoEditar('vendedores')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
-  ['vend-id','vend-nome','vend-user','vend-pass','vend-tel','vend-email'].forEach(id=>document.getElementById(id).value='');
+  ['vend-id','vend-nome','vend-user','vend-pass','vend-tel','vend-email','vend-comissao'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('vend-tipo').value = 'vendedor';
   montarPermissoesTabela({});
   atualizarVisibilidadePermissoes();
@@ -10263,6 +10431,7 @@ async function editarVendedor(id){
   document.getElementById('vend-tel').value = v.telefone || '';
   document.getElementById('vend-email').value = v.email || '';
   document.getElementById('vend-tipo').value = v.tipo || (v.admin ? 'admin' : 'vendedor');
+  document.getElementById('vend-comissao').value = v.comissao_pct || '';
   montarPermissoesTabela(v.permissoes || {});
   atualizarVisibilidadePermissoes();
   document.getElementById('modal-vendedor-titulo').textContent = 'Editar Usuário';
@@ -10280,6 +10449,7 @@ async function salvarVendedor(){
   const tipo = document.getElementById('vend-tipo').value;
   const admin = tipo==='admin';
   const permissoes = tipo==='personalizado' ? lerPermissoesTabela() : null;
+  const comissaoPct = tipo==='vendedor' ? (Number(document.getElementById('vend-comissao').value)||0) : 0;
   if(!nome||!user){ toast('Nome e usuário são obrigatórios','error'); return; }
 
   if(id){
@@ -10287,7 +10457,7 @@ async function salvarVendedor(){
     const dados = {
       nome, usuario:user, telefone:document.getElementById('vend-tel').value,
       email:document.getElementById('vend-email').value, admin, tipo,
-      permissoes: permissoes || null
+      permissoes: permissoes || null, comissao_pct: comissaoPct
     };
     if(pass) dados.senha = pass; // só atualiza a senha se foi digitada uma nova
     await db.ref('usuarios/'+id).update(dados);
@@ -10302,7 +10472,7 @@ async function salvarVendedor(){
     await db.ref('usuarios/'+novoId).set({ id:novoId, nome, usuario:user, senha:pass,
       telefone:document.getElementById('vend-tel').value,
       email:document.getElementById('vend-email').value, admin, tipo,
-      permissoes: permissoes || null, ativo:true });
+      permissoes: permissoes || null, comissao_pct: comissaoPct, ativo:true });
     fecharModal('modal-vendedor'); renderVendedores();
     toast(`✓ Usuário ${nome} cadastrado!`,'success');
   }
@@ -11516,7 +11686,7 @@ function mostrarRelatorio(tipo, btnEl){
     tipo === 'estoque-minimo' ? 'flex' : 'none';
   // Diagnóstico de Consumo não usa período/vendedor/agrupamento — esconde só esses campos,
   // mantendo visíveis os botões Gerar/Excel que ficam no mesmo container
-  const escondePeriodoVendedorAgrupar = tipo === 'diagnostico-consumo' || tipo === 'mrp';
+  const escondePeriodoVendedorAgrupar = tipo === 'diagnostico-consumo' || tipo === 'mrp' || tipo === 'comissionamento';
   document.querySelector('#rel-filtros .filtro-group:nth-child(1)').style.display = escondePeriodoVendedorAgrupar ? 'none' : '';
   document.querySelector('#rel-filtros .filtro-group:nth-child(2)').style.display = escondePeriodoVendedorAgrupar ? 'none' : '';
 
@@ -11539,14 +11709,17 @@ async function gerarRelatorio(){
   const el = document.getElementById('rel-conteudo');
   el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:40px">⏳ Carregando...</div>';
 
-  const snap = await db.ref('pedidos').once('value');
+  const snap = await db.ref('pedidos').orderByChild('faturado').equalTo(true).once('value');
   const todos = snap.val() || {};
 
-  // Filtra por período e status concluído
+  // Filtra por FATURAMENTO (não mais pela data de criação) — todos os relatórios de
+  // vendas passam a considerar só pedidos já faturados, usando a data da nota fiscal
+  // como referência de período, não a data em que o pedido foi criado no sistema.
   const pedidos = Object.values(todos).filter(p => {
-    if(!['CC','Confirmado'].includes(p.status)) return false;
-    if(dataIni && p.data < dataIni) return false;
-    if(dataFim && p.data > dataFim) return false;
+    if(!p.faturado || !p.data_faturamento) return false;
+    const df = p.data_faturamento.split('T')[0];
+    if(dataIni && df < dataIni) return false;
+    if(dataFim && df > dataFim) return false;
     if(vendedorFiltro && p.vendedor_nome !== vendedorFiltro) return false;
     return true;
   });
@@ -11565,6 +11738,7 @@ async function gerarRelatorio(){
     case 'sugestao-jornal': await relSugestaoJornal(pedidos, el); break;
     case 'diagnostico-consumo': await relDiagnosticoConsumoInsumos(el); break;
     case 'mrp': await relMRP(el); break;
+    case 'comissionamento': await relComissionamento(el); break;
   }
 }
 
@@ -11675,19 +11849,20 @@ function relVendasCliente(pedidos, el){
 
 // ── Clientes Inativos ──
 async function relClientesInativos(dataIni, dataFim, vendedorFiltro, el){
-  const snap = await db.ref('pedidos').once('value');
+  const snap = await db.ref('pedidos').orderByChild('faturado').equalTo(true).once('value');
   const todos = Object.values(snap.val()||{});
   // Data de referência: se filtrou período, usa a data fim; senão, hoje
   const refFim = dataFim || new Date().toISOString().split('T')[0];
   const refIni = dataIni;
-  // Clientes que compraram neste período
+  // Clientes que compraram (faturado) neste período
   const compraramNoPeriodo = new Set();
-  todos.filter(p=>['CC','Confirmado'].includes(p.status)&&(!refIni||p.data>=refIni)&&p.data<=refFim).forEach(p=>compraramNoPeriodo.add(p.cliente_nome));
-  // Última compra de cada cliente (histórico completo)
+  todos.filter(p=>p.faturado && p.data_faturamento && (!refIni||p.data_faturamento.split('T')[0]>=refIni) && p.data_faturamento.split('T')[0]<=refFim).forEach(p=>compraramNoPeriodo.add(p.cliente_nome));
+  // Última compra faturada de cada cliente (histórico completo)
   const ultimaCompra = {};
-  todos.filter(p=>['CC','Confirmado'].includes(p.status)).forEach(p=>{
-    if(!ultimaCompra[p.cliente_nome]||p.data>ultimaCompra[p.cliente_nome].data)
-      ultimaCompra[p.cliente_nome]={data:p.data,vendedor:p.vendedor_nome};
+  todos.filter(p=>p.faturado && p.data_faturamento).forEach(p=>{
+    const df = p.data_faturamento.split('T')[0];
+    if(!ultimaCompra[p.cliente_nome]||df>ultimaCompra[p.cliente_nome].data)
+      ultimaCompra[p.cliente_nome]={data:df,vendedor:p.vendedor_nome};
   });
   // Clientes cadastrados que NÃO compraram no período
   let clientes = CLIENTES_DB.filter(c=>!c.inativo&&!compraramNoPeriodo.has(c.nome));
@@ -12069,6 +12244,133 @@ function exportarRelatorioExcelEstoqueMinimo(lista){
 // estoque já a caminho (pedidos de compra em aberto), cobertura em dias, e cruza
 // com o prazo de entrega do fornecedor pra sugerir QUANTO e QUANDO comprar.
 // ══════════════════════════════════════════════
+// ══════════════════════════════════════════════
+// ══ COMISSIONAMENTO ══
+// Calcula a comissão de cada vendedor sobre os pedidos FATURADOS (não sobre a data de
+// criação do pedido) — usa a % de comissão cadastrada individualmente em cada vendedor.
+// ══════════════════════════════════════════════
+async function relComissionamento(el){
+  const hoje = new Date();
+  const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().split('T')[0];
+  const fimHoje = hoje.toISOString().split('T')[0];
+  el.innerHTML = `
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
+      <div class="form-group" style="margin:0">
+        <label>Faturado de</label>
+        <input type="date" id="com-data-ini" value="${inicioMes}">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>até</label>
+        <input type="date" id="com-data-fim" value="${fimHoje}">
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="calcularComissionamento()">🔄 Calcular</button>
+    </div>
+    <div id="comissionamento-resultado"></div>
+  `;
+  await calcularComissionamento();
+}
+
+async function calcularComissionamento(){
+  const el = document.getElementById('comissionamento-resultado');
+  el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px">⏳ Calculando...</div>';
+
+  const dataIni = document.getElementById('com-data-ini').value;
+  const dataFim = document.getElementById('com-data-fim').value;
+
+  // Busca só os pedidos FATURADOS (não todo o histórico) — filtra pelo campo
+  // data_faturamento, que é a data real da nota fiscal, não a data de criação do pedido.
+  const snap = await db.ref('pedidos').orderByChild('faturado').equalTo(true).once('value');
+  const todos = snap.val() || {};
+  const faturados = Object.values(todos).filter(p => {
+    if(!p.data_faturamento) return false;
+    const df = p.data_faturamento.split('T')[0];
+    return df >= dataIni && df <= dataFim;
+  });
+
+  if(!faturados.length){
+    el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--muted)">Nenhum pedido faturado encontrado nesse período.</div>';
+    return;
+  }
+
+  // Busca a % de comissão cadastrada de cada vendedor
+  const snapUsuarios = await db.ref('usuarios').once('value');
+  const usuarios = snapUsuarios.val() || {};
+  const comissaoPorVendedorId = {};
+  Object.values(usuarios).forEach(u => { if(u.id) comissaoPorVendedorId[u.id] = Number(u.comissao_pct)||0; });
+
+  // Agrupa por vendedor
+  const porVendedor = {};
+  faturados.forEach(p => {
+    const vid = p.vendedor_id || '_sem_vendedor';
+    if(!porVendedor[vid]){
+      porVendedor[vid] = { nome: p.vendedor_nome || '(sem vendedor)', totalFaturado: 0, qtdPedidos: 0, comissaoPct: comissaoPorVendedorId[vid] || 0 };
+    }
+    porVendedor[vid].totalFaturado += Number(p.total||0);
+    porVendedor[vid].qtdPedidos++;
+  });
+
+  const linhas = Object.values(porVendedor)
+    .map(v => ({ ...v, valorComissao: v.totalFaturado * v.comissaoPct / 100 }))
+    .sort((a,b) => b.totalFaturado - a.totalFaturado);
+
+  const totalGeralFaturado = linhas.reduce((s,l)=>s+l.totalFaturado,0);
+  const totalGeralComissao = linhas.reduce((s,l)=>s+l.valorComissao,0);
+
+  comissionamentoCache = linhas;
+
+  el.innerHTML = `
+    <div style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <span style="font-size:13px;color:var(--muted)">${linhas.length} vendedor(es) · ${faturados.length} pedido(s) faturado(s) no período</span>
+      <button class="btn btn-outline btn-sm" onclick="exportarComissionamentoExcel()">📥 Exportar Excel</button>
+    </div>
+    <div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead style="background:var(--primary);color:rgba(255,255,255,.85)"><tr>
+        <th style="padding:8px 10px;text-align:left">Vendedor</th>
+        <th style="padding:8px 10px;text-align:center">Pedidos Faturados</th>
+        <th style="padding:8px 10px;text-align:right">Total Faturado</th>
+        <th style="padding:8px 10px;text-align:center">% Comissão</th>
+        <th style="padding:8px 10px;text-align:right">Valor da Comissão</th>
+      </tr></thead>
+      <tbody>
+        ${linhas.map((l,idx)=>`
+          <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
+            <td style="padding:7px 10px;font-weight:700">${l.nome}</td>
+            <td style="padding:7px 10px;text-align:center">${l.qtdPedidos}</td>
+            <td style="padding:7px 10px;text-align:right">${fmtMoeda(l.totalFaturado)}</td>
+            <td style="padding:7px 10px;text-align:center">${l.comissaoPct ? l.comissaoPct+'%' : '<span style="color:#dc2626">sem % cadastrada</span>'}</td>
+            <td style="padding:7px 10px;text-align:right;font-weight:700;color:var(--success)">${fmtMoeda(l.valorComissao)}</td>
+          </tr>`).join('')}
+      </tbody>
+      <tfoot>
+        <tr style="font-weight:700;background:var(--bg)">
+          <td style="padding:8px 10px">Total Geral</td>
+          <td style="padding:8px 10px;text-align:center">${faturados.length}</td>
+          <td style="padding:8px 10px;text-align:right">${fmtMoeda(totalGeralFaturado)}</td>
+          <td></td>
+          <td style="padding:8px 10px;text-align:right;color:var(--success)">${fmtMoeda(totalGeralComissao)}</td>
+        </tr>
+      </tfoot>
+    </table></div>
+    <div style="font-size:11px;color:var(--muted);margin-top:10px">
+      Calculado sobre pedidos <strong>faturados</strong> no período (data da nota fiscal), não sobre a data de criação do pedido. Vendedores com "sem % cadastrada" precisam ter a comissão configurada em Admin → Usuários → Editar.
+    </div>
+  `;
+}
+
+let comissionamentoCache = [];
+function exportarComissionamentoExcel(){
+  const dados = comissionamentoCache.map(l=>({
+    'Vendedor': l.nome, 'Pedidos Faturados': l.qtdPedidos,
+    'Total Faturado': Number(l.totalFaturado.toFixed(2)), '% Comissão': l.comissaoPct,
+    'Valor da Comissão': Number(l.valorComissao.toFixed(2))
+  }));
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(dados);
+  XLSX.utils.book_append_sheet(wb, ws, 'Comissionamento');
+  XLSX.writeFile(wb, `comissionamento_${new Date().toISOString().split('T')[0]}.xlsx`);
+}
+
 async function relMRP(el){
   el.innerHTML = `
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
