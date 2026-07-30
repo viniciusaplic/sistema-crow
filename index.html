@@ -1095,9 +1095,11 @@ tbody td{padding:11px 16px;font-size:14px}
         <div class="section-title">🚚 Fornecedores</div>
         <div class="search-box">
           <input type="text" class="search-input" id="search-fornecedores" placeholder="Buscar fornecedor..." oninput="renderFornecedores()">
+          <button class="btn btn-outline btn-sm" style="color:#d97706;border-color:#d97706" onclick="verificarNomesFornecedorDesatualizados()">🔍 Nomes Desatualizados</button>
           <button class="btn btn-primary" onclick="abrirModalFornecedor()">+ Novo Fornecedor</button>
         </div>
       </div>
+      <div id="fornecedores-nomes-desatualizados-resultado"></div>
       <div class="table-wrap">
         <div id="fornecedores-table"></div>
       </div>
@@ -5761,6 +5763,7 @@ async function salvarFornecedor(){
   if(!nome){ toast('Nome é obrigatório','error'); return; }
 
   const keyExistente = document.getElementById('fornecedor-key').value;
+  const fornecedorAntigo = keyExistente ? FORNECEDORES_DB.find(f=>f.key===keyExistente) : null;
 
   // Ao criar novo, avisar se já existe fornecedor com nome muito parecido
   if(!keyExistente){
@@ -5783,9 +5786,74 @@ async function salvarFornecedor(){
   };
   await db.ref('fornecedores/'+key).set(dados);
   fecharModal('modal-fornecedor');
+
+  // Se o NOME mudou, propaga a renomeação pra todo mundo que guarda uma cópia desse nome
+  // (produtos, insumos e histórico de pedidos de compra) — senão o sistema passa a
+  // enxergar "fornecedor antigo" e "fornecedor novo" como se fossem dois fornecedores
+  // diferentes, e para de achar último preço/código cadastrado nesses vínculos antigos.
+  if(fornecedorAntigo && (fornecedorAntigo.nome||'').trim().toLowerCase() !== nome.toLowerCase()){
+    await propagarRenomeacaoFornecedor(fornecedorAntigo.nome, nome);
+  }
+
   FORNECEDORES_DB = [];
   await renderFornecedores();
   toast(`✓ Fornecedor ${nome} salvo!`,'success');
+}
+
+// Atualiza o NOME do fornecedor em todo lugar que guarda uma cópia dele (não uma referência
+// viva): a lista de fornecedores de cada produto/insumo, o campo legado "fornecedor" do
+// insumo, e o histórico de pedidos de compra já feitos — assim o item continua sendo
+// reconhecido como o mesmo fornecedor depois de renomeado (código padrão certo, último
+// preço de compra encontrado, sem nome duplicado nas listas).
+async function propagarRenomeacaoFornecedor(nomeAntigo, nomeNovo){
+  if(!nomeAntigo || !nomeNovo) return;
+  const nomeAntigoLower = nomeAntigo.trim().toLowerCase();
+  if(nomeAntigoLower === nomeNovo.trim().toLowerCase()) return;
+  if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
+  if(!INSUMOS_DB.length) await carregarInsumosFirebase();
+
+  const updates = {};
+  let qtd = 0;
+
+  PRODUTOS_DB.forEach(p=>{
+    if(!(p.fornecedores||[]).some(f=>(f.nome||'').trim().toLowerCase()===nomeAntigoLower)) return;
+    p.fornecedores = p.fornecedores.map(f=>(f.nome||'').trim().toLowerCase()===nomeAntigoLower ? {...f, nome:nomeNovo} : f);
+    updates[`produtos/${p.codigo}/fornecedores`] = p.fornecedores;
+    qtd++;
+  });
+
+  INSUMOS_DB.forEach(i=>{
+    let mudou = false;
+    if((i.fornecedores||[]).some(f=>(f.nome||'').trim().toLowerCase()===nomeAntigoLower)){
+      i.fornecedores = i.fornecedores.map(f=>(f.nome||'').trim().toLowerCase()===nomeAntigoLower ? {...f, nome:nomeNovo} : f);
+      updates[`insumos/${i.key}/fornecedores`] = i.fornecedores;
+      mudou = true;
+    }
+    if((i.fornecedor||'').trim().toLowerCase()===nomeAntigoLower){
+      i.fornecedor = nomeNovo;
+      updates[`insumos/${i.key}/fornecedor`] = nomeNovo;
+      mudou = true;
+    }
+    if(mudou) qtd++;
+  });
+
+  // Histórico de pedidos de compra — renomeia também, senão o "último preço de compra" e
+  // os filtros por fornecedor param de encontrar os pedidos feitos antes da renomeação
+  try{
+    const snapCompras = await db.ref('pedidos_compra').once('value');
+    const compras = snapCompras.val() || {};
+    Object.keys(compras).forEach(id=>{
+      if((compras[id].fornecedor||'').trim().toLowerCase()===nomeAntigoLower){
+        updates[`pedidos_compra/${id}/fornecedor`] = nomeNovo;
+        qtd++;
+      }
+    });
+  } catch(e){}
+
+  if(Object.keys(updates).length){
+    await db.ref().update(updates);
+    toast(`✓ Nome atualizado em ${qtd} registro(s) vinculado(s) a este fornecedor`,'success');
+  }
 }
 
 async function removerFornecedor(key){
@@ -5801,6 +5869,89 @@ async function removerFornecedor(key){
   FORNECEDORES_DB = [];
   await renderFornecedores();
   toast('✓ Fornecedor removido','success');
+}
+
+// Encontra nomes de fornecedor "presos" em produtos, insumos e pedidos de compra que não
+// batem com nenhum fornecedor cadastrado hoje — normalmente sobra de uma renomeação feita
+// antes desta correção existir (o nome mudou no cadastro, mas ficou uma cópia antiga
+// espalhada nos vínculos). Deixa a pessoa escolher pra qual fornecedor atual cada nome
+// antigo deve virar, e então propaga a correção.
+async function verificarNomesFornecedorDesatualizados(){
+  if(!temPermissaoEditar('fornecedores')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  const el = document.getElementById('fornecedores-nomes-desatualizados-resultado');
+  el.innerHTML = '<div style="padding:12px;color:var(--muted)">⏳ Verificando...</div>';
+
+  if(!FORNECEDORES_DB.length) await carregarFornecedoresFirebase();
+  if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
+  if(!INSUMOS_DB.length) await carregarInsumosFirebase();
+  const nomesAtuais = new Set(FORNECEDORES_DB.map(f=>(f.nome||'').trim().toLowerCase()));
+
+  const ocorrencias = {}; // nomeOriginal (como está gravado) -> contagem
+  function registrar(nome){
+    const limpo = (nome||'').trim();
+    if(!limpo) return;
+    if(nomesAtuais.has(limpo.toLowerCase())) return; // já bate com um fornecedor atual, não é problema
+    ocorrencias[limpo] = (ocorrencias[limpo]||0) + 1;
+  }
+  PRODUTOS_DB.forEach(p => (p.fornecedores||[]).forEach(f=>registrar(f.nome)));
+  INSUMOS_DB.forEach(i => {
+    (i.fornecedores||[]).forEach(f=>registrar(f.nome));
+    registrar(i.fornecedor);
+  });
+  const snapCompras = await db.ref('pedidos_compra').once('value');
+  const compras = snapCompras.val() || {};
+  Object.values(compras).forEach(c => registrar(c.fornecedor));
+
+  const nomesDesatualizados = Object.keys(ocorrencias);
+  if(!nomesDesatualizados.length){
+    el.innerHTML = `
+      <div style="text-align:right;margin:10px 0 6px"><button class="btn btn-outline btn-sm" onclick="document.getElementById('fornecedores-nomes-desatualizados-resultado').innerHTML=''">✕ Fechar</button></div>
+      <div style="padding:12px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534;font-size:13px">✅ Nenhum nome de fornecedor desatualizado encontrado.</div>`;
+    return;
+  }
+
+  const opcoesFornecedores = FORNECEDORES_DB.slice().sort((a,b)=>(a.nome||'').localeCompare(b.nome||''))
+    .map(f=>`<option value="${f.nome}">${f.nome}</option>`).join('');
+
+  el.innerHTML = `
+    <div style="text-align:right;margin:10px 0 6px"><button class="btn btn-outline btn-sm" onclick="document.getElementById('fornecedores-nomes-desatualizados-resultado').innerHTML=''">✕ Fechar</button></div>
+    <div style="padding:12px 14px;margin-bottom:12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;font-size:13px;color:#9a3412">
+      ⚠️ <strong>${nomesDesatualizados.length} nome(s)</strong> aparecem em produtos, insumos ou pedidos de compra mas não existem mais no cadastro de fornecedores (provavelmente por causa de uma renomeação). Escolha pra qual fornecedor atual cada um deve virar.
+    </div>
+    <div style="max-height:360px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:10px">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead style="background:var(--primary);color:rgba(255,255,255,.85);position:sticky;top:0"><tr>
+        <th style="padding:6px 10px;text-align:left">Nome desatualizado</th>
+        <th style="padding:6px 10px;text-align:left">Ocorrências</th>
+        <th style="padding:6px 10px;text-align:left">Virar qual fornecedor?</th>
+        <th style="padding:6px 10px"></th>
+      </tr></thead>
+      <tbody>
+        ${nomesDesatualizados.map((nome,idx)=>`
+          <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
+            <td style="padding:5px 10px;font-weight:700;color:#dc2626">${nome}</td>
+            <td style="padding:5px 10px">${ocorrencias[nome]}</td>
+            <td style="padding:5px 10px">
+              <select id="fnd-select-${idx}" style="width:100%;padding:4px;border:1px solid var(--border);border-radius:4px">
+                <option value="">— selecione —</option>
+                ${opcoesFornecedores}
+              </select>
+            </td>
+            <td style="padding:5px 10px">
+              <button class="btn btn-primary btn-sm" onclick="corrigirNomeFornecedorDesatualizado('${nome.replace(/'/g,"\\'")}', 'fnd-select-${idx}')">Corrigir</button>
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table></div>
+  `;
+}
+
+async function corrigirNomeFornecedorDesatualizado(nomeAntigo, selectId){
+  const sel = document.getElementById(selectId);
+  const nomeNovo = sel?.value;
+  if(!nomeNovo){ toast('Selecione pra qual fornecedor esse nome deve virar','error'); return; }
+  await propagarRenomeacaoFornecedor(nomeAntigo, nomeNovo);
+  await verificarNomesFornecedorDesatualizados();
 }
 
 // ══════════════════════════════════════════════
