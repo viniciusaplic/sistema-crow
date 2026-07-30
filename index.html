@@ -368,6 +368,7 @@ tbody td{padding:11px 16px;font-size:14px}
         <div class="nav-tab" data-tab="separacao" onclick="showTab('separacao',this)">📦 Separação</div>
         <div class="nav-tab" data-tab="producao" onclick="showTab('producao',this)">🏭 Ordens de Produção</div>
         <div class="nav-tab" data-tab="garantias" onclick="showTab('garantias',this)">🛡️ Garantias</div>
+        <div class="nav-tab" data-tab="manutencao" onclick="showTab('manutencao',this)">🔧 Manutenção</div>
       </div>
     </div>
 
@@ -394,6 +395,7 @@ tbody td{padding:11px 16px;font-size:14px}
     <!-- PAINEL -->
     <div id="tab-painel">
       <div class="dashboard-cards" id="dash-cards"></div>
+      <div id="dash-alertas-manutencao"></div>
       <div class="section-header admin-only" id="dash-clientes-novos-header" style="display:none"><div class="section-title">👤 Clientes Novos — Pendentes no W3</div></div>
       <div id="dash-clientes-novos-wrap" class="admin-only"></div>
       <div class="section-header"><div class="section-title">Pedidos Recentes</div></div>
@@ -1219,6 +1221,19 @@ tbody td{padding:11px 16px;font-size:14px}
       <div class="pagination" id="garantias-pag"></div>
     </div>
 
+    <!-- MANUTENÇÃO PREVENTIVA -->
+    <div id="tab-manutencao" style="display:none">
+      <div class="section-header">
+        <div class="section-title">🔧 Manutenção Preventiva</div>
+        <div class="search-box">
+          <input type="text" id="search-manutencao" placeholder="Buscar equipamento ou manutenção..." oninput="paginaManutencao=1;renderManutencao()">
+          <button class="btn btn-primary" onclick="abrirModalManutencao()">+ Nova Manutenção</button>
+        </div>
+      </div>
+      <div id="manutencao-table"></div>
+      <div class="pagination" id="manutencao-pag"></div>
+    </div>
+
     <!-- ESTOQUE -->
     <div id="tab-estoque" style="display:none">
       <div class="section-header">
@@ -1695,6 +1710,53 @@ tbody td{padding:11px 16px;font-size:14px}
   </div>
 </div>
 
+<div class="modal-overlay" id="modal-manutencao">
+  <div class="modal" style="max-width:560px">
+    <button class="modal-close" onclick="fecharModal('modal-manutencao')">×</button>
+    <div class="modal-title" id="modal-manutencao-titulo">Nova Manutenção</div>
+    <input type="hidden" id="manutencao-key">
+    <div class="form-row single"><div class="form-group"><label>Equipamento *</label><input type="text" id="manutencao-equipamento" placeholder="ex: Compressor de parafuso"></div></div>
+    <div class="form-row single"><div class="form-group"><label>Manutenção *</label><input type="text" id="manutencao-descricao" placeholder="ex: Troca de óleo e filtros"></div></div>
+    <div class="form-row single">
+      <div class="form-group" style="max-width:220px">
+        <label>Data da Manutenção *</label>
+        <input type="date" id="manutencao-data">
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-outline" onclick="fecharModal('modal-manutencao')">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarManutencao()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-verificacao-manutencao">
+  <div class="modal" style="max-width:560px">
+    <button class="modal-close" onclick="fecharModal('modal-verificacao-manutencao')">×</button>
+    <div class="modal-title">Registrar Verificação de Manutenção</div>
+    <input type="hidden" id="verificacao-manutencao-key">
+    <div class="form-row single"><div class="form-group" id="verificacao-manutencao-info" style="font-size:13px;color:var(--muted)"></div></div>
+    <div class="form-row">
+      <div class="form-group"><label>Nome de quem verificou *</label><input type="text" id="verificacao-nome"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Data da verificação *</label><input type="date" id="verificacao-data"></div>
+      <div class="form-group"><label>Hora da verificação *</label><input type="time" id="verificacao-hora"></div>
+    </div>
+    <div class="form-row single"><div class="form-group"><label>Observação</label><input type="text" id="verificacao-observacao"></div></div>
+    <div class="form-row single">
+      <div class="form-group" style="max-width:260px">
+        <label>Data da Próxima Manutenção *</label>
+        <input type="date" id="verificacao-proxima-data">
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-outline" onclick="fecharModal('modal-verificacao-manutencao')">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarVerificacaoManutencao()">Salvar Verificação</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL DETALHE/EDIÇÃO PRODUTO -->
 <div class="modal-overlay" id="modal-produto-detalhe">
   <div class="modal" style="max-width:680px">
@@ -2143,6 +2205,7 @@ const MODULOS_PERMISSAO = [
   { id:'producao',     label:'Ordens de Produção' },
   { id:'compras',      label:'Pedidos de Compra' },
   { id:'garantias',    label:'Garantias' },
+  { id:'manutencao',   label:'Manutenção Preventiva' },
   { id:'estoque',      label:'Estoque' },
   { id:'fornecedores', label:'Fornecedores' },
   { id:'relatorios',   label:'Relatórios' },
@@ -2256,6 +2319,8 @@ let insumoDefeitoSelecionado = null;
 let opContextoDefeito = null; // { key, numero } da OP sendo trabalhada ao registrar defeito
 let opContextoEtiquetas = null; // { codigo, tipo } do item para impressão de etiquetas ao iniciar OP
 let COMPRAS_CACHE = [];
+let MANUTENCOES_DB = [];
+let paginaManutencao = 1;
 
 // Status do pedido: ciclo de vida completo
 const STATUS_PEDIDO = {
@@ -2688,6 +2753,7 @@ function showTab(tab, el){
     if(!filtroGarantiasJaAplicado){ document.getElementById('garantia-f-data-ini').value = primeiroDiaMesAtual(); filtroGarantiasJaAplicado = true; }
     renderGarantias();
   }
+  if(tab==='manutencao') renderManutencao();
 }
 
 function toggleNavGroup(trigger, event){
@@ -2713,6 +2779,7 @@ document.addEventListener('click', e=>{
 
 // ══ PAINEL ══
 async function renderPainel(){
+  renderAlertasManutencao();
   const hoje = new Date(); hoje.setHours(0,0,0,0);
   const mesInicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
 
@@ -2853,6 +2920,176 @@ async function renderPainel(){
         </tbody></table>
       </div>`;
   }
+}
+
+// ══ MANUTENÇÃO PREVENTIVA ══
+async function carregarManutencoesFirebase(){
+  try{
+    const snap = await db.ref('manutencoes').once('value');
+    const todos = snap.val()||{};
+    MANUTENCOES_DB = Object.keys(todos).map(k=>({key:k, ...todos[k]}));
+  } catch(e){ MANUTENCOES_DB = []; }
+}
+function hojeISO(){ const d=new Date(); d.setHours(0,0,0,0); return d.toISOString().split('T')[0]; }
+function diasEntre(dataISO){
+  const hoje = new Date(hojeISO()+'T00:00:00');
+  const d = new Date(dataISO+'T00:00:00');
+  return Math.round((hoje - d)/86400000);
+}
+// Alertas de manutenção vencida — exibidos no Painel para quem tem acesso ao módulo (admin e produção autorizada)
+async function renderAlertasManutencao(){
+  const wrap = document.getElementById('dash-alertas-manutencao');
+  if(!wrap) return;
+  if(!podeVer('manutencao')){ wrap.innerHTML=''; return; }
+  await carregarManutencoesFirebase();
+  const hoje = hojeISO();
+  const vencidas = MANUTENCOES_DB
+    .filter(m => m.ativo!==false && m.data_prevista && m.data_prevista <= hoje)
+    .sort((a,b)=> a.data_prevista.localeCompare(b.data_prevista));
+  if(!vencidas.length){ wrap.innerHTML=''; return; }
+  wrap.innerHTML = `
+    <div class="section-header"><div class="section-title">🔧 Alertas de Manutenção Preventiva</div></div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
+      ${vencidas.map(m=>{
+        const atraso = diasEntre(m.data_prevista);
+        const txtAtraso = atraso>0 ? `${atraso} dia(s) de atraso` : 'vence hoje';
+        return `<div class="alerta alerta-danger" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+          <div>
+            <strong>⚠️ ${m.equipamento}</strong> — ${m.manutencao}<br>
+            <span style="font-size:12px">Prevista para ${fmtData(m.data_prevista)} · ${txtAtraso}</span>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="abrirModalVerificacaoManutencao('${m.key}')">Registrar verificação</button>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+async function renderManutencao(){
+  if(!podeVer('manutencao')){ toast('Acesso restrito — sem permissão nesta área','error'); return; }
+  await carregarManutencoesFirebase();
+  const busca = (document.getElementById('search-manutencao')?.value||'').toLowerCase();
+  const hoje = hojeISO();
+  const filtrado = MANUTENCOES_DB
+    .filter(m => (m.equipamento||'').toLowerCase().includes(busca) || (m.manutencao||'').toLowerCase().includes(busca))
+    .sort((a,b)=> (a.data_prevista||'').localeCompare(b.data_prevista||''));
+
+  const total = filtrado.length, inicio=(paginaManutencao-1)*POR_PAGINA;
+  const pagina = filtrado.slice(inicio, inicio+POR_PAGINA);
+  const podeEditar = temPermissaoEditar('manutencao');
+
+  document.getElementById('manutencao-table').innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:var(--primary);color:rgba(255,255,255,.85)">
+        <th style="padding:10px;text-align:left">Equipamento</th>
+        <th style="padding:10px;text-align:left">Manutenção</th>
+        <th style="padding:10px;text-align:left">Próxima Data</th>
+        <th style="padding:10px;text-align:left">Status</th>
+        <th style="padding:10px;text-align:left">Última Verificação</th>
+        <th style="padding:10px"></th>
+      </tr></thead>
+      <tbody>${pagina.map(m=>{
+        const vencida = m.ativo!==false && m.data_prevista && m.data_prevista <= hoje;
+        const uv = m.ultima_verificacao;
+        return `<tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:10px"><strong>${m.equipamento}</strong></td>
+          <td style="padding:10px">${m.manutencao}</td>
+          <td style="padding:10px">${fmtData(m.data_prevista)}</td>
+          <td style="padding:10px">${vencida ? '<span class="alerta alerta-danger" style="padding:2px 8px;display:inline-block">Vencida</span>' : '<span class="alerta alerta-success" style="padding:2px 8px;display:inline-block">Em dia</span>'}</td>
+          <td style="padding:10px">${uv ? `${uv.nome} em ${fmtData(uv.data)} ${uv.hora||''}` : '—'}</td>
+          <td style="padding:10px;white-space:nowrap">
+            <button class="btn btn-outline btn-sm" onclick="abrirModalVerificacaoManutencao('${m.key}')">✓ Verificar</button>
+            ${podeEditar ? `<button class="btn btn-outline btn-sm" onclick="abrirModalManutencao('${m.key}')">✏️</button>
+            <button class="btn btn-sm" style="background:#fef2f2;color:#dc2626;border:none" onclick="removerManutencao('${m.key}')">🗑️</button>` : ''}
+          </td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">Nenhuma manutenção cadastrada</td></tr>'}
+      </tbody>
+    </table>`;
+  renderPaginacao('manutencao-pag', total, paginaManutencao, n=>{ paginaManutencao=n; renderManutencao(); });
+}
+function abrirModalManutencao(key=null){
+  if(!temPermissaoEditar('manutencao')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  if(key){
+    const m = MANUTENCOES_DB.find(x=>x.key===key);
+    if(!m) return;
+    document.getElementById('modal-manutencao-titulo').textContent = 'Editar Manutenção';
+    document.getElementById('manutencao-key').value = key;
+    document.getElementById('manutencao-equipamento').value = m.equipamento||'';
+    document.getElementById('manutencao-descricao').value = m.manutencao||'';
+    document.getElementById('manutencao-data').value = m.data_prevista||'';
+  } else {
+    document.getElementById('modal-manutencao-titulo').textContent = 'Nova Manutenção';
+    ['manutencao-key','manutencao-equipamento','manutencao-descricao','manutencao-data'].forEach(id=>document.getElementById(id).value='');
+  }
+  abrirModal('modal-manutencao');
+}
+async function salvarManutencao(){
+  if(!temPermissaoEditar('manutencao')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  const equipamento = document.getElementById('manutencao-equipamento').value.trim();
+  const manutencao = document.getElementById('manutencao-descricao').value.trim();
+  const data_prevista = document.getElementById('manutencao-data').value;
+  if(!equipamento || !manutencao || !data_prevista){ toast('Preencha equipamento, manutenção e data','error'); return; }
+
+  const keyExistente = document.getElementById('manutencao-key').value;
+  const key = keyExistente || 'manut_' + Date.now();
+  const dadosBase = keyExistente ? (MANUTENCOES_DB.find(x=>x.key===keyExistente)||{}) : {};
+  const dados = {
+    ...dadosBase,
+    equipamento, manutencao, data_prevista,
+    ativo: true,
+    criado_por: dadosBase.criado_por || usuarioLogado.nome,
+    criado_em: dadosBase.criado_em || Date.now()
+  };
+  delete dados.key;
+  await db.ref('manutencoes/'+key).set(dados);
+  fecharModal('modal-manutencao');
+  await renderManutencao();
+  toast(`✓ Manutenção de ${equipamento} salva!`,'success');
+}
+async function removerManutencao(key){
+  if(!temPermissaoEditar('manutencao')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  const m = MANUTENCOES_DB.find(x=>x.key===key);
+  if(!confirm(`Remover a manutenção "${m?.manutencao||''}" de "${m?.equipamento||key}"?`)) return;
+  await db.ref('manutencoes/'+key).remove();
+  await renderManutencao();
+  toast('Manutenção removida','success');
+}
+function abrirModalVerificacaoManutencao(key){
+  if(!podeVer('manutencao')){ toast('Acesso restrito — sem permissão nesta área','error'); return; }
+  const m = MANUTENCOES_DB.find(x=>x.key===key);
+  if(!m) return;
+  document.getElementById('verificacao-manutencao-key').value = key;
+  document.getElementById('verificacao-manutencao-info').textContent = `${m.equipamento} — ${m.manutencao} (prevista para ${fmtData(m.data_prevista)})`;
+  const agora = new Date();
+  document.getElementById('verificacao-nome').value = usuarioLogado?.nome || '';
+  document.getElementById('verificacao-data').value = hojeISO();
+  document.getElementById('verificacao-hora').value = agora.toTimeString().slice(0,5);
+  document.getElementById('verificacao-observacao').value = '';
+  document.getElementById('verificacao-proxima-data').value = '';
+  abrirModal('modal-verificacao-manutencao');
+}
+async function salvarVerificacaoManutencao(){
+  const key = document.getElementById('verificacao-manutencao-key').value;
+  const nome = document.getElementById('verificacao-nome').value.trim();
+  const data = document.getElementById('verificacao-data').value;
+  const hora = document.getElementById('verificacao-hora').value;
+  const observacao = document.getElementById('verificacao-observacao').value.trim();
+  const proximaData = document.getElementById('verificacao-proxima-data').value;
+  if(!nome || !data || !hora){ toast('Preencha nome, data e hora da verificação','error'); return; }
+  if(!proximaData){ toast('A data da próxima manutenção é obrigatória','error'); return; }
+
+  const m = MANUTENCOES_DB.find(x=>x.key===key);
+  if(!m) return;
+  const registro = { nome, data, hora, observacao, data_anterior: m.data_prevista };
+  await db.ref('manutencoes/'+key+'/historico').push(registro);
+  await db.ref('manutencoes/'+key).update({
+    data_prevista: proximaData,
+    ultima_verificacao: { nome, data, hora, observacao }
+  });
+  fecharModal('modal-verificacao-manutencao');
+  await carregarManutencoesFirebase();
+  renderAlertasManutencao();
+  if(document.getElementById('tab-manutencao').style.display!=='none') renderManutencao();
+  toast('✓ Verificação registrada!','success');
 }
 
 // ══ PEDIDOS ══
@@ -3024,8 +3261,15 @@ async function renderPedidos(){
       const w3Str = String(p.codigo_w3||'');
       if(!numStr.includes(fNumero) && !w3Str.includes(fNumero)) return false;
     }
-    if(fStatus==='ativos'){ if(p.status!=='AA' && p.status!=='AP' && p.status!=='EX') return false; }
-    else if(fStatus && p.status!==fStatus) return false;
+    if(fFaturado){
+      // Quando a pessoa filtra por Faturamento (sim/não), a restrição padrão de
+      // "Situação = ativos" (que esconde Concluído) não deve se aplicar — senão os
+      // pedidos faturados (status Concluído) somem da lista mesmo com o filtro certo.
+      if(fStatus && fStatus!=='ativos' && p.status!==fStatus) return false;
+    } else {
+      if(fStatus==='ativos'){ if(p.status!=='AA' && p.status!=='AP' && p.status!=='EX') return false; }
+      else if(fStatus && p.status!==fStatus) return false;
+    }
     if(fFaturado==='sim' && !p.faturado) return false;
     if(fFaturado==='nao' && p.faturado) return false;
     if(fVendedor && !(p.vendedor_nome||'').toLowerCase().includes(fVendedor)) return false;
@@ -3136,7 +3380,7 @@ async function renderPedidos(){
         <input type="checkbox" class="check-imprimir-pedido" data-id="${p.id}" ${pedidosSelecionadosImprimir.has(p.id)?'checked':''} onchange="toggleSelecaoPedido('${p.id}',this.checked)" style="flex-shrink:0;width:16px;height:16px;cursor:pointer">
         <div style="flex-shrink:0;min-width:90px">
           <div style="font-family:'DM Sans',sans-serif;font-weight:700;font-size:14px">#${p.numero}</div>
-          <div style="margin-top:2px">${statusBadge(p.status)}</div>
+          <div style="margin-top:2px;display:flex;gap:4px;flex-wrap:wrap">${statusBadge(p.status)} ${p.faturado?'<span class="badge" style="background:#dcfce7;color:#16a34a;font-size:10px">💰 Faturado</span>':''}</div>
         </div>
         <div style="flex-shrink:0;font-size:12px;color:var(--muted);min-width:70px">${fmtData(p.data)}</div>
         <div style="flex:1;min-width:0;overflow:hidden">
