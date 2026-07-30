@@ -740,6 +740,7 @@ tbody td{padding:11px 16px;font-size:14px}
         <div class="section-title">👤 Usuários</div>
         <div class="search-box">
           <button class="btn btn-outline btn-sm" onclick="abrirModalCorrigirVendedorMassa()">🔧 Corrigir Pedidos de Vendedor</button>
+          <button class="btn btn-outline btn-sm" style="color:#166534;border-color:#166534" onclick="abrirModalFaturarRetroativo()">💰 Faturar Retroativo (Concluídos)</button>
           <button class="btn btn-primary" onclick="abrirModalVendedor()">+ Novo Usuário</button>
         </div>
       </div>
@@ -1624,6 +1625,22 @@ tbody td{padding:11px 16px;font-size:14px}
 </div>
 
 <!-- MODAL CORRIGIR VENDEDOR EM MASSA (admin) -->
+<div class="modal-overlay" id="modal-faturar-retroativo">
+  <div class="modal" style="max-width:640px">
+    <button class="modal-close" onclick="fecharModal('modal-faturar-retroativo')">×</button>
+    <div class="modal-title">💰 Faturar Retroativo (Pedidos Concluídos)</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px">
+      Marca como Faturado todos os pedidos <strong>Concluídos</strong> no período abaixo que ainda não estão faturados — cada um usando a <strong>própria data do pedido</strong> como data de faturamento (não uma data única pra todos).
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>De</label><input type="date" id="fat-retro-ini"></div>
+      <div class="form-group"><label>Até</label><input type="date" id="fat-retro-fim"></div>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="preVisualizarFaturarRetroativo()">🔍 Pré-visualizar</button>
+    <div id="fat-retro-resultado" style="margin-top:14px"></div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-corrigir-vendedor-massa">
   <div class="modal" style="max-width:520px">
     <button class="modal-close" onclick="fecharModal('modal-corrigir-vendedor-massa')">×</button>
@@ -3160,6 +3177,109 @@ function podeEditar(p){
 
 // ── Correção em massa: pedidos "presos" no ID antigo de um vendedor recriado ──
 let pedidosParaCorrigirMassa = [];
+
+// ══════════════════════════════════════════════
+// ══ FATURAR RETROATIVO ══
+// Marca pedidos Concluídos de um período como Faturado, usando a data de CADA PEDIDO
+// como data de faturamento — não uma data única em lote (diferente da ferramenta de
+// marcar faturado em lote, que usa uma data compartilhada pra todos).
+// ══════════════════════════════════════════════
+let faturarRetroativoCache = [];
+
+function abrirModalFaturarRetroativo(){
+  if(!usuarioLogado?.admin){ toast('Acesso restrito — só administradores','error'); return; }
+  document.getElementById('fat-retro-ini').value = `${new Date().getFullYear()}-01-01`;
+  document.getElementById('fat-retro-fim').value = new Date().toISOString().split('T')[0];
+  document.getElementById('fat-retro-resultado').innerHTML = '';
+  faturarRetroativoCache = [];
+  abrirModal('modal-faturar-retroativo');
+}
+
+async function preVisualizarFaturarRetroativo(){
+  const dataIni = document.getElementById('fat-retro-ini').value;
+  const dataFim = document.getElementById('fat-retro-fim').value;
+  if(!dataIni || !dataFim){ toast('Escolha o período','error'); return; }
+  const el = document.getElementById('fat-retro-resultado');
+  el.innerHTML = '<div style="padding:12px;color:var(--muted)">⏳ Verificando...</div>';
+
+  try {
+    const snap = await db.ref('pedidos').orderByChild('data').startAt(dataIni+'T00:00:00').endAt(dataFim+'T23:59:59').once('value');
+    const todos = snap.val() || {};
+    const candidatos = Object.entries(todos)
+      .filter(([id, p]) => p.status === 'CC' && !p.faturado)
+      .map(([id, p]) => ({ id, numero: p.numero, cliente_nome: p.cliente_nome, data: p.data, total: p.total, vendedor_nome: p.vendedor_nome }))
+      .sort((a,b) => new Date(a.data) - new Date(b.data));
+
+    faturarRetroativoCache = candidatos;
+
+    if(!candidatos.length){
+      el.innerHTML = '<div style="padding:12px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534;font-size:13px">✅ Nenhum pedido Concluído e ainda não faturado nesse período.</div>';
+      return;
+    }
+
+    const totalGeral = candidatos.reduce((s,p)=>s+(p.total||0),0);
+    el.innerHTML = `
+      <div style="padding:12px 14px;margin-bottom:12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;font-size:13px;color:#9a3412">
+        ⚠️ <strong>${candidatos.length} pedido(s)</strong> Concluídos e ainda não faturados no período — total ${fmtMoeda(totalGeral)}. Cada um será marcado como faturado usando a <strong>própria data do pedido</strong>.
+      </div>
+      <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:10px">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead style="background:var(--primary);color:rgba(255,255,255,.85);position:sticky;top:0"><tr>
+          <th style="padding:6px 8px;text-align:left">Pedido</th>
+          <th style="padding:6px 8px;text-align:left">Cliente</th>
+          <th style="padding:6px 8px;text-align:left">Vendedor</th>
+          <th style="padding:6px 8px;text-align:center">Data (será a data de faturamento)</th>
+          <th style="padding:6px 8px;text-align:right">Valor</th>
+        </tr></thead>
+        <tbody>
+          ${candidatos.map((p,idx)=>`
+            <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
+              <td style="padding:5px 8px;font-weight:700">#${p.numero}</td>
+              <td style="padding:5px 8px">${p.cliente_nome}</td>
+              <td style="padding:5px 8px">${p.vendedor_nome||'—'}</td>
+              <td style="padding:5px 8px;text-align:center">${fmtData(p.data)}</td>
+              <td style="padding:5px 8px;text-align:right">${fmtMoeda(p.total)}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table></div>
+      <button class="btn btn-primary btn-sm" onclick="aplicarFaturarRetroativo()">✅ Marcar ${candidatos.length} Pedido(s) como Faturado</button>
+    `;
+  } catch(e){
+    el.innerHTML = `<div style="color:#dc2626;padding:12px">Erro: ${e.message}</div>`;
+  }
+}
+
+async function aplicarFaturarRetroativo(){
+  if(!usuarioLogado?.admin){ toast('Acesso restrito — só administradores','error'); return; }
+  const lista = faturarRetroativoCache;
+  if(!lista.length) return;
+  const ok = await confirmCustom(`Marcar ${lista.length} pedido(s) como faturado, cada um com a própria data?\n\nEsta ação atualiza o cadastro de cada pedido individualmente.`, `Marcar ${lista.length}`);
+  if(!ok) return;
+
+  const el = document.getElementById('fat-retro-resultado');
+  el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--muted)">⏳ Processando...</div>';
+
+  let count = 0;
+  for(const p of lista){
+    try {
+      const snap = await db.ref('pedidos/'+p.id).once('value');
+      const pedidoAtualDb = snap.val();
+      if(!pedidoAtualDb || pedidoAtualDb.faturado) continue; // pula se já foi faturado nesse meio tempo
+      const dataFaturamento = p.data.split('T')[0]; // usa a própria data do pedido, só a parte da data
+      const historico = pedidoAtualDb.historico_edicoes || [];
+      historico.push({
+        ts: Date.now(), usuario_nome: usuarioLogado.nome, usuario_tipo: 'admin',
+        alteracoes: [`💰 Faturado retroativamente, usando a data do próprio pedido (${fmtData(dataFaturamento)})`]
+      });
+      await db.ref('pedidos/'+p.id).update({ faturado: true, data_faturamento: dataFaturamento, historico_edicoes: historico });
+      count++;
+    } catch(e){ /* segue pros próximos mesmo se um falhar */ }
+  }
+
+  faturarRetroativoCache = [];
+  el.innerHTML = `<div style="padding:14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534">✅ ${count} pedido(s) marcado(s) como faturado(s), cada um com a própria data.</div>`;
+  toast(`✓ ${count} pedido(s) faturado(s) retroativamente`,'success');
+}
 
 async function abrirModalCorrigirVendedorMassa(){
   if(!usuarioLogado.admin){ toast('Apenas admin pode corrigir vendedor em massa','error'); return; }
