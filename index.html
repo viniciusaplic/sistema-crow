@@ -412,7 +412,7 @@ tbody td{padding:11px 16px;font-size:14px}
             Marcar todos (desta página)
           </label>
           <button class="btn btn-outline btn-sm" onclick="desmarcarTodosPedidos()">✕ Desmarcar todos</button>
-          <button class="btn btn-outline btn-sm" id="btn-imprimir-pedidos" onclick="imprimirPedidosSelecionados()">📄 Gerar PDF (0)</button>
+          <button class="btn btn-outline btn-sm" id="btn-imprimir-pedidos" onclick="imprimirPedidosSelecionados()">🖨️ Imprimir Pedido (0)</button>
           <button class="btn btn-outline btn-sm admin-only" style="color:#166534;border-color:#166534" id="btn-faturar-lote" onclick="abrirModalFaturarLote()">💰 Marcar Faturado (0)</button>
           <button class="btn btn-primary" onclick="abrirModalPedido()">+ Novo Pedido</button>
         </div>
@@ -484,7 +484,7 @@ tbody td{padding:11px 16px;font-size:14px}
       <div class="section-header">
         <div class="section-title">Orçamentos</div>
         <div class="search-box">
-          <button class="btn btn-outline btn-sm" id="btn-imprimir-orcamentos" onclick="imprimirOrcamentosSelecionados()">📄 Gerar PDF (0)</button>
+          <button class="btn btn-outline btn-sm" id="btn-imprimir-orcamentos" onclick="imprimirOrcamentosSelecionados()">🖨️ Imprimir Orçamento (0)</button>
           <button class="btn btn-primary" onclick="abrirModalOrcamento()">+ Novo Orçamento</button>
         </div>
       </div>
@@ -2898,7 +2898,7 @@ async function renderPainel(){
         <div class="pedido-card-info">👤 <span>${p.cliente_nome}</span></div>
         <div class="pedido-card-actions">
           <button class="btn btn-outline btn-sm" onclick="verPedido('${p.id}')">Ver detalhes</button>
-          <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600" onclick="compartilharPedidoUnico('${p.id}')">📄 Gerar PDF</button>
+          <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600" onclick="gerarImagemPedido('${p.id}')">📄 Gerar PDF</button>
           ${!bloqueado&&p.status!=='Cancelado'?`<button class="btn btn-warning btn-sm" onclick="editarPedido('${p.id}')">${lockIcon} Editar</button>`:`<span style="font-size:13px;color:var(--muted)">${lockIcon} Bloqueado</span>`}
           ${usuarioLogado.admin&&p.status!=='Cancelado'?`<button class="btn btn-sm btn-danger" onclick="cancelarPedido('${p.id}')">Cancelar</button>`:''}
         </div>
@@ -3122,7 +3122,7 @@ function toggleSelecaoPedido(id, checked){
 }
 function atualizarBotaoImprimirPedidos(){
   const btn = document.getElementById('btn-imprimir-pedidos');
-  if(btn) btn.textContent = `📄 Gerar PDF (${pedidosSelecionadosImprimir.size})`;
+  if(btn) btn.textContent = `🖨️ Imprimir Pedido (${pedidosSelecionadosImprimir.size})`;
   const btnFat = document.getElementById('btn-faturar-lote');
   if(btnFat) btnFat.textContent = `💰 Marcar Faturado (${pedidosSelecionadosImprimir.size})`;
 }
@@ -3149,7 +3149,7 @@ function toggleSelecaoOrcamento(id, checked){
 }
 function atualizarBotaoImprimirOrcamentos(){
   const btn = document.getElementById('btn-imprimir-orcamentos');
-  if(btn) btn.textContent = `📄 Gerar PDF (${orcamentosSelecionadosImprimir.size})`;
+  if(btn) btn.textContent = `🖨️ Imprimir Orçamento (${orcamentosSelecionadosImprimir.size})`;
 }
 
 // Abre uma janela de impressão com uma ou mais folhas de pedido/orçamento, cada uma em sua própria página
@@ -3187,29 +3187,29 @@ function abrirJanelaImpressaoPedidos(lista, tituloJanela, winPreAberta){
 }
 
 async function imprimirPedidosSelecionados(){
-  if(!pedidosSelecionadosImprimir.size){ toast('Marque ao menos um pedido para gerar o PDF','error'); return; }
-  toast('⏳ Gerando PDF...','');
+  if(!pedidosSelecionadosImprimir.size){ toast('Marque ao menos um pedido para imprimir','error'); return; }
+  const win = window.open('', '_blank'); // abre já, no clique — antes de qualquer busca assíncrona (celular bloqueia senão)
   const lista = [];
   for(const id of pedidosSelecionadosImprimir){
     const snap = await db.ref('pedidos/'+id).once('value');
     const p = snap.val(); if(p) lista.push(p);
   }
   lista.sort((a,b)=>(a.numero||0)-(b.numero||0));
-  await gerarPdfMultiplosPedidos(lista, 'pedido');
-  for(const id of pedidosSelecionadosImprimir){ registrarEventoHistorico(id, 'PDF gerado (em lote)'); }
+  abrirJanelaImpressaoPedidos(lista, `Impressão de ${lista.length} Pedido(s)`, win);
+  for(const id of pedidosSelecionadosImprimir){ registrarEventoHistorico(id, 'Pedido impresso (em lote)'); }
 }
 
 async function imprimirOrcamentosSelecionados(){
-  if(!orcamentosSelecionadosImprimir.size){ toast('Marque ao menos um orçamento para gerar o PDF','error'); return; }
-  toast('⏳ Gerando PDF...','');
+  if(!orcamentosSelecionadosImprimir.size){ toast('Marque ao menos um orçamento para imprimir','error'); return; }
+  const win = window.open('', '_blank');
   const lista = [];
   for(const id of orcamentosSelecionadosImprimir){
     const snap = await db.ref('pedidos/'+id).once('value');
     const p = snap.val(); if(p) lista.push(p);
   }
   lista.sort((a,b)=>(a.numero||0)-(b.numero||0));
-  await gerarPdfMultiplosPedidos(lista, 'orcamento');
-  for(const id of orcamentosSelecionadosImprimir){ registrarEventoHistorico(id, 'PDF gerado (em lote)'); }
+  abrirJanelaImpressaoPedidos(lista, `Impressão de ${lista.length} Orçamento(s)`, win);
+  for(const id of orcamentosSelecionadosImprimir){ registrarEventoHistorico(id, 'Orçamento impresso (em lote)'); }
 }
 
 async function renderPedidos(){
@@ -3367,7 +3367,7 @@ async function renderPedidos(){
         ${p.obs ? `<div style="margin-top:6px;padding:5px 10px;background:#fffbeb;border-left:3px solid #fde68a;border-radius:0 6px 6px 0;font-size:12px;color:#92400e">⚠️ ${p.obs}</div>` : ''}
         <div class="pedido-card-actions">
           <button class="btn btn-outline btn-sm" onclick="verPedido('${p.id}')">Ver detalhes</button>
-          <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600" onclick="compartilharPedidoUnico('${p.id}')">📄 Gerar PDF</button>
+          <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600" onclick="gerarImagemPedido('${p.id}')">📄 Gerar PDF</button>
           ${!bloqueado&&p.status!=='Cancelado'?`<button class="btn btn-warning btn-sm" onclick="editarPedido('${p.id}')">${lockIcon} Editar</button>`:`<span style="font-size:13px;color:var(--muted)">${lockIcon} Bloqueado</span>`}
           ${usuarioLogado.admin&&p.status!=='Cancelado'?`<button class="btn btn-sm btn-danger" onclick="cancelarPedido('${p.id}')">Cancelar</button>`:''}
         </div>
@@ -3394,7 +3394,7 @@ async function renderPedidos(){
         </div>` : ''}
         <div style="flex-shrink:0;display:flex;gap:6px;align-items:center">
           <button class="btn btn-outline btn-sm" onclick="verPedido('${p.id}')">Ver detalhes</button>
-          <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600;padding:4px 8px" onclick="compartilharPedidoUnico('${p.id}')">📄 Gerar PDF</button>
+          <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600;padding:4px 8px" onclick="gerarImagemPedido('${p.id}')">📄 Gerar PDF</button>
           ${!bloqueado&&p.status!=='Cancelado'?`<button class="btn btn-warning btn-sm" onclick="editarPedido('${p.id}')">${lockIcon} Editar</button>`:`<span style="font-size:12px;color:var(--muted)">${lockIcon}</span>`}
           ${usuarioLogado.admin&&p.status!=='Cancelado'?`<button class="btn btn-sm btn-danger" onclick="cancelarPedido('${p.id}')">Cancelar</button>`:''}
         </div>
@@ -3850,7 +3850,7 @@ async function verPedido(id){
         ${usuarioLogado.admin&&p.status!=='Cancelado'&&p.status!=='Orçamento'&&!p.faturado?`<button class="btn btn-outline btn-sm" style="color:#166534;border-color:#166534" onclick="abrirModalFaturarPedido('${id}')">💰 Marcar como Faturado</button>`:''}
         <button class="btn btn-outline btn-sm" onclick="clonarPedido('${id}')">📑 Clonar Pedido</button>
         <button class="btn btn-outline btn-sm" onclick="imprimirCapaPedidoVenda('${id}')">🖨️ Imprimir Pedido</button>
-        <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600" onclick="compartilharPedidoUnico('${id}')">📄 Gerar PDF p/ Enviar</button>
+        <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600" onclick="gerarImagemPedido('${id}')">📄 Gerar PDF p/ Enviar</button>
       </div>
     `;
     abrirModal('modal-ver-pedido');
@@ -5356,7 +5356,7 @@ async function renderOrcamentos(){
         <div style="flex-shrink:0;display:flex;gap:6px;align-items:center">
           <button class="btn btn-outline btn-sm" onclick="verPedido('${p.id}')">Ver</button>
           ${p._status_orcamento==='andamento' ? `
-            <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600;padding:4px 8px" onclick="compartilharPedidoUnico('${p.id}')">📄 Gerar PDF</button>
+            <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600;padding:4px 8px" onclick="gerarImagemPedido('${p.id}')">📄 Gerar PDF</button>
             <button class="btn btn-success btn-sm" onclick="confirmarOrcamento('${p.id}')">✓ Confirmar</button>
             <button class="btn btn-sm" style="background:#ffeef0;color:var(--accent)" onclick="cancelarPedido('${p.id}')">Excluir</button>
           ` : ''}
@@ -15304,9 +15304,6 @@ async function gerarPdfMultiplosPedidos(lista, tipoDoc){
     const pdfBlob = pdf.output('blob');
     const pdfUrl = URL.createObjectURL(pdfBlob);
     const nomeArquivo = `${tipoDoc}_${lista.length>1?'lote_'+lista.length:lista[0].numero}.pdf`;
-    // Web Share API — quando disponível (celular/tablet), permite enviar o PDF direto pro
-    // WhatsApp (ou qualquer outro app) em um único toque, sem precisar salvar e anexar manualmente.
-    const podeCompartilhar = !!navigator.share;
 
     let modal = document.getElementById('modal-whatsapp-img');
     if(!modal){
@@ -15322,10 +15319,6 @@ async function gerarPdfMultiplosPedidos(lista, tipoDoc){
       <div style="color:rgba(255,255,255,.7);font-size:13px;text-align:center">
         ${lista.length} ${tipoDoc}(s) em um único arquivo
       </div>
-      ${podeCompartilhar ? `<button onclick="compartilharPDF('${pdfUrl}','${nomeArquivo}')"
-        style="background:#25d366;color:#fff;font-weight:700;padding:14px 32px;border-radius:10px;font-size:15px;border:none;cursor:pointer">
-        📤 Enviar (WhatsApp e outros)
-      </button>` : ''}
       <a href="${pdfUrl}" download="${nomeArquivo}"
         style="background:#1565c0;color:#fff;font-weight:700;padding:14px 32px;border-radius:10px;font-size:15px;text-decoration:none">
         ⬇️ Baixar PDF
@@ -15335,7 +15328,7 @@ async function gerarPdfMultiplosPedidos(lista, tipoDoc){
         🖨️ Abrir e Imprimir
       </button>
       <div style="color:rgba(255,255,255,.5);font-size:11px;text-align:center;margin-top:4px">
-        ${podeCompartilhar ? '"Enviar" abre o menu de compartilhamento do celular — escolha o WhatsApp direto, sem precisar salvar o arquivo antes' : '"Abrir e Imprimir" abre o PDF numa aba nova — use o botão de imprimir do próprio visualizador de PDF'}
+        "Abrir e Imprimir" abre o PDF numa aba nova — use o botão de imprimir do próprio visualizador de PDF
       </div>
     `;
     modal.style.display = 'flex';
@@ -15345,32 +15338,41 @@ async function gerarPdfMultiplosPedidos(lista, tipoDoc){
   }
 }
 
-// Gera o PDF de UM pedido/orçamento e já abre o modal de compartilhamento (com envio
-// direto pra WhatsApp via Web Share API, quando o navegador suportar) — substitui o fluxo
-// antigo que dependia da janela de impressão nativa do navegador (ruim no celular/tablet:
-// exigia escolher "Salvar como PDF", salvar o arquivo, abrir o WhatsApp e anexar manualmente).
-async function compartilharPedidoUnico(id){
-  toast('⏳ Gerando PDF...','');
+// Antes gerava uma IMAGEM da página (print de tela colado num PDF) — isso sempre distorcia
+// um pouco o texto e a logo, e repetia o cabeçalho inteiro em toda página de pedidos longos.
+// Agora usa exatamente a mesma janela de impressão nativa do "Imprimir Pedido" — garante
+// ficar 100% idêntico, porque é literalmente a mesma renderização, sem conversão pra imagem.
+async function gerarImagemPedido(id){
+  const win = window.open('', '_blank'); // abre já, no clique — celular bloqueia se abrir só depois da busca
   const snap = await db.ref('pedidos/'+id).once('value');
   const p = snap.val();
-  if(!p){ toast('Pedido não encontrado','error'); return; }
-  const tipoDoc = p.status==='Orçamento' ? 'orcamento' : 'pedido';
-  await gerarPdfMultiplosPedidos([p], tipoDoc);
+  if(!p){ if(win && !win.closed) win.close(); return; }
+  abrirJanelaImpressaoPedidos([p], `Pedido #${p.numero}`, win);
+  toast('Na tela de impressão, escolha "Salvar como PDF" pra baixar, ou imprima direto.','');
   registrarEventoHistorico(id, `PDF gerado (${p.status==='Orçamento'?'Orçamento':'Pedido'})`);
 }
 
-function compartilharPDF(url, nomeArquivo){
+function compartilharPDF(url, numero){
   if(navigator.share){
     fetch(url).then(r=>r.blob()).then(blob=>{
-      const file = new File([blob], nomeArquivo || 'pedido_crow.pdf', {type:'application/pdf'});
-      if(navigator.canShare && !navigator.canShare({files:[file]})){
-        toast('Este navegador não permite enviar o arquivo direto. Use "Baixar PDF" e envie manualmente.','');
-        return;
-      }
-      navigator.share({ files:[file], title: nomeArquivo||'Pedido CROW' }).catch(()=>{});
+      const file = new File([blob], `pedido_${numero}.pdf`, {type:'application/pdf'});
+      navigator.share({ files:[file], title:`Pedido CROW #${numero}` }).catch(()=>{
+        toast('Não foi possível compartilhar. Use "Baixar PDF" e envie manualmente.','');
+      });
     });
   } else {
     toast('Use "Baixar PDF" e envie pelo WhatsApp manualmente','');
+  }
+}
+
+function compartilharWhatsApp(url){
+  if(navigator.share){
+    fetch(url).then(r=>r.blob()).then(blob=>{
+      const file=new File([blob],'pedido_crow.png',{type:'image/png'});
+      navigator.share({ files:[file], title:'Pedido CROW' }).catch(()=>{});
+    });
+  } else {
+    toast('Use "Baixar PNG" e envie pelo WhatsApp manualmente','');
   }
 }
 
