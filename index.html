@@ -157,8 +157,8 @@ tbody td{padding:11px 16px;font-size:14px}
 .alerta-info{background:#cff4fc;color:#055160;border:1px solid #b6effb}
 
 /* PRODUTO FOTO */
-.prod-foto{width:40px;height:40px;border-radius:6px;object-fit:cover;border:1px solid var(--border);background:#f5f5f5;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
-.prod-foto img{width:100%;height:100%;object-fit:cover;border-radius:5px}
+.prod-foto{width:40px;height:40px;border-radius:6px;object-fit:contain;background:#fff;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.prod-foto img{width:100%;height:100%;object-fit:contain;border-radius:5px}
 
 /* PARCELAS */
 .parcelas-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-top:12px}
@@ -398,6 +398,7 @@ tbody td{padding:11px 16px;font-size:14px}
     <!-- PAINEL -->
     <div id="tab-painel">
       <div class="dashboard-cards" id="dash-cards"></div>
+      <div id="dash-meta-mes" class="admin-only"></div>
       <div id="dash-alertas-manutencao"></div>
       <div class="section-header admin-only" id="dash-clientes-novos-header" style="display:none"><div class="section-title">👤 Clientes Novos — Pendentes no W3</div></div>
       <div id="dash-clientes-novos-wrap" class="admin-only"></div>
@@ -1762,6 +1763,23 @@ tbody td{padding:11px 16px;font-size:14px}
   </div>
 </div>
 
+<div class="modal-overlay" id="modal-meta-mes">
+  <div class="modal" style="max-width:420px">
+    <button class="modal-close" onclick="fecharModal('modal-meta-mes')">×</button>
+    <div class="modal-title">🎯 Meta do Mês</div>
+    <input type="hidden" id="meta-mes-chave">
+    <div class="form-row single"><div class="form-group"><label>Meta do Mês (R$) *</label><input type="number" step="0.01" id="meta-mes-valor" placeholder="ex: 320000"></div></div>
+    <div class="form-row">
+      <div class="form-group"><label>Dias Úteis do Mês *</label><input type="number" id="meta-mes-dias-uteis" placeholder="ex: 23"></div>
+      <div class="form-group"><label>Dias Trabalhados até hoje *</label><input type="number" id="meta-mes-dias-trabalhados" placeholder="ex: 15"></div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-outline" onclick="fecharModal('modal-meta-mes')">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarMetaMes()">Salvar</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL DETALHE/EDIÇÃO PRODUTO -->
 <div class="modal-overlay" id="modal-produto-detalhe">
   <div class="modal" style="max-width:680px">
@@ -2398,14 +2416,17 @@ function fotoImg(codigo, size=40, style=''){
   const key = (codigo||'').toUpperCase();
   // Usar foto local (base64) se disponível
   if(FOTOS_LOCAL[key]){
-    return `<img src="${FOTOS_LOCAL[key]}" style="width:${size}px;height:${size}px;object-fit:cover;border-radius:6px;${style}" alt="${codigo}">`;
+    // "contain" mostra a foto inteira dentro do quadrado (com uma sobra branca nas bordas se
+    // a proporção não for exatamente quadrada) — "cover" (usado antes) cortava as bordas da
+    // imagem pra preencher o quadrado todo, cortando parte do produto em fotos não-quadradas.
+    return `<img src="${FOTOS_LOCAL[key]}" style="width:${size}px;height:${size}px;object-fit:contain;background:#fff;border-radius:6px;${style}" alt="${codigo}">`;
   }
   const pid = FOTO_MAPA[key] || ('produtos/'+codigo);
   // Cache buster: diário por padrão, mas pode ser sobreposto manualmente (botão "Atualizar Fotos")
   // para forçar atualização imediata sem esperar o cache normal expirar.
   const cacheBuster = cacheBusterManual || new Date().toISOString().split('T')[0].replace(/-/g,'');
   const src = `https://res.cloudinary.com/dleujtvtq/image/upload/w_${size},h_${size},c_pad,b_white,f_jpg,q_auto:good/${pid}?v=${cacheBuster}`;
-  return `<img src="${src}" style="width:${size}px;height:${size}px;object-fit:cover;border-radius:6px;${style}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" alt="${codigo}"><div style="display:none;width:${size}px;height:${size}px;background:var(--bg);border-radius:6px;align-items:center;justify-content:center;font-size:${Math.round(size*0.5)}px">📦</div>`;
+  return `<img src="${src}" style="width:${size}px;height:${size}px;object-fit:contain;background:#fff;border-radius:6px;${style}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" alt="${codigo}"><div style="display:none;width:${size}px;height:${size}px;background:var(--bg);border-radius:6px;align-items:center;justify-content:center;font-size:${Math.round(size*0.5)}px">📦</div>`;
 }
 let pedidoAtual = { cliente: null, itens: [], isOrcamento: false };
 let VENDEDORES_SELECT_CACHE = null; // cache da lista de vendedores para o seletor de vendedor no pedido (admin)
@@ -2424,6 +2445,15 @@ function fmtData(iso){
   if(!iso) return '';
   const data = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? new Date(iso+'T00:00:00') : new Date(iso);
   return data.toLocaleDateString('pt-BR');
+}
+
+// Mesma correção do fmtData, mas pra uso em CÁLCULO/COMPARAÇÃO de datas (não só exibição):
+// uma data "só o dia" (YYYY-MM-DD, ex: data_faturamento gravada por "Marcar Faturado") vira
+// meia-noite em UTC se não tratada — em comparações de mês (>= início do mês, < fim do mês)
+// isso pode jogar um pedido faturado no dia 1º pro mês ANTERIOR, sumindo da conta do mês certo.
+function parseDataLocal(iso){
+  if(!iso) return null;
+  return /^\d{4}-\d{2}-\d{2}$/.test(iso) ? new Date(iso+'T00:00:00') : new Date(iso);
 }
 
 // Ordena resultados de busca por relevância: código EXATO primeiro, depois código que COMEÇA
@@ -2878,7 +2908,7 @@ async function renderPainel(){
       Object.values(todosFat).forEach(p => {
         if(p.vendedor_id !== usuarioLogado.id) return;
         if(!p.data_faturamento) return;
-        const df = new Date(p.data_faturamento); df.setHours(0,0,0,0);
+        const df = parseDataLocal(p.data_faturamento); df.setHours(0,0,0,0);
         if(df < mesInicio) return;
         totalFaturadoMeu += Number(p.total||0);
         pedidosFaturadosMeu++;
@@ -2896,6 +2926,9 @@ async function renderPainel(){
     <div class="dash-card"><div class="dash-card-label">Pedidos do Mês</div><div class="dash-card-value">${pedidosMes}</div></div>
     ${mostrarFaturadoMeu ? `<div class="dash-card"><div class="dash-card-label">💰 Faturado no Mês (Minhas Vendas)</div><div class="dash-card-value success">${fmtMoeda(totalFaturadoMeu)}</div><div style="font-size:11px;color:var(--muted);margin-top:2px">${pedidosFaturadosMeu} pedido(s)</div></div>` : ''}
   `;
+
+  if(usuarioLogado.admin) renderMetaMes(mesInicio, meusPedidos);
+  else { const elMeta=document.getElementById('dash-meta-mes'); if(elMeta) elMeta.innerHTML=''; }
 
   // Clientes novos pendentes de cadastro no W3 — visível só pra admin, direto no painel
   if(usuarioLogado.admin){
@@ -2980,6 +3013,182 @@ async function renderPainel(){
         </tbody></table>
       </div>`;
   }
+}
+
+// ══ META DO MÊS (RESUMO ADMIN) ══
+// Painel de acompanhamento de meta x realizado, visível só pra admin. Só a Meta do Mês, os
+// Dias Úteis e os Dias Trabalhados são preenchidos manualmente (ficam salvos por mês em
+// metas/{AAAA-MM}) — tudo o mais é calculado sozinho a partir dos pedidos: faturado do mês,
+// vendido ainda não faturado, e o que era de mês anterior e só faturou agora.
+async function renderMetaMes(mesInicio, pedidosDoMes){
+  const el = document.getElementById('dash-meta-mes');
+  if(!el) return;
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const mesFim = new Date(mesInicio.getFullYear(), mesInicio.getMonth()+1, 1);
+  const mesAnteriorInicio = new Date(mesInicio.getFullYear(), mesInicio.getMonth()-1, 1);
+  const chaveMes = `${mesInicio.getFullYear()}-${String(mesInicio.getMonth()+1).padStart(2,'0')}`;
+
+  let cfg = { meta:0, dias_uteis:0, dias_trabalhados:0 };
+  try{
+    const snap = await db.ref('metas/'+chaveMes).once('value');
+    if(snap.val()) cfg = { ...cfg, ...snap.val() };
+  } catch(e){}
+
+  // "pedidosDoMes" já veio pronto do Painel (mesma consulta que ele já faz pros cards de
+  // cima) — não busca de novo, só reaproveita. Só falta 1 consulta extra: os FATURADOS, pra
+  // achar os deste mês, os do mês anterior (pro gráfico) e os que eram de mês anterior e só
+  // faturaram agora (essa informação não dá pra tirar dos pedidos deste mês, porque o pedido
+  // original é de antes).
+  let realizadoMes = 0, realizadoMesAnterior = 0, naoFatMesAnteriorVirou = 0, vendidoNaoFaturadoMes = 0;
+  try{
+    const snapFat = await db.ref('pedidos').orderByChild('faturado').equalTo(true).once('value');
+    Object.values(snapFat.val()||{}).forEach(p=>{
+      if(!p.data_faturamento) return;
+      const df = parseDataLocal(p.data_faturamento);
+      if(df >= mesAnteriorInicio && df < mesInicio) realizadoMesAnterior += Number(p.total||0);
+      if(df < mesInicio || df >= mesFim) return;
+      realizadoMes += Number(p.total||0);
+      const dPedido = parseDataLocal(p.data);
+      if(dPedido < mesInicio) naoFatMesAnteriorVirou += Number(p.total||0);
+    });
+    (pedidosDoMes||[]).forEach(p=>{
+      if(p.status==='Cancelado' || p.faturado) return;
+      vendidoNaoFaturadoMes += Number(p.total||0);
+    });
+  } catch(e){}
+
+  const somaFaturadosMaisAFaturar = realizadoMes + vendidoNaoFaturadoMes;
+  const totalVendidoNoMes = somaFaturadosMaisAFaturar - naoFatMesAnteriorVirou;
+  const diasRestantes = Math.max(0, (cfg.dias_uteis||0) - (cfg.dias_trabalhados||0));
+  const metaProporcional = cfg.dias_uteis>0 ? (cfg.meta||0) * (cfg.dias_trabalhados||0)/cfg.dias_uteis : 0;
+  const diferenca = realizadoMes - metaProporcional;
+  const diariaReal = cfg.dias_trabalhados>0 ? realizadoMes/cfg.dias_trabalhados : 0;
+  const faltaParaMeta = (cfg.meta||0) - realizadoMes;
+  const diariaNecessaria = diasRestantes>0 ? Math.max(0,faltaParaMeta)/diasRestantes : 0;
+  const metaAtingida = cfg.meta>0 && realizadoMes >= cfg.meta;
+  const emDiaComMeta = realizadoMes >= metaProporcional;
+  const cresceVsMesAnterior = realizadoMesAnterior>0 ? ((realizadoMes-realizadoMesAnterior)/realizadoMesAnterior*100) : null;
+  const linha = (label,valor)=>`
+    <tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:7px 10px;color:var(--muted)">${label}</td>
+      <td style="padding:7px 10px;text-align:right;font-weight:600">${valor}</td>
+    </tr>`;
+
+  el.innerHTML = `
+    <div class="section-header">
+      <div class="section-title">🎯 Meta do Mês — ${mesInicio.toLocaleDateString('pt-BR',{month:'long',year:'numeric'})}</div>
+      <button class="btn btn-outline btn-sm" onclick="abrirModalMetaMes('${chaveMes}', ${cfg.meta||0}, ${cfg.dias_uteis||0}, ${cfg.dias_trabalhados||0})">✏️ Editar Meta/Dias</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:16px;margin-bottom:20px;align-items:start">
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <tbody>
+            ${linha('Meta do Mês (R$)', fmtMoeda(cfg.meta||0))}
+            ${linha('Dias Úteis do Mês', cfg.dias_uteis||0)}
+            ${linha('Dias Trabalhados (até hoje)', cfg.dias_trabalhados||0)}
+            ${linha('Dias Restantes', diasRestantes)}
+            ${linha('Meta Proporcional até Hoje', fmtMoeda(metaProporcional))}
+            ${linha('Realizado (faturado)', fmtMoeda(realizadoMes))}
+            ${linha('Diferença (realiz. − meta prop.)', fmtMoeda(diferenca))}
+            ${linha('Diária Real', fmtMoeda(diariaReal))}
+            ${linha('Soma Faturados + A Faturar', fmtMoeda(somaFaturadosMaisAFaturar))}
+            ${linha('Vendido, Ainda Não Faturado', fmtMoeda(vendidoNaoFaturadoMes))}
+            ${linha('Não Fat. Mês Anterior (virou este mês)', fmtMoeda(naoFatMesAnteriorVirou))}
+            <tr style="border-bottom:1px solid var(--border);background:var(--bg)">
+              <td style="padding:7px 10px;font-weight:700">Total Vendido no Mês</td>
+              <td style="padding:7px 10px;text-align:right;font-weight:700">${fmtMoeda(totalVendidoNoMes)}</td>
+            </tr>
+            ${linha('Falta p/ Meta (só faturado)', fmtMoeda(faltaParaMeta))}
+            ${linha('Diária Necessária', fmtMoeda(diariaNecessaria))}
+            <tr>
+              <td style="padding:9px 10px;font-weight:700" colspan="2">
+                Situação do Mês<br>
+                <span class="badge" style="background:${metaAtingida?'#dcfce7':'#fef2f2'};color:${metaAtingida?'#16a34a':'#dc2626'}">${metaAtingida?'✅ Meta atingida!':'🔸 Ainda não atingida'}</span>
+                <span class="badge" style="background:${emDiaComMeta?'#dcfce7':'#fff7ed'};color:${emDiaComMeta?'#16a34a':'#d97706'}">${emDiaComMeta?'✅ Em dia c/ a meta':'⚠️ Atrasado'}</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">Faturamento: Mês Anterior × Este Mês</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">
+          ${cresceVsMesAnterior===null ? '' : (cresceVsMesAnterior>=0 ? `📈 +${cresceVsMesAnterior.toFixed(1)}% vs mês anterior` : `📉 ${cresceVsMesAnterior.toFixed(1)}% vs mês anterior`)}
+        </div>
+        <canvas id="meta-mes-grafico" height="180"></canvas>
+      </div>
+    </div>`;
+
+  desenharGraficoMetaMes(mesInicio, mesAnteriorInicio, realizadoMesAnterior, realizadoMes, cfg.meta||0);
+}
+
+let graficoMetaMes = null;
+async function desenharGraficoMetaMes(mesInicio, mesAnteriorInicio, realizadoMesAnterior, realizadoMes, meta){
+  await garantirChartJs();
+  const canvas = document.getElementById('meta-mes-grafico');
+  if(!canvas || !window.Chart) return;
+  if(graficoMetaMes) graficoMetaMes.destroy();
+  const labelAnterior = mesAnteriorInicio.toLocaleDateString('pt-BR',{month:'short',year:'2-digit'});
+  const labelAtual = mesInicio.toLocaleDateString('pt-BR',{month:'short',year:'2-digit'});
+  graficoMetaMes = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: [labelAnterior, labelAtual],
+      datasets: [{
+        label: 'Faturado',
+        data: [realizadoMesAnterior, realizadoMes],
+        backgroundColor: ['#c7c7d1', '#1a1a2e'],
+        borderRadius: 6
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => fmtMoeda(ctx.parsed.y) } }
+      },
+      scales: { y: { ticks: { callback: v => fmtMoeda(v) } } }
+    }
+  });
+}
+
+// Garante que o Chart.js está carregado antes de desenhar um gráfico — reaproveita a tag
+// <script> se ela já estiver na página (evita carregar a biblioteca duas vezes).
+function garantirChartJs(){
+  return new Promise(resolve=>{
+    if(window.Chart) return resolve();
+    let s = document.querySelector('script[src*="chart.umd"]');
+    if(!s){
+      s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js';
+      document.head.appendChild(s);
+    }
+    s.addEventListener('load', () => resolve());
+    const intervalo = setInterval(()=>{ if(window.Chart){ clearInterval(intervalo); resolve(); } }, 150);
+  });
+}
+
+function abrirModalMetaMes(chave, meta, diasUteis, diasTrabalhados){
+  document.getElementById('meta-mes-chave').value = chave;
+  document.getElementById('meta-mes-valor').value = meta || '';
+  document.getElementById('meta-mes-dias-uteis').value = diasUteis || '';
+  document.getElementById('meta-mes-dias-trabalhados').value = diasTrabalhados || '';
+  abrirModal('modal-meta-mes');
+}
+
+async function salvarMetaMes(){
+  const chave = document.getElementById('meta-mes-chave').value;
+  const meta = Number(document.getElementById('meta-mes-valor').value) || 0;
+  const dias_uteis = Number(document.getElementById('meta-mes-dias-uteis').value) || 0;
+  const dias_trabalhados = Number(document.getElementById('meta-mes-dias-trabalhados').value) || 0;
+  if(!chave){ toast('Erro: mês não identificado','error'); return; }
+  await db.ref('metas/'+chave).set({
+    meta, dias_uteis, dias_trabalhados,
+    atualizado_por: usuarioLogado.nome, atualizado_em: Date.now()
+  });
+  fecharModal('modal-meta-mes');
+  await renderPainel();
+  toast('✓ Meta do mês salva!','success');
 }
 
 // ══ MANUTENÇÃO PREVENTIVA ══
