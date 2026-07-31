@@ -398,7 +398,7 @@ tbody td{padding:11px 16px;font-size:14px}
       <div id="dash-alertas-manutencao"></div>
       <div class="section-header admin-only" id="dash-clientes-novos-header" style="display:none"><div class="section-title">👤 Clientes Novos — Pendentes no W3</div></div>
       <div id="dash-clientes-novos-wrap" class="admin-only"></div>
-      <div class="section-header"><div class="section-title">Pedidos Recentes</div></div>
+      <div class="section-header" id="dash-pedidos-header"><div class="section-title">Pedidos Recentes</div></div>
       <div id="dash-pedidos-wrap"></div>
     </div>
 
@@ -2227,12 +2227,26 @@ function ehExpedicao(){
   return usuarioLogado.tipo === 'expedicao';
 }
 
+// Retorna true se o usuário logado é um perfil de Produção — personalizado, com acesso
+// ao módulo de produção, mas sem ser admin nem expedição. Usado pra simplificar o Painel
+// pra esse perfil (esconder faturamento/pedidos/valores, mostrar só o que interessa: os
+// alertas de manutenção).
+function ehProducao(){
+  if(!usuarioLogado || usuarioLogado.admin || ehExpedicao()) return false;
+  return usuarioLogado.tipo === 'personalizado' && podeVer('producao');
+}
+
 // Pode VER o módulo (aparece no menu / acessa a tela)?
 function podeVer(modulo){
   if(!usuarioLogado) return false;
   if(usuarioLogado.admin) return true;
   if(ehExpedicao()) return MODULOS_EXPEDICAO_VER.includes(modulo);
-  if(usuarioLogado.tipo==='personalizado') return !!usuarioLogado.permissoes?.[modulo]?.ver;
+  if(usuarioLogado.tipo==='personalizado'){
+    // Manutenção Preventiva anda junto com Produção: quem já vê o módulo de Produção
+    // enxerga Manutenção automaticamente, sem precisar marcar a permissão separada.
+    if(modulo==='manutencao' && usuarioLogado.permissoes?.producao?.ver) return true;
+    return !!usuarioLogado.permissoes?.[modulo]?.ver;
+  }
   return MODULOS_VENDEDOR_PADRAO.includes(modulo);
 }
 // Pode EDITAR/criar/aprovar/excluir dentro do módulo?
@@ -2785,7 +2799,21 @@ async function renderPainel(){
   const hoje = new Date(); hoje.setHours(0,0,0,0);
   const mesInicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
 
+  // Perfil de Produção não lida com vendas — o Painel dele mostra só os alertas de
+  // manutenção (já renderizados acima). Sai cedo pra não gastar banda buscando pedidos
+  // à toa nem mostrar faturamento/valores que não dizem respeito a esse perfil.
+  const souProducao = ehProducao();
+  if(souProducao){
+    document.getElementById('dash-cards').innerHTML = '';
+    const headerPedidos = document.getElementById('dash-pedidos-header');
+    if(headerPedidos) headerPedidos.style.display = 'none';
+    document.getElementById('dash-pedidos-wrap').innerHTML = '';
+    return;
+  }
+
   let meusPedidos=[], total=0, totalMes=0, pedidosMes=0, pedidosHoje=0;
+  const headerPedidosVisivel = document.getElementById('dash-pedidos-header');
+  if(headerPedidosVisivel) headerPedidosVisivel.style.display = '';
   try {
     // Busca só os pedidos deste mês em diante (não a base inteira desde o começo) —
     // o Painel só precisa de "hoje" e "este mês", baixar tudo era desperdício de dado
