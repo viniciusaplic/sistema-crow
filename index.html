@@ -2383,7 +2383,10 @@ async function carregarFotoMapa(){
     return;
   }
   try {
-    const r = await fetch('https://res.cloudinary.com/dleujtvtq/image/list/produtos.json');
+    // Cache-bust também nessa busca (não só nas fotos individuais) — sem isso, o navegador
+    // ou o próprio Cloudinary podiam devolver a LISTA de fotos antiga (de antes de um reimport),
+    // mesmo com o localStorage limpo, porque a URL da busca era sempre idêntica.
+    const r = await fetch(`https://res.cloudinary.com/dleujtvtq/image/list/produtos.json?_=${Date.now()}`, { cache: 'no-store' });
     if(r.ok){
       const data = await r.json();
       const mapa = {};
