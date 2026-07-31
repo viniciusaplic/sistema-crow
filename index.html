@@ -2428,7 +2428,13 @@ function fotoImg(codigo, size=40, style=''){
   // Cache buster: diário por padrão, mas pode ser sobreposto manualmente (botão "Atualizar Fotos")
   // para forçar atualização imediata sem esperar o cache normal expirar.
   const cacheBuster = cacheBusterManual || new Date().toISOString().split('T')[0].replace(/-/g,'');
-  const src = `https://res.cloudinary.com/dleujtvtq/image/upload/w_${size},h_${size},c_pad,b_white,f_jpg,q_auto:good/${pid}?v=${cacheBuster}`;
+  // c_fit (em vez de c_pad,b_white,f_jpg) redimensiona sem forçar nenhum preenchimento de fundo —
+  // isso evita o mesmo problema da foto ampliada, onde pedir um fundo branco ao Cloudinary também
+  // pintava de branco qualquer transparência que existisse DENTRO da própria foto (não só nas
+  // bordas), criando um "buraco" branco no meio de fotos com recorte/transparência interna. A
+  // margem branca ao redor do quadrado continua aparecendo, só que agora via CSS (object-fit +
+  // background do próprio <img>), sem mexer em nenhum pixel da imagem.
+  const src = `https://res.cloudinary.com/dleujtvtq/image/upload/w_${size},h_${size},c_fit,q_auto:good/${pid}?v=${cacheBuster}`;
   return `<img src="${src}" style="width:${size}px;height:${size}px;object-fit:contain;background:#fff;border-radius:6px;${style}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" alt="${codigo}"><div style="display:none;width:${size}px;height:${size}px;background:var(--bg);border-radius:6px;align-items:center;justify-content:center;font-size:${Math.round(size*0.5)}px">📦</div>`;
 }
 let pedidoAtual = { cliente: null, itens: [], isOrcamento: false };
