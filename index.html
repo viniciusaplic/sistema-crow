@@ -6463,12 +6463,18 @@ async function salvarQtdEIniciar(key){
   await renderProducao();
   toast('✓ OP iniciada!','success');
 
-  // Abre o modal para imprimir etiquetas do item que será produzido, já sugerindo a quantidade da OP
+  // Abre o modal para imprimir etiquetas do item que será produzido, já sugerindo a quantidade da OP —
+  // exceto pra itens marcados como "etiqueta única por lote" (ex: botão de rosca vendido a granel,
+  // tudo embalado junto num saco só com 1 etiqueta, não importa quantas unidades o cliente pediu).
   const op = OPS_DB.find(o=>o.key===key);
   if(op){
+    const produtoOP = PRODUTOS_DB.find(p=>p.codigo===op.produto_codigo);
+    const etiquetaUnica = !!produtoOP?.etiqueta_unica_por_lote;
     opContextoEtiquetas = { codigo: op.produto_codigo, tipo: 'vendavel' };
-    document.getElementById('etiquetas-op-info').textContent = `Produzindo ${novaQtd}x ${op.produto_nome} (${op.produto_codigo})`;
-    document.getElementById('etiquetas-op-qtd').value = novaQtd;
+    document.getElementById('etiquetas-op-info').textContent = etiquetaUnica
+      ? `Produzindo ${novaQtd}x ${op.produto_nome} (${op.produto_codigo}) — item de etiqueta única: todo o lote vai num saco só, com 1 etiqueta`
+      : `Produzindo ${novaQtd}x ${op.produto_nome} (${op.produto_codigo})`;
+    document.getElementById('etiquetas-op-qtd').value = etiquetaUnica ? 1 : novaQtd;
     abrirModal('modal-etiquetas-op');
   }
 }
@@ -10342,6 +10348,10 @@ function renderModalProduto(codigo){
         <div class="form-row single"><div class="form-group"><label>Localização no Estoque</label><input type="text" id="pd-localizacao" value="${p.localizacao||''}" placeholder="ex: Corredor A, Prateleira 3"></div></div>
         <div class="form-row single"><div class="form-group"><label>Categoria</label><select id="pd-categoria">${opcoesCategorias(p.categoria)}</select></div></div>
         <div class="form-row single"><div class="form-group"><label>Código de Barras (GTIN/EAN) — usado na bipagem</label><input type="text" id="pd-gtin" value="${p.gtin||''}" placeholder="ex: 7891234567890"></div></div>
+        <div class="form-row single"><div class="form-group" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="pd-etiqueta-unica" style="width:auto" ${p.etiqueta_unica_por_lote?'checked':''}>
+          <label for="pd-etiqueta-unica" style="margin:0">Vende em qualquer quantidade, embala tudo num saco só (1 etiqueta por lote, não uma por unidade)</label>
+        </div></div>
         ${produtoDetalheModo==='editar' && p._temp ? `<div class="form-row single"><div class="form-group" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="pd-inativo-criacao" style="width:auto"><label for="pd-inativo-criacao" style="margin:0">Cadastrar já como inativo (item sem estoque/em falta — reative quando voltar)</label></div></div>` : ''}
         <div class="form-actions">
           <button class="btn btn-outline" onclick="produtoDetalheModo='ver';renderModalProduto('${codigo}')">Cancelar</button>
@@ -10667,6 +10677,7 @@ async function salvarEdicaoProduto(codigoAntigo){
   const gtin = document.getElementById('pd-gtin').value.trim();
   const localizacao = document.getElementById('pd-localizacao').value.trim();
   const categoria = document.getElementById('pd-categoria')?.value || '';
+  const etiqueta_unica_por_lote = document.getElementById('pd-etiqueta-unica')?.checked || false;
 
   if(!novoCodigo){ toast('Código não pode ficar vazio','error'); return; }
 
@@ -10680,7 +10691,7 @@ async function salvarEdicaoProduto(codigoAntigo){
   const existente = PRODUTOS_DB.find(x=>x.codigo===codigoAntigo);
   const isNovo = !existente || codigoAntigo === '__NOVO__';
   const dadosAtualizados = {
-    nome, unidade, preco_venda, preco_minimo, quantidade, estoque_minimo, gtin, localizacao, categoria,
+    nome, unidade, preco_venda, preco_minimo, quantidade, estoque_minimo, gtin, localizacao, categoria, etiqueta_unica_por_lote,
     ...(isNovo ? { ts_cadastro: Date.now() } : {})
   };
 
