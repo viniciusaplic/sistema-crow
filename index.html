@@ -290,8 +290,11 @@ tbody td{padding:11px 16px;font-size:14px}
   .totais-box{flex-direction:column;gap:8px}
   .search-input{width:100%}
 }
-::-webkit-scrollbar{width:6px;height:6px}
-::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+::-webkit-scrollbar{width:14px;height:14px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:#8a8a9a;border-radius:7px;border:3px solid var(--bg)}
+::-webkit-scrollbar-thumb:hover{background:var(--primary)}
+*{scrollbar-width:auto;scrollbar-color:#8a8a9a var(--bg)}
 
 /* PROMOÇÕES / CATÁLOGO */
 .arquivo-card{background:var(--card);border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);transition:box-shadow .2s}
