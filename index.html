@@ -2402,14 +2402,19 @@ async function carregarFotoMapa(){
   } catch(e){ console.warn('Cloudinary:', e.message); }
 }
 
-// Versão extra de cache-busting, usada quando o usuário força atualização manual (sobrepõe o buster diário)
-let cacheBusterManual = null;
+// Versão extra de cache-busting, usada quando o usuário força atualização manual (sobrepõe o
+// buster diário). Fica salva no localStorage — sem isso, ela reiniciava a cada F5/reload da
+// página (voltando pro buster "do dia", que é sempre o mesmo valor o dia inteiro), e aí o
+// navegador continuava servindo a foto antiga do próprio cache dele, sem nem tentar buscar de
+// novo no Cloudinary — mesmo depois de "Atualizar Fotos" ter funcionado uma vez.
+let cacheBusterManual = localStorage.getItem('crow_cache_buster_manual') || null;
 
 async function forcarAtualizacaoFotos(){
   toast('🔄 Atualizando fotos...','success');
   localStorage.removeItem('crow_foto_mapa');
   localStorage.removeItem('crow_foto_mapa_ts');
   cacheBusterManual = Date.now();
+  localStorage.setItem('crow_cache_buster_manual', String(cacheBusterManual));
   await carregarFotoMapa();
   renderProdutos();
   toast('✓ Fotos atualizadas!','success');
