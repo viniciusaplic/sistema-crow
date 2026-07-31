@@ -13292,12 +13292,16 @@ async function relSugestaoJornal(pedidos, el){
     el.innerHTML='<div style="color:#dc2626;padding:20px">⏳ Produtos ainda não carregados. Aguarde e tente novamente.</div>';
     await carregarProdutosFirebase();
   }
+  // Precisa de receitas e insumos pra calcular "quanto ainda dá pra montar" — a mesma conta
+  // usada na busca de produto do Pedido (físico + capacidade de produção pelo insumo gargalo).
+  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
+  if(!INSUMOS_DB.length) await carregarInsumosFirebase();
 
   const snapCompras = await db.ref('pedidos_compra').once('value');
   const compras = Object.values(snapCompras.val()||{});
-  const emTransito = new Set();
+  const codigosEmTransito = new Set();
   compras.filter(c=>['transito','separacao'].includes(c.status)).forEach(c=>{
-    (c.itens||[]).forEach(i=>{ if(i.codigo) emTransito.add(i.codigo); });
+    (c.itens||[]).forEach(i=>{ if(i.codigo) codigosEmTransito.add(i.codigo); });
   });
 
   const vendas = {};
@@ -13317,24 +13321,53 @@ async function relSugestaoJornal(pedidos, el){
 
   const lista = Object.values(vendas).map(v=>{
     const prod = PRODUTOS_DB.find(p=>p.codigo===v.codigo);
-    const disponivel = prod ? Number(prod.quantidade||0)-Number(prod.reservado||0) : 0;
+    const dispFisico = prod ? Number(prod.quantidade||0)-Number(prod.reservado||0) : 0;
+
+    // Capacidade de produção pelo insumo gargalo da receita — embalagem/etiqueta não conta
+    // (mesma lógica da busca de produto do Pedido, pra não mostrar "sem estoque" num item
+    // montado que na real ainda dá pra montar mais, só falta física pronta na prateleira).
+    let capacidadeProducao = 0;
+    let insumoEmTransito = false;
+    const receita = RECEITAS_DB[v.codigo];
+    const itensReceitaSemEmbalagem = (receita?.itens||[]).filter(ri=>{
+      const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
+      return insumo?.categoria !== 'Embalagens';
+    });
+    if(itensReceitaSemEmbalagem.length){
+      let minCap = Infinity;
+      for(const ri of itensReceitaSemEmbalagem){
+        const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
+        const estoqueInsumo = Number(insumo?.estoque_atual||0);
+        const cap = ri.qtd > 0 ? Math.floor(estoqueInsumo / ri.qtd) : Infinity;
+        if(cap < minCap) minCap = cap;
+        if(codigosEmTransito.has(ri.codigo)) insumoEmTransito = true;
+      }
+      capacidadeProducao = minCap === Infinity ? 0 : minCap;
+    }
+
+    const disponivel = dispFisico + capacidadeProducao;
+    // "Em trânsito" agora considera tanto o próprio código quanto os insumos da receita —
+    // um Produto Montado quase nunca tem pedido de compra do próprio código, e sim do
+    // insumo que falta pra montar mais dele.
+    const emTransito = codigosEmTransito.has(v.codigo) || insumoEmTransito;
+
     return {
-      ...v, disponivel,
+      ...v, disponivel, dispFisico, capacidadeProducao,
       minimo: prod ? Number(prod.estoque_minimo||0) : 0,
-      emTransito: emTransito.has(v.codigo),
-      score: v.qtd * (emTransito.has(v.codigo)?0.5:1) * (disponivel>0?1:0.1)
+      emTransito,
+      score: v.qtd * (emTransito?0.5:1) * (disponivel>0?1:0.1)
     };
   }).sort((a,b)=>b.score-a.score).slice(0,100);
 
   relatorioCache = { tipo:'sugestao-jornal', lista };
 
   el.innerHTML = `<div style="font-size:13px;margin-bottom:12px;color:var(--muted)">
-    Top 100 produtos sugeridos para o Jornal — mais vendidos no período, com estoque disponível. Produtos em trânsito são sinalizados.
+    Top 100 produtos sugeridos para o Jornal — mais vendidos no período, com estoque disponível (físico + o que ainda dá pra montar). Produtos em trânsito (ou com insumo da receita em trânsito) são sinalizados.
   </div>`+tabelaRel(
     ['#','Código','Produto',{label:'Qtd Vendida',align:'center'},{label:'Disponível',align:'center'},{label:'Em Trânsito',align:'center'},{label:'Indicação',align:'center'}],
     lista.map((v,i)=>[
       i+1, v.codigo, v.nome, v.qtd,
-      `<span style="color:${v.disponivel>10?'#16a34a':v.disponivel>0?'#d97706':'#dc2626'}">${v.disponivel}</span>`,
+      `<span style="color:${v.disponivel>10?'#16a34a':v.disponivel>0?'#d97706':'#dc2626'}" title="${v.dispFisico} físico + ${v.capacidadeProducao} prod.">${v.disponivel}</span>`,
       v.emTransito?'✅ Sim':'—',
       v.disponivel<=0?'<span class="badge" style="background:#fef2f2;color:#dc2626">Sem estoque</span>':
       v.emTransito?'<span class="badge" style="background:#dbeafe;color:#1565c0">⭐ Boa opção</span>':
