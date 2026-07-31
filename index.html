@@ -424,7 +424,7 @@ tbody td{padding:11px 16px;font-size:14px}
         <div class="filtros-inner" id="filtros-pedidos-inner">
           <div class="filtro-group">
             <label>Nº do Pedido</label>
-            <input type="text" id="f-numero" placeholder="ex: 2239..." oninput="renderPedidos()">
+            <input type="text" id="f-numero" placeholder="ex: 2239..." oninput="paginaPedidos=1;renderPedidos()">
           </div>
           <div class="filtro-group">
             <label>Data início</label>
@@ -444,7 +444,7 @@ tbody td{padding:11px 16px;font-size:14px}
           </div>
           <div class="filtro-group admin-only" id="f-vendedor-wrap" style="display:none">
             <label>Vendedor</label>
-            <input type="text" id="f-vendedor" list="lista-vendedores-datalist" placeholder="Digite ou selecione..." oninput="renderPedidos()">
+            <input type="text" id="f-vendedor" list="lista-vendedores-datalist" placeholder="Digite ou selecione..." oninput="paginaPedidos=1;renderPedidos()">
             <datalist id="lista-vendedores-datalist"></datalist>
           </div>
           <div class="filtro-group">
@@ -461,14 +461,14 @@ tbody td{padding:11px 16px;font-size:14px}
           </div>
           <div class="filtro-group">
             <label>Faturamento</label>
-            <select id="f-faturado" onchange="renderPedidos()">
+            <select id="f-faturado" onchange="paginaPedidos=1;renderPedidos()">
               <option value="">Todos</option>
               <option value="sim">✅ Já faturados</option>
               <option value="nao">⏳ Ainda não faturados</option>
             </select>
           </div>
           <div class="filtros-btns">
-            <button class="btn btn-secondary btn-sm" onclick="renderPedidos()">Filtrar</button>
+            <button class="btn btn-secondary btn-sm" onclick="paginaPedidos=1;renderPedidos()">Filtrar</button>
             <button class="btn btn-outline btn-sm" onclick="limparFiltrosPedidos()">Limpar</button>
             <button id="btn-exportar-w3" class="btn btn-secondary btn-sm" onclick="exportarPedidosW3()" style="display:none;background:#1C4C2A;color:#fff;border:none;margin-left:4px">⬇ Exportar W3</button>
           </div>
@@ -511,7 +511,7 @@ tbody td{padding:11px 16px;font-size:14px}
           </div>
           <div class="filtro-group">
             <label>Situação do Orçamento</label>
-            <select id="fo-status" onchange="renderOrcamentos()">
+            <select id="fo-status" onchange="paginaOrcamentos=1;renderOrcamentos()">
               <option value="">Todas</option>
               <option value="andamento">Em Andamento</option>
               <option value="aprovado">Aprovado</option>
@@ -520,11 +520,11 @@ tbody td{padding:11px 16px;font-size:14px}
           </div>
           <div class="filtro-group admin-only" id="fo-vendedor-wrap" style="display:none">
             <label>Vendedor</label>
-            <input type="text" id="fo-vendedor" list="lista-vendedores-datalist-orc" placeholder="Digite ou selecione..." oninput="renderOrcamentos()">
+            <input type="text" id="fo-vendedor" list="lista-vendedores-datalist-orc" placeholder="Digite ou selecione..." oninput="paginaOrcamentos=1;renderOrcamentos()">
             <datalist id="lista-vendedores-datalist-orc"></datalist>
           </div>
           <div class="filtros-btns">
-            <button class="btn btn-secondary btn-sm" onclick="renderOrcamentos()">Filtrar</button>
+            <button class="btn btn-secondary btn-sm" onclick="paginaOrcamentos=1;renderOrcamentos()">Filtrar</button>
             <button class="btn btn-outline btn-sm" onclick="limparFiltrosOrcamentos()">Limpar</button>
           </div>
         </div>
@@ -551,40 +551,40 @@ tbody td{padding:11px 16px;font-size:14px}
         <div class="filtros-inner open" id="filtros-clientes-inner">
           <div class="filtro-group">
             <label>Nome</label>
-            <input type="text" id="cliente-f-nome" placeholder="Nome do cliente..." oninput="renderClientes()">
+            <input type="text" id="cliente-f-nome" placeholder="Nome do cliente..." oninput="paginaClientes=1;renderClientes()">
           </div>
           <div class="filtro-group">
             <label>CNPJ/CPF</label>
-            <input type="text" id="cliente-f-cnpj" placeholder="Documento..." oninput="renderClientes()">
+            <input type="text" id="cliente-f-cnpj" placeholder="Documento..." oninput="paginaClientes=1;renderClientes()">
           </div>
           <div class="filtro-group">
             <label>Endereço</label>
-            <input type="text" id="cliente-f-endereco" placeholder="Rua, bairro..." oninput="renderClientes()">
+            <input type="text" id="cliente-f-endereco" placeholder="Rua, bairro..." oninput="paginaClientes=1;renderClientes()">
           </div>
           <div class="filtro-group">
             <label>Cidade</label>
-            <input type="text" id="cliente-f-cidade" placeholder="Cidade..." oninput="renderClientes()">
+            <input type="text" id="cliente-f-cidade" placeholder="Cidade..." oninput="paginaClientes=1;renderClientes()">
           </div>
           <div class="filtro-group">
             <label>Estado (UF)</label>
-            <input type="text" id="cliente-f-uf" placeholder="ex: MG" maxlength="2" oninput="renderClientes()">
+            <input type="text" id="cliente-f-uf" placeholder="ex: MG" maxlength="2" oninput="paginaClientes=1;renderClientes()">
           </div>
           <div class="filtro-group admin-only" id="cliente-f-vendedor-wrap" style="display:none">
             <label>Vendedor</label>
-            <input type="text" id="cliente-f-vendedor" list="lista-vendedores-datalist-cliente" placeholder="Digite ou selecione..." oninput="renderClientes()">
+            <input type="text" id="cliente-f-vendedor" list="lista-vendedores-datalist-cliente" placeholder="Digite ou selecione..." oninput="paginaClientes=1;renderClientes()">
             <datalist id="lista-vendedores-datalist-cliente"></datalist>
           </div>
           <div class="filtro-group">
             <label>Cadastrado a partir de</label>
-            <input type="date" id="cliente-f-data-ini" onchange="renderClientes()">
+            <input type="date" id="cliente-f-data-ini" onchange="paginaClientes=1;renderClientes()">
           </div>
           <div class="filtro-group">
             <label>Cadastrado até</label>
-            <input type="date" id="cliente-f-data-fim" onchange="renderClientes()">
+            <input type="date" id="cliente-f-data-fim" onchange="paginaClientes=1;renderClientes()">
           </div>
           <div class="filtro-group">
             <label>Situação W3</label>
-            <select id="cliente-f-w3" onchange="renderClientes()">
+            <select id="cliente-f-w3" onchange="paginaClientes=1;renderClientes()">
               <option value="">Todos</option>
               <option value="pendente">⚠️ Pendente no W3</option>
               <option value="ok">✅ Cadastrado no W3</option>
@@ -592,7 +592,7 @@ tbody td{padding:11px 16px;font-size:14px}
             </select>
           </div>
           <div class="filtros-btns">
-            <button class="btn btn-secondary btn-sm" onclick="renderClientes()">Filtrar</button>
+            <button class="btn btn-secondary btn-sm" onclick="paginaClientes=1;renderClientes()">Filtrar</button>
             <button class="btn btn-outline btn-sm" onclick="limparFiltrosClientes()">Limpar</button>
           </div>
         </div>
@@ -610,23 +610,23 @@ tbody td{padding:11px 16px;font-size:14px}
         <div class="search-box" style="align-items:center;gap:8px;flex-wrap:wrap">
           <div id="btn-tabela-prod-wrap"></div>
           <button class="btn btn-outline btn-sm" onclick="forcarAtualizacaoFotos()" title="Força recarregar todas as fotos, útil após trocar imagens no Cloudinary">🔄 Atualizar Fotos</button>
-          <input type="text" class="search-input" id="search-produtos" placeholder="Buscar produto..." oninput="renderProdutos()">
-          <select id="filter-estoque" onchange="renderProdutos()" class="search-input" style="width:auto">
+          <input type="text" class="search-input" id="search-produtos" placeholder="Buscar produto..." oninput="paginaProdutos=1;renderProdutos()">
+          <select id="filter-estoque" onchange="paginaProdutos=1;renderProdutos()" class="search-input" style="width:auto">
             <option value="todos">Todos</option>
             <option value="disponivel">Com estoque</option>
             <option value="zero">Sem estoque</option>
           </select>
-          <select id="filter-tipo-produto" onchange="renderProdutos()" class="search-input" style="width:auto">
+          <select id="filter-tipo-produto" onchange="paginaProdutos=1;renderProdutos()" class="search-input" style="width:auto">
             <option value="vendavel" selected>Só Vendáveis</option>
             <option value="">Vendáveis + Insumos</option>
             <option value="insumo">Só Insumos</option>
           </select>
-          <select id="filter-status-produto" onchange="renderProdutos()" class="search-input" style="width:auto">
+          <select id="filter-status-produto" onchange="paginaProdutos=1;renderProdutos()" class="search-input" style="width:auto">
             <option value="ativos">Ativos</option>
             <option value="inativos">Inativos</option>
             <option value="todos">Todos (ativos + inativos)</option>
           </select>
-          <select id="filter-categoria-produto" onchange="renderProdutos()" class="search-input" style="width:auto">
+          <select id="filter-categoria-produto" onchange="paginaProdutos=1;renderProdutos()" class="search-input" style="width:auto">
             <option value="">Todas as categorias</option>
             <option value="Embalagens">Embalagens</option>
             <option value="Itens de Montagem">Itens de Montagem</option>
@@ -634,7 +634,7 @@ tbody td{padding:11px 16px;font-size:14px}
             <option value="Produto Montado">Produto Montado</option>
             <option value="__sem__">Sem categoria</option>
           </select>
-          <select id="filter-fornecedor-produto" onchange="renderProdutos()" class="search-input" style="width:auto">
+          <select id="filter-fornecedor-produto" onchange="paginaProdutos=1;renderProdutos()" class="search-input" style="width:auto">
             <option value="">Todos os fornecedores</option>
           </select>
           <button class="btn btn-outline btn-sm admin-only" onclick="abrirModalNovoProdutoVendavel()">+ Novo Produto</button>
@@ -1094,7 +1094,7 @@ tbody td{padding:11px 16px;font-size:14px}
       <div class="section-header">
         <div class="section-title">🚚 Fornecedores</div>
         <div class="search-box">
-          <input type="text" class="search-input" id="search-fornecedores" placeholder="Buscar fornecedor..." oninput="renderFornecedores()">
+          <input type="text" class="search-input" id="search-fornecedores" placeholder="Buscar fornecedor..." oninput="paginaFornecedores=1;renderFornecedores()">
           <button class="btn btn-outline btn-sm" style="color:#d97706;border-color:#d97706" onclick="verificarNomesFornecedorDesatualizados()">🔍 Nomes Desatualizados</button>
           <button class="btn btn-primary" onclick="abrirModalFornecedor()">+ Novo Fornecedor</button>
         </div>
@@ -1251,8 +1251,8 @@ tbody td{padding:11px 16px;font-size:14px}
       <!-- VISÃO 1: Lista de produtos com estoque atual -->
       <div id="estoque-view-produtos">
         <div class="search-box" style="margin-bottom:14px">
-          <input type="text" class="search-input" id="search-estoque" placeholder="Buscar produto..." oninput="renderEstoque()">
-          <select id="filter-status-estoque" onchange="renderEstoque()" class="search-input" style="width:auto">
+          <input type="text" class="search-input" id="search-estoque" placeholder="Buscar produto..." oninput="paginaEstoque=1;renderEstoque()">
+          <select id="filter-status-estoque" onchange="paginaEstoque=1;renderEstoque()" class="search-input" style="width:auto">
             <option value="ativos">Ativos</option>
             <option value="inativos">Inativos</option>
             <option value="todos">Todos (ativos + inativos)</option>
@@ -2421,6 +2421,25 @@ function fmtData(iso){
   if(!iso) return '';
   const data = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? new Date(iso+'T00:00:00') : new Date(iso);
   return data.toLocaleDateString('pt-BR');
+}
+
+// Ordena resultados de busca por relevância: código EXATO primeiro, depois código que COMEÇA
+// com o termo, depois nome que começa com o termo, e só por último qualquer item que apenas
+// CONTENHA o termo em algum lugar do código/nome. Sem isso, digitar um código exato (ex: "803")
+// podia trazer primeiro um item que só tem esse trecho no meio de um código maior (ex: "5803B"),
+// empurrando o item certo pra fora da lista de resultados exibidos (limitada a poucos itens).
+function ordenarBuscaPorRelevancia(lista, termoBusca){
+  const q = (termoBusca||'').toLowerCase();
+  const pontuar = p => {
+    const cod = (p.codigo||'').toLowerCase();
+    const nome = (p.nome||'').toLowerCase();
+    if(cod === q) return 0;
+    if(cod.startsWith(q)) return 1;
+    if(nome.startsWith(q)) return 2;
+    if(cod.includes(q)) return 3;
+    return 4;
+  };
+  return lista.slice().sort((a,b) => pontuar(a) - pontuar(b));
 }
 // Registra um evento no histórico de um pedido/orçamento (impressão, PDF gerado,
 // aprovação, criação, etc.) — sempre com data/hora exata e quem foi o responsável.
@@ -4550,7 +4569,7 @@ async function buscarProdutoPedido(){
   const q = document.getElementById('pedido-busca-produto').value.toLowerCase();
   const lista = document.getElementById('pedido-lista-produtos');
   if(q.length<2){ lista.style.display='none'; return; }
-  const res = PRODUTOS_DB.filter(p=>!p.inativo && ((p.nome||'').toLowerCase().includes(q)||(p.codigo||'').toLowerCase().includes(q))).slice(0,8);
+  const res = ordenarBuscaPorRelevancia(PRODUTOS_DB.filter(p=>!p.inativo && ((p.nome||'').toLowerCase().includes(q)||(p.codigo||'').toLowerCase().includes(q))), q).slice(0,8);
   if(!res.length){ lista.style.display='none'; return; }
 
   // Garante que receitas e insumos estejam carregados para calcular capacidade de produção
@@ -6214,10 +6233,10 @@ async function buscarProdutoOP(){
 
   // Só mostra produtos que TÊM receita cadastrada
   const codigosComReceita = Object.keys(RECEITAS_DB);
-  const res = PRODUTOS_DB.filter(p =>
+  const res = ordenarBuscaPorRelevancia(PRODUTOS_DB.filter(p =>
     codigosComReceita.includes(p.codigo) &&
     (p.nome.toLowerCase().includes(q) || p.codigo.toLowerCase().includes(q))
-  ).slice(0,8);
+  ), q).slice(0,8);
 
   if(!res.length){
     lista.innerHTML = '<div style="padding:14px;color:var(--muted);font-size:13px">Nenhum produto com receita cadastrada encontrado</div>';
@@ -7187,7 +7206,7 @@ function buscarProdutoMovimento(){
   const itensInsumo = INSUMOS_DB.filter(i=>!i.inativo).map(i=>({codigo:i.codigo, nome:i.nome, quantidade:i.estoque_atual, _tipo:'insumo', key:i.key}));
   const todos = [...itensVendaveis, ...itensInsumo];
 
-  const res = todos.filter(p=>(p.nome||'').toLowerCase().includes(q)||(p.codigo||'').toLowerCase().includes(q)).slice(0,8);
+  const res = ordenarBuscaPorRelevancia(todos.filter(p=>(p.nome||'').toLowerCase().includes(q)||(p.codigo||'').toLowerCase().includes(q)), q).slice(0,8);
   if(!res.length){ lista.innerHTML='<div style="padding:14px;color:var(--muted);font-size:13px">Nenhum produto encontrado</div>'; lista.style.display='block'; return; }
   lista.innerHTML = res.map(p=>{
     const tipoTag = p._tipo==='insumo' ? '<span class="badge" style="background:#ede9fe;color:#7c3aed;font-size:9px">INSUMO</span>' : '';
@@ -7712,7 +7731,7 @@ function buscarItemCompra(){
   const itensInsumo = INSUMOS_DB.filter(i=>!i.inativo).map(i=>({codigo:i.codigo, nome:i.nome, unidade:i.unidade, fornecedores:i.fornecedores, _tipo:'insumo'}));
   const todos = [...itensVendaveis, ...itensInsumo];
 
-  const res = todos.filter(p=>(p.nome||'').toLowerCase().includes(q)||(p.codigo||'').toLowerCase().includes(q)).slice(0,8);
+  const res = ordenarBuscaPorRelevancia(todos.filter(p=>(p.nome||'').toLowerCase().includes(q)||(p.codigo||'').toLowerCase().includes(q)), q).slice(0,8);
   if(!res.length){ lista.innerHTML='<div style="padding:14px;color:var(--muted);font-size:13px">Nenhum item encontrado</div>'; lista.style.display='block'; return; }
 
   lista.innerHTML = res.map(p=>{
@@ -8536,9 +8555,9 @@ function buscarInsumoDefeito(){
   const lista = document.getElementById('defeito-lista-busca');
   if(q.length<2){ lista.style.display='none'; return; }
 
-  const resInsumo = INSUMOS_DB.filter(i=>!i.inativo && ((i.nome||'').toLowerCase().includes(q)||(i.codigo||'').toLowerCase().includes(q)))
+  const resInsumo = ordenarBuscaPorRelevancia(INSUMOS_DB.filter(i=>!i.inativo && ((i.nome||'').toLowerCase().includes(q)||(i.codigo||'').toLowerCase().includes(q))), q)
     .slice(0,6).map(i=>({...i, _tipo:'insumo', _estoque:i.estoque_atual||0}));
-  const resProduto = PRODUTOS_DB.filter(p=>!p.inativo && ((p.nome||'').toLowerCase().includes(q)||(p.codigo||'').toLowerCase().includes(q)))
+  const resProduto = ordenarBuscaPorRelevancia(PRODUTOS_DB.filter(p=>!p.inativo && ((p.nome||'').toLowerCase().includes(q)||(p.codigo||'').toLowerCase().includes(q))), q)
     .slice(0,6).map(p=>({...p, _tipo:'vendavel', _estoque:p.quantidade||0}));
   const res = [...resProduto, ...resInsumo].slice(0,8);
 
