@@ -2413,7 +2413,15 @@ const POR_PAGINA = 20;
 
 // ══ UTILITÁRIOS ══
 function fmtMoeda(v){ return 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
-function fmtData(iso){ if(!iso) return ''; return new Date(iso).toLocaleDateString('pt-BR'); }
+// Datas "só o dia" (formato YYYY-MM-DD, sem hora) — como as que vêm de <input type="date"> —
+// são interpretadas pelo JavaScript como meia-noite em UTC. Convertendo isso pro fuso do Brasil
+// (que está sempre atrás de UTC), a data "vaza" pro dia anterior na exibição. Forçando meia-noite
+// LOCAL corrige isso pras datas puras, sem mexer em timestamps completos (que já têm hora certa).
+function fmtData(iso){
+  if(!iso) return '';
+  const data = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? new Date(iso+'T00:00:00') : new Date(iso);
+  return data.toLocaleDateString('pt-BR');
+}
 // Registra um evento no histórico de um pedido/orçamento (impressão, PDF gerado,
 // aprovação, criação, etc.) — sempre com data/hora exata e quem foi o responsável.
 async function registrarEventoHistorico(pedidoId, textoEvento){
