@@ -1390,7 +1390,7 @@ tbody td{padding:11px 16px;font-size:14px}
       <div id="pedido-lista-produtos" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;display:none;background:var(--card);margin-bottom:12px"></div>
       <div id="pedido-item-staging" style="display:none;margin-bottom:14px"></div>
       <div class="item-row item-row-header">
-        <span>Produto</span><span>Qtd</span><span>Preço Unit.</span><span>Desc.%</span><span>Subtotal</span><span></span>
+        <span>Produto</span><span>Qtd</span><span>Preço Unit.</span><span>Desc.</span><span>Subtotal</span><span></span>
       </div>
       <div id="itens-lista"></div>
       <!-- Desconto geral -->
@@ -4973,6 +4973,13 @@ function atualizarItemStaging(){
   let desc = modo === 'R$' ? (preco > 0 ? Math.min(100, Math.max(0, rawDesc/preco*100)) : 0)
                            : Math.min(100, Math.max(0, rawDesc));
 
+  // Segurança: em R$ (por unidade), valor >= preço unitário zeraria o item
+  if(modo === 'R$' && preco > 0 && rawDesc >= preco){
+    alert(`O desconto de ${fmtMoeda(rawDesc)} é maior ou igual ao preço unitário de ${fmtMoeda(preco)} — o item ficaria de graça.\n\nO desconto em R$ é POR UNIDADE. Se você quis desconto em %, use o botão % / R$.`);
+    desc = 0;
+    document.getElementById('staging-desc').value = 0;
+  }
+
   // Mesma trava de sempre: vendedor comum não passa do preço mínimo, nem por preço nem por desconto
   if(!usuarioLogado?.admin && itemEmEstagio.preco_minimo > 0){
     if(preco < itemEmEstagio.preco_minimo){
@@ -5062,6 +5069,19 @@ function atualizarDescItem(idx, val){
     desconto = item.preco > 0 ? Math.min(100, rs/item.preco*100) : 0;
   } else {
     desconto = Math.min(100, Math.max(0, parseFloat(val)||0));
+  }
+
+  // Segurança: em R$, um desconto >= preço unitário zeraria (ou inverteria) o item.
+  // O R$ é POR UNIDADE — em itens baratos é fácil passar do preço sem querer.
+  if(modo === 'R$'){
+    const rsDigitado = Math.max(0, parseFloat(val)||0);
+    if(item.preco > 0 && rsDigitado >= item.preco){
+      alert(`O desconto de ${fmtMoeda(rsDigitado)} é maior ou igual ao preço unitário de ${fmtMoeda(item.preco)} — o item ficaria de graça.\n\nLembre: o desconto em R$ é POR UNIDADE. Se você quis dar desconto em porcentagem, use o botão % / R$ ao lado do campo.`);
+      item.desconto_item = 0;
+      item.desc_valor = 0;
+      renderItens();
+      return;
+    }
   }
 
   const cadastroAtual = PRODUTOS_DB.find(x=>x.codigo===item.codigo);
