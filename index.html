@@ -1396,10 +1396,14 @@ tbody td{padding:11px 16px;font-size:14px}
       <!-- Desconto geral -->
       <div style="display:flex;align-items:center;gap:12px;margin:12px 0;flex-wrap:wrap">
         <div class="form-group" style="flex:0 0 auto">
-          <label>Desconto geral no pedido (%)</label>
-          <input type="number" id="desc-geral" min="0" max="100" step="0.1" value="0" style="width:120px" oninput="atualizarTotais()">
+          <label>Desconto geral (%)</label>
+          <input type="number" id="desc-geral" min="0" max="100" step="0.1" value="0" style="width:110px" oninput="ultimoCampoDesc='percent';atualizarTotais()">
         </div>
-        <div style="font-size:13px;color:var(--muted);padding-top:20px">O desconto geral é aplicado sobre o total após descontos por item.</div>
+        <div class="form-group" style="flex:0 0 auto">
+          <label>Desconto geral (R$)</label>
+          <input type="number" id="desc-geral-valor" min="0" step="0.01" value="0" style="width:130px" oninput="ultimoCampoDesc='valor';atualizarTotais()">
+        </div>
+        <div style="font-size:13px;color:var(--muted);padding-top:20px">Descontos gerais (% e/ou R$) aplicados sobre o total após os descontos por item.</div>
       </div>
       <div class="totais-box" id="totais-box">
         <div class="totais-item"><span>Itens</span><strong id="tot-itens">0</strong></div>
@@ -4347,6 +4351,7 @@ async function editarPedido(id){
   document.getElementById('step-cliente-ped').style.display='none';
   document.getElementById('step-itens-ped').style.display='';
   document.getElementById('desc-geral').value = p.desconto_geral||0;
+  document.getElementById('desc-geral-valor').value = p.desconto_valor||0;
   renderItens();
   await atualizarCondicoes();
   document.getElementById('pedido-forma').value = p.forma||'';
@@ -4412,6 +4417,7 @@ async function clonarPedido(id){
   document.getElementById('step-cliente-ped').style.display='none';
   document.getElementById('step-itens-ped').style.display='';
   document.getElementById('desc-geral').value = p.desconto_geral||0;
+  document.getElementById('desc-geral-valor').value = p.desconto_valor||0;
   renderItens();
   await atualizarCondicoes();
   document.getElementById('pedido-forma').value = p.forma||'';
@@ -4670,6 +4676,7 @@ async function abrirModalPedido(isOrcamento=false){
   document.getElementById('pedido-condicao').innerHTML='<option value="">Selecione...</option>';
   document.getElementById('pedido-obs').value='';
   document.getElementById('desc-geral').value=0;
+  const _dgv=document.getElementById('desc-geral-valor'); if(_dgv) _dgv.value=0; ultimoCampoDesc='percent';
   document.getElementById('boleto-info').style.display='none';
   document.getElementById('alerta-parcela').style.display='none';
   document.getElementById('parcelas-container').style.display='none';
@@ -5065,13 +5072,16 @@ function atualizarPreco(idx,val){
   item.preco=v; renderItens(); calcularParcelas();
 }
 
+let ultimoCampoDesc='percent';
+function getDescValor(){ return Math.max(0, parseFloat(document.getElementById('desc-geral-valor')?.value)||0); }
 function calcSubtotal(){
   return pedidoAtual.itens.reduce((s,i)=>s+i.qtd*i.preco*(1-(i.desconto_item||0)/100),0);
 }
 function calcTotal(){
   const sub = calcSubtotal();
   const dg = parseFloat(document.getElementById('desc-geral')?.value)||0;
-  const totalComDesconto = sub * (1 - dg/100);
+  const dv = getDescValor();
+  const totalComDesconto = Math.max(0, sub * (1 - dg/100) - dv);
   return Math.max(0, totalComDesconto - (pedidoAtual.credito_aplicado||0));
 }
 
@@ -5082,10 +5092,13 @@ function calcTotal(){
 function validarPedidoPrecosMinimos(){
   if(usuarioLogado?.admin) return null; // admin pode vender abaixo do mínimo
   const dg = parseFloat(document.getElementById('desc-geral')?.value) || 0;
+  const dv = getDescValor();
+  const sub = calcSubtotal();
+  const mult = sub > 0 ? ((1 - dg/100) - dv/sub) : (1 - dg/100);
   for(const item of pedidoAtual.itens){
     if(!(item.preco_minimo > 0)) continue;
     const precoComDescItem = item.preco * (1-(item.desconto_item||0)/100);
-    const precoFinal = precoComDescItem * (1 - dg/100);
+    const precoFinal = precoComDescItem * mult;
     if(precoFinal < item.preco_minimo - 0.001){ // pequena tolerância pra arredondamento
       return { item, precoFinal };
     }
@@ -5094,21 +5107,33 @@ function validarPedidoPrecosMinimos(){
 }
 
 function atualizarTotais(){
-  // Trava o desconto geral se ele derrubar QUALQUER item abaixo do preço mínimo dele —
-  // sem isso, dava pra contornar a trava por item aplicando desconto no total do pedido.
+  // Trava de preço mínimo: se os descontos gerais (% e/ou R$) derrubarem qualquer item
+  // abaixo do preço mínimo dele, limita automaticamente o campo que acabou de ser mexido.
   if(!usuarioLogado?.admin){
     const dgEl = document.getElementById('desc-geral');
+    const dvEl = document.getElementById('desc-geral-valor');
     const dg = parseFloat(dgEl.value)||0;
-    if(dg > 0){
-      for(const item of pedidoAtual.itens){
-        if(!(item.preco_minimo > 0)) continue;
-        const precoComDescItem = item.preco * (1-(item.desconto_item||0)/100);
-        const precoFinal = precoComDescItem * (1 - dg/100);
-        if(precoFinal < item.preco_minimo){
-          const dgMaximo = precoComDescItem > 0 ? Math.max(0, ((precoComDescItem - item.preco_minimo) / precoComDescItem * 100)) : 0;
-          alert(`Desconto geral máximo permitido: ${dgMaximo.toFixed(1)}%\n\nCom ${dg}% de desconto geral, "${item.nome}" ficaria em ${fmtMoeda(precoFinal)}, abaixo do mínimo de ${fmtMoeda(item.preco_minimo)}.`);
-          dgEl.value = dgMaximo.toFixed(1);
-          break;
+    const dv = Math.max(0, parseFloat(dvEl?.value)||0);
+    const subG = calcSubtotal();
+    if((dg > 0 || dv > 0) && subG > 0){
+      let multMin = 0, itemCritico = null;
+      for(const it of pedidoAtual.itens){
+        if(!(it.preco_minimo > 0)) continue;
+        const pcd = it.preco * (1-(it.desconto_item||0)/100);
+        if(pcd <= 0) continue;
+        const m = it.preco_minimo / pcd;
+        if(m > multMin){ multMin = m; itemCritico = it; }
+      }
+      const multEfetivo = (1 - dg/100) - dv/subG;
+      if(itemCritico && multEfetivo < multMin - 0.0000001){
+        if(ultimoCampoDesc === 'valor'){
+          const dvMax = Math.max(0, subG*((1 - dg/100) - multMin));
+          dvEl.value = dvMax.toFixed(2);
+          alert(`Desconto em R$ máximo permitido: ${fmtMoeda(dvMax)}\n\n"${itemCritico.nome}" ficaria abaixo do preço mínimo de ${fmtMoeda(itemCritico.preco_minimo)}.`);
+        } else {
+          const dgMax = Math.max(0, (1 - multMin - dv/subG) * 100);
+          dgEl.value = dgMax.toFixed(1);
+          alert(`Desconto geral máximo permitido: ${dgMax.toFixed(1)}%\n\n"${itemCritico.nome}" ficaria abaixo do preço mínimo de ${fmtMoeda(itemCritico.preco_minimo)}.`);
         }
       }
     }
@@ -5236,7 +5261,8 @@ async function confirmarPedido(){
   // os itens, quando o total ainda estava em R$0.
   if(pedidoAtual.credito_aplicado > 0){
     const dgAtual = parseFloat(document.getElementById('desc-geral')?.value)||0;
-    const totalSemCredito = calcSubtotal() * (1 - dgAtual/100);
+    const dvAtual = getDescValor();
+    const totalSemCredito = Math.max(0, calcSubtotal() * (1 - dgAtual/100) - dvAtual);
     if(pedidoAtual.credito_aplicado > totalSemCredito){
       pedidoAtual.credito_aplicado = Math.max(0, totalSemCredito);
       toast(`⚠️ Crédito aplicado ajustado para ${fmtMoeda(pedidoAtual.credito_aplicado)} — não pode passar do valor do pedido`,'error');
@@ -5282,7 +5308,8 @@ async function confirmarPedido(){
 
   const sub = calcSubtotal();
   const dg = parseFloat(document.getElementById('desc-geral').value)||0;
-  const total = Math.max(0, sub*(1-dg/100) - (pedidoAtual.credito_aplicado||0));
+  const dv = Math.max(0, parseFloat(document.getElementById('desc-geral-valor').value)||0);
+  const total = Math.max(0, Math.max(0, sub*(1-dg/100) - dv) - (pedidoAtual.credito_aplicado||0));
   const dias = condicao==='AVISTA'?[0]:condicao.split('/').map(Number);
   if(dias.length>1 && total/dias.length < 300){
     const ok = await confirmCustom('Parcela abaixo de R$ 300,00. Confirmar mesmo assim?', 'Confirmar');
@@ -5391,7 +5418,7 @@ async function confirmarPedido(){
       digitado_por_id: usuarioLogado.id, digitado_por_nome: usuarioLogado.nome,
       itens:pedidoAtual.itens, forma, condicao,
       obs:document.getElementById('pedido-obs').value,
-      subtotal:sub, desconto_geral:dg, desconto_total:sub-total, total,
+      subtotal:sub, desconto_geral:dg, desconto_valor:dv, desconto_total:sub-total, total,
       credito_aplicado: pedidoAtual.credito_aplicado || 0,
       parcelas, status: convertendoOrcamento ? 'AA' : (pedidoOriginal?.status || 'AA'),
       veio_de_orcamento: convertendoOrcamento ? true : (pedidoOriginal?.veio_de_orcamento || false),
@@ -5469,7 +5496,8 @@ async function salvarComoOrcamento(){
   // Trava final: o crédito aplicado não pode passar do valor real do orçamento
   if(pedidoAtual.credito_aplicado > 0){
     const dgAtualOrc = parseFloat(document.getElementById('desc-geral')?.value)||0;
-    const totalSemCreditoOrc = calcSubtotal() * (1 - dgAtualOrc/100);
+    const dvAtualOrc = getDescValor();
+    const totalSemCreditoOrc = Math.max(0, calcSubtotal() * (1 - dgAtualOrc/100) - dvAtualOrc);
     if(pedidoAtual.credito_aplicado > totalSemCreditoOrc){
       pedidoAtual.credito_aplicado = Math.max(0, totalSemCreditoOrc);
       toast(`⚠️ Crédito aplicado ajustado para ${fmtMoeda(pedidoAtual.credito_aplicado)} — não pode passar do valor do orçamento`,'error');
@@ -5479,7 +5507,8 @@ async function salvarComoOrcamento(){
   }
 
   const sub=calcSubtotal(); const dg=parseFloat(document.getElementById('desc-geral').value)||0;
-  const total=Math.max(0, sub*(1-dg/100) - (pedidoAtual.credito_aplicado||0)); const c=pedidoAtual.cliente;
+  const dv=Math.max(0, parseFloat(document.getElementById('desc-geral-valor').value)||0);
+  const total=Math.max(0, Math.max(0, sub*(1-dg/100) - dv) - (pedidoAtual.credito_aplicado||0)); const c=pedidoAtual.cliente;
   try {
     // Editando um orçamento já existente: atualiza o mesmo registro em vez de criar um novo
     const editandoExistente = pedidoAtual.editando && pedidoAtual.id;
@@ -5530,7 +5559,7 @@ async function salvarComoOrcamento(){
       digitado_por_nome: dadosOriginais.digitado_por_nome || usuarioLogado.nome,
       itens:pedidoAtual.itens, forma, condicao,
       obs:document.getElementById('pedido-obs').value,
-      subtotal:sub, desconto_geral:dg, desconto_total:sub-total, total,
+      subtotal:sub, desconto_geral:dg, desconto_valor:dv, desconto_total:sub-total, total,
       credito_aplicado: pedidoAtual.credito_aplicado || 0,
       parcelas, status:'Orçamento',
       historico_edicoes: historicoOrc
@@ -5670,6 +5699,7 @@ async function confirmarOrcamento(id){
     document.getElementById('step-cliente-ped').style.display='none';
     document.getElementById('step-itens-ped').style.display='';
     document.getElementById('desc-geral').value=p.desconto_geral||0;
+    document.getElementById('desc-geral-valor').value=p.desconto_valor||0;
     renderItens();
     await atualizarCondicoes();
     document.getElementById('pedido-forma').value = p.forma||'';
