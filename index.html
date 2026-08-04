@@ -524,7 +524,7 @@ tbody td{padding:11px 16px;font-size:14px}
             <label>Situação do Orçamento</label>
             <select id="fo-status" onchange="paginaOrcamentos=1;renderOrcamentos()">
               <option value="">Todas</option>
-              <option value="andamento">Em Andamento</option>
+              <option value="andamento" selected>Em Andamento</option>
               <option value="aprovado">Aprovado</option>
               <option value="cancelado">Cancelado</option>
             </select>
@@ -2819,7 +2819,13 @@ function showTab(tab, el){
   if(tab==='painel') renderPainel();
   if(tab==='pedidos'){ limparFiltrosPedidos(); renderPedidos(); }
   if(tab==='orcamentos'){
-    if(!filtroOrcamentosJaAplicado){ document.getElementById('fo-data-ini').value = primeiroDiaMesAtual(); filtroOrcamentosJaAplicado = true; }
+    if(!filtroOrcamentosJaAplicado){
+      document.getElementById('fo-data-ini').value = primeiroDiaMesAtual();
+      // Orçamentos abre sempre filtrado em "Em Andamento" — é o que interessa no dia a dia.
+      // Os aprovados já viraram pedido e os cancelados só poluem a lista.
+      document.getElementById('fo-status').value = 'andamento';
+      filtroOrcamentosJaAplicado = true;
+    }
     renderOrcamentos();
   }
   if(tab==='clientes') renderClientes();
@@ -5670,6 +5676,9 @@ function limparFiltrosOrcamentos(){
   document.getElementById('fo-cliente').value = '';
   document.getElementById('fo-produto').value = '';
   document.getElementById('fo-vendedor').value = '';
+  // Limpar volta ao padrão da tela, que é "Em Andamento" — antes esse campo não era
+  // tocado aqui, então ficava preso no que estivesse selecionado.
+  document.getElementById('fo-status').value = 'andamento';
   paginaOrcamentos = 1;
   renderOrcamentos();
 }
