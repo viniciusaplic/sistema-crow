@@ -8134,17 +8134,30 @@ async function adicionarItemCompra(codigo, tipo){
   }
   if(fInfo) codigoFornecedor = fInfo.codigo_fornecedor || '';
 
-  // 2. Último preço de compra — busca no histórico de pedidos de compra concluídos
+  // 2. Último preço de compra — considera TODOS os pedidos de compra, não só os já
+  // recebidos. Antes o filtro era ['recebido','concluido'], então um pedido feito hoje
+  // (que nasce em "Em Negociação") ficava invisível aqui e o preço não era puxado —
+  // só aparecia depois que a mercadoria chegasse, que é justamente quando já não
+  // adianta mais para montar o pedido seguinte.
   let ultimoPrecoCompra = 0;
   let ultimaDataCompra = null;
+  let ultimoStatusCompra = null;
+  let ultimoTsCompra = 0;
   for(const c of Object.values(todos)){
-    if(!['recebido','concluido'].includes(c.status)) continue;
-    // Filtra pelo mesmo fornecedor se tiver selecionado
-    if(fornecedorSelecionado && (c.fornecedor||'').toLowerCase() !== fornecedorSelecionado) continue;
+    // Filtra pelo mesmo fornecedor se tiver selecionado (trim nos dois lados — espaço
+    // sobrando no cadastro fazia a comparação falhar silenciosamente)
+    if(fornecedorSelecionado && (c.fornecedor||'').trim().toLowerCase() !== fornecedorSelecionado) continue;
     const itemHist = (c.itens||[]).find(i=>i.codigo===codigo);
-    if(itemHist && itemHist.preco_unit > 0){
-      if(!ultimaDataCompra || c.data > ultimaDataCompra){
-        ultimaDataCompra = c.data;
+    if(itemHist && Number(itemHist.preco_unit) > 0){
+      const data = c.data || '';
+      const ts = Number(c.ts_criacao) || 0;
+      // Mais recente pela data do pedido; empate na mesma data desempata pelo horário de criação
+      const maisRecente = !ultimaDataCompra || data > ultimaDataCompra ||
+                          (data === ultimaDataCompra && ts > ultimoTsCompra);
+      if(maisRecente){
+        ultimaDataCompra = data;
+        ultimoTsCompra = ts;
+        ultimoStatusCompra = c.status;
         ultimoPrecoCompra = Number(itemHist.preco_unit)||0;
       }
     }
@@ -8159,7 +8172,11 @@ async function adicionarItemCompra(codigo, tipo){
   });
 
   if(ultimoPrecoCompra > 0){
-    toast(`✓ Adicionado — último preço de compra: ${fmtMoeda(ultimoPrecoCompra)} (${new Date(ultimaDataCompra+'T00:00').toLocaleDateString('pt-BR')})`,'success');
+    // Mostra de qual status veio o preço: um pedido ainda "Em Negociação" é uma
+    // referência mais fraca do que um já recebido, e quem está comprando precisa saber.
+    const rotuloStatus = statusInfoCompra(ultimoStatusCompra).label;
+    const dataFmt = ultimaDataCompra ? new Date(ultimaDataCompra+'T00:00').toLocaleDateString('pt-BR') : 's/ data';
+    toast(`✓ Adicionado — último preço de compra: ${fmtMoeda(ultimoPrecoCompra)} (${dataFmt} · ${rotuloStatus})`,'success');
   }
 
   document.getElementById('compra-busca-item').value = '';
@@ -12975,6 +12992,8 @@ function fornecedorPadrao(item){
   return padrao?.nome || item.fornecedor || '—';
 }
 
+let SUGESTAO_LISTA = [];
+
 async function relSugestaoCompra(el){
   if(!PRODUTOS_DB.length){
     el.innerHTML='<div style="color:#dc2626;padding:20px">⏳ Produtos ainda não carregados. Aguarde e tente novamente.</div>';
@@ -13012,27 +13031,76 @@ async function relSugestaoCompra(el){
     return;
   }
 
+  // Guarda a lista completa para o filtro por fornecedor poder re-renderizar sem
+  // consultar o banco de novo (o filtro é aplicado em memória, resposta instantânea).
+  SUGESTAO_LISTA = lista;
+
+  // Fornecedores que realmente têm itens pendentes, com a contagem de cada um
+  const contagemForn = {};
+  lista.forEach(p=>{ contagemForn[p.fornecedor] = (contagemForn[p.fornecedor]||0) + 1; });
+  const opcoesForn = Object.keys(contagemForn).sort((a,b)=>a.localeCompare(b,'pt-BR'))
+    .map(f=>`<option value="${f.replace(/"/g,'&quot;')}">${f} (${contagemForn[f]})</option>`).join('');
+
+  el.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+    <span id="sugestao-contador" style="font-size:13px;color:#92400e;font-weight:700"></span>
+    <button class="btn btn-primary btn-sm" style="background:#1565c0" onclick="criarPedidoCompraDoRelatorio()">🛒 Criar Pedido com Selecionados</button>
+  </div>
+  <div style="display:flex;align-items:flex-end;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+    <div class="filtro-group" style="margin:0">
+      <label>Fornecedor</label>
+      <select id="sugestao-filtro-forn" onchange="renderTabelaSugestao()">
+        <option value="">Todos os fornecedores (${lista.length})</option>
+        ${opcoesForn}
+      </select>
+    </div>
+  </div>
+  <div id="sugestao-tabela-wrap"></div>`;
+
+  renderTabelaSugestao();
+}
+
+// Renderiza (ou re-renderiza) a tabela da sugestão de compra aplicando o filtro de
+// fornecedor. Fica separado da geração porque o filtro precisa redesenhar só a tabela.
+function renderTabelaSugestao(){
+  const wrap = document.getElementById('sugestao-tabela-wrap');
+  if(!wrap) return;
+  const filtro = document.getElementById('sugestao-filtro-forn')?.value || '';
+  const lista = (SUGESTAO_LISTA||[]).filter(p => !filtro || p.fornecedor === filtro);
+
+  const contador = document.getElementById('sugestao-contador');
+  if(contador){
+    const vend = lista.filter(p=>p.tipo==='Vendável').length;
+    const ins  = lista.filter(p=>p.tipo==='Insumo').length;
+    contador.textContent = `🛒 ${lista.length} item(ns) precisam de reposição (${vend} vendáveis + ${ins} insumos)`;
+  }
+
+  if(!lista.length){
+    wrap.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">Nenhum item para este fornecedor.</div>';
+    return;
+  }
+
   const porFornecedor = {};
   lista.forEach(p=>{ if(!porFornecedor[p.fornecedor]) porFornecedor[p.fornecedor]=[]; porFornecedor[p.fornecedor].push(p); });
 
-  let html = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
-    <span style="font-size:13px;color:#92400e;font-weight:700">🛒 ${lista.length} item(ns) precisam de reposição (${itensVendaveis.length} vendáveis + ${itensInsumo.length} insumos)</span>
-    <button class="btn btn-primary btn-sm" style="background:#1565c0" onclick="criarPedidoCompraDoRelatorio()">🛒 Criar Pedido com Selecionados</button>
-  </div>
-  <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
-    <thead style="background:var(--primary);color:rgba(255,255,255,.85)"><tr>
-      <th style="padding:10px 12px;width:30px"><input type="checkbox" id="rel-sel-todos" onchange="selecionarTodosSugestao(this.checked)"></th>
-      <th style="padding:10px 12px">Código</th><th style="padding:10px 12px">Produto/Insumo</th>
-      <th style="padding:10px 12px;text-align:center">Tipo</th>
-      <th style="padding:10px 12px">Fornecedor</th>
-      <th style="padding:10px 12px;text-align:center">Disponível</th>
-      <th style="padding:10px 12px;text-align:center">Mínimo</th>
-      <th style="padding:10px 12px;text-align:center">Qtd Sugerida</th>
-      <th style="padding:10px 12px;text-align:center">Qtd a Pedir</th>
+  // Cabeçalho fixo: o container tem altura máxima e rolagem própria, e cada <th> usa
+  // position:sticky. Sem a altura máxima aqui o sticky não gruda em lugar nenhum,
+  // porque o overflow-x do container já cria um contexto de rolagem próprio.
+  const thBase = 'padding:10px 12px;position:sticky;top:0;z-index:3;background:var(--primary);color:rgba(255,255,255,.85)';
+  let html = `<div style="overflow:auto;max-height:70vh;border:1px solid var(--border);border-radius:8px">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr>
+      <th style="${thBase};width:30px"><input type="checkbox" id="rel-sel-todos" onchange="selecionarTodosSugestao(this.checked)"></th>
+      <th style="${thBase}">Código</th><th style="${thBase}">Produto/Insumo</th>
+      <th style="${thBase};text-align:center">Tipo</th>
+      <th style="${thBase}">Fornecedor</th>
+      <th style="${thBase};text-align:center">Disponível</th>
+      <th style="${thBase};text-align:center">Mínimo</th>
+      <th style="${thBase};text-align:center">Qtd Sugerida</th>
+      <th style="${thBase};text-align:center">Qtd a Pedir</th>
     </tr></thead><tbody>`;
 
   Object.entries(porFornecedor).forEach(([forn, itens])=>{
-    html += `<tr style="background:#f8f9fa"><td colspan="9" style="padding:8px 12px;font-weight:700;color:var(--primary)">📦 ${forn}</td></tr>`;
+    html += `<tr style="background:#f8f9fa"><td colspan="9" style="padding:8px 12px;font-weight:700;color:var(--primary);position:sticky;top:41px;z-index:2;background:#f8f9fa">📦 ${forn}</td></tr>`;
     itens.forEach(p=>{
       html += `<tr style="border-bottom:1px solid var(--border)">
         <td style="padding:10px 12px;text-align:center"><input type="checkbox" class="rel-sugestao-check" data-codigo="${p.codigo}" checked></td>
@@ -13051,7 +13119,7 @@ async function relSugestaoCompra(el){
     });
   });
   html += '</tbody></table></div>';
-  el.innerHTML = html;
+  wrap.innerHTML = html;
 }
 
 // ── Sugestão Jornal do Mês (corrigida) ──
