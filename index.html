@@ -13274,6 +13274,8 @@ async function relSugestaoCompra(el, forcarRecarga){
   if(!PRODUTOS_DB.length)     await carregarProdutosFirebase();
   if(!INSUMOS_DB.length)      await carregarInsumosFirebase();
   if(!FORNECEDORES_DB.length) await carregarFornecedoresFirebase();
+  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
+  if(!OPS_DB.length)          await carregarOPsFirebase();
 
   const dados = await carregarConsumoAnualSugestao(forcarRecarga);
   const mapaConsumo   = dados.consumo[baseDemanda] || dados.consumo.concluidos;
@@ -13305,10 +13307,122 @@ async function relSugestaoCompra(el, forcarRecarga){
       semLeadTime: leadTime === 0, semConsumo: cmd === 0 };
   }
 
+  // ── VENDÁVEIS: demanda própria (ponto de pedido clássico) ──
+  const linhasVend = PRODUTOS_DB.filter(p=>!p.inativo).map(p=>montarLinha(p,'Vendável'));
+
+  // ── INSUMOS: demanda DEPENDENTE ──
+  // Insumo não tem demanda própria: ele existe para virar produto acabado. Repor pelo
+  // estoque mínimo dele geraria estoque em dobro — o item já está na prateleira, só que
+  // na forma do produto pai. A necessidade desce da necessidade líquida do pai pela receita.
+  const parteDeReceita = new Set();
+  Object.values(RECEITAS_DB || {}).forEach(r=>{
+    (r?.itens || []).forEach(it=>{ if(it?.codigo) parteDeReceita.add(it.codigo); });
+  });
+
+  // Quanto de cada componente entra em UMA unidade de cada produto pai. Recursivo, para
+  // cobrir sub-receitas (componente que também é montado a partir de outros).
+  function componentesPorUnidade(codigo, fator, nivel, acc){
+    if(nivel > 6) return acc;
+    const r = RECEITAS_DB[codigo];
+    if(!r || !r.itens) return acc;
+    r.itens.forEach(it=>{
+      const q = Number(it.qtd||0) * fator;
+      if(!it.codigo || q <= 0) return;
+      acc[it.codigo] = (acc[it.codigo]||0) + q;
+      componentesPorUnidade(it.codigo, q, nivel+1, acc);
+    });
+    return acc;
+  }
+
+  // Índice reverso componente → pais que o consomem. Um mecanismo que entra em toda
+  // torneira e ducha aparece aqui com dezenas de pais, e a necessidade soma todos.
+  const paisDoInsumo = {};
+  const dadosPai = {};
+  linhasVend.forEach(l => { dadosPai[l.codigo] = l; });
+  PRODUTOS_DB.filter(p=>!p.inativo && RECEITAS_DB[p.codigo]).forEach(p=>{
+    const comps = componentesPorUnidade(p.codigo, 1, 1, {});
+    Object.entries(comps).forEach(([ins, q])=>{
+      (paisDoInsumo[ins] = paisDoInsumo[ins] || []).push({ pai: p.codigo, q });
+    });
+  });
+
+  // A necessidade do componente é calculada no HORIZONTE DELE (lead time próprio +
+  // cobertura), não no do pai. Um mecanismo importado com 90 dias de prazo precisa ser
+  // comprado olhando 90 dias de demanda à frente, mesmo que o pai se reponha em 20.
+  function necessidadeDependente(codigoInsumo, horizonte){
+    let total = 0;
+    (paisDoInsumo[codigoInsumo] || []).forEach(({ pai, q })=>{
+      const d = dadosPai[pai];
+      if(!d) return;
+      // Produção líquida do pai no horizonte: o que a demanda pede, menos o que já existe
+      // pronto ou a caminho. Pai com estoque suficiente não gera necessidade de componente.
+      const netPai = Math.max(0, d.cmd*horizonte + d.es - d.disponivel - d.emTransito);
+      total += q * netPai;
+    });
+    return total;
+  }
+
+  // OPs abertas já comprometem insumo, mas a baixa só acontece na conclusão — então o
+  // saldo ainda mostra esse material como se estivesse livre. Somamos o que falta produzir.
+  const comprometidoOP = {};
+  OPS_DB.filter(op=>op.status !== 'concluida').forEach(op=>{
+    const falta = Math.max(0, Number(op.qtd_solicitada||0) - Number(op.qtd_produzida||0));
+    if(falta <= 0) return;
+    (op.receita||[]).forEach(it=>{
+      if(!it.codigo) return;
+      comprometidoOP[it.codigo] = (comprometidoOP[it.codigo]||0) + Number(it.qtd||0)*falta;
+    });
+  });
+
+  function montarLinhaInsumo(item){
+    const disponivel = Number(item.estoque_atual||0);
+    const transito   = dados.emTransito.insumo[item.codigo] || 0;
+    const consumoAno = mapaConsumo.insumo[item.codigo] || 0;
+    const cmd        = consumoAno / SUG_DIAS_HISTORICO;
+    const es         = Number(item.estoque_minimo||0);
+
+    const nomeForn   = fornecedorPadrao(item);
+    const cadastro   = FORNECEDORES_DB.find(f=>f.nome === nomeForn);
+    const leadTime   = Number(cadastro?.prazo_entrega_dias||0);
+
+    const horizonte   = leadTime + diasCobertura;
+    const necProducao = necessidadeDependente(item.codigo, horizonte);
+    const necOP       = comprometidoOP[item.codigo] || 0;
+    const naReceita   = parteDeReceita.has(item.codigo);
+    const qtdPais     = (paisDoInsumo[item.codigo] || []).length;
+
+    // Insumo consumido mas fora de qualquer receita (embalagem avulsa, por exemplo) não
+    // recebe necessidade pela explosão. Para não faltar em silêncio, ele cai no ponto de
+    // pedido clássico, e a tela sinaliza que veio por esse caminho.
+    // Estoque mínimo de insumo NÃO entra em nenhum dos dois caminhos. Na receita, a
+    // necessidade vem do pai. Fora da receita, vem do consumo histórico. O campo continua
+    // no cadastro, mas não manda mais em nada aqui.
+    let necessidade, pontoPedido, origem;
+    if(naReceita || necProducao > 0 || necOP > 0){
+      necessidade = necProducao + necOP;
+      pontoPedido = null;
+      origem = 'receita';
+    } else {
+      necessidade = cmd*(leadTime + diasCobertura);
+      pontoPedido = cmd*leadTime;
+      origem = 'consumo';
+    }
+
+    const sugestao  = Math.max(0, Math.ceil(necessidade - disponivel - transito));
+    const cobertura = cmd > 0 ? disponivel/cmd : Infinity;
+
+    return { tipo:'Insumo', codigo:item.codigo, nome:item.nome||'', unidade:item.unidade||'UN',
+      fornecedor:nomeForn, cod_fornecedor:(item.fornecedores||[])[0]?.codigo_fornecedor||'',
+      cmd, leadTime, es, disponivel, emTransito:transito, pontoPedido, cobertura, sugestao,
+      necProducao, necOP, necessidade, origem, qtdPais, horizonte,
+      semPai: naReceita && qtdPais === 0,
+      semLeadTime: leadTime === 0, semConsumo: cmd === 0 };
+  }
+
   const lista = [
-    ...PRODUTOS_DB.filter(p=>!p.inativo).map(p=>montarLinha(p,'Vendável')),
-    ...INSUMOS_DB.filter(i=>!i.inativo).map(i=>montarLinha(i,'Insumo'))
-  ].filter(l => l.disponivel + l.emTransito <= l.pontoPedido && l.sugestao > 0)
+    ...linhasVend.filter(l => l.disponivel + l.emTransito <= l.pontoPedido),
+    ...INSUMOS_DB.filter(i=>!i.inativo).map(i=>montarLinhaInsumo(i))
+  ].filter(l => l.sugestao > 0)
    // Infinity - Infinity dá NaN e deixa a ordenação indefinida: comparamos explicitamente
    .sort((a,b)=>{
      if(a.cobertura === b.cobertura) return a.codigo.localeCompare(b.codigo,'pt-BR');
@@ -13319,6 +13433,9 @@ async function relSugestaoCompra(el, forcarRecarga){
   SUGESTAO_LISTA = lista;
 
   const semLeadTime = lista.filter(l=>l.semLeadTime).length;
+  const insumosPorConsumo = lista.filter(l=>l.origem==='consumo').length;
+  const insumosSemPai = INSUMOS_DB.filter(i=>!i.inativo)
+    .map(i=>montarLinhaInsumo(i)).filter(l=>l.semPai).length;
 
   const totVend = lista.filter(p=>p.tipo==='Vendável').length;
   const totIns  = lista.filter(p=>p.tipo==='Insumo').length;
@@ -13336,6 +13453,12 @@ async function relSugestaoCompra(el, forcarRecarga){
     <strong>Cálculo MRP:</strong> CMD = itens de <strong>${baseDemanda==='ampliado'?'pedidos concluídos + aprovados + em separação':'pedidos concluídos'}</strong> nos últimos 365 dias ÷ 365 &nbsp;·&nbsp;
     Ponto de Pedido = (CMD × Lead Time) + Estoque Mínimo &nbsp;·&nbsp;
     Qtd Sugerida = CMD × (Lead Time + ${diasCobertura} dias) + Estoque Mínimo − Disponível − Em Trânsito.
+    <br><strong>Insumos seguem outra lógica e não usam estoque mínimo:</strong> a necessidade é a produção
+    líquida de todos os produtos pais dentro do <em>horizonte do próprio insumo</em> (lead time dele + ${diasCobertura} dias),
+    somada ao que as OPs abertas ainda vão consumir. Assim um insumo já transformado em produto acabado não é
+    comprado de novo, e um componente de prazo longo é comprado olhando longe o suficiente.
+    ${insumosSemPai ? `<br><strong style="color:#b45309">⚠ ${insumosSemPai} insumo(s) estão em receita mas sem produto pai ativo</strong> — a necessidade deles sai zero. Verifique se o produto acabado foi inativado ou não existe no cadastro.` : ''}
+    ${insumosPorConsumo ? `<br><strong style="color:#b45309">ℹ ${insumosPorConsumo} insumo(s) fora de qualquer receita</strong> — sem vínculo com produto acabado, a necessidade deles caiu no cálculo por consumo histórico. Se deveriam estar numa receita, vale cadastrar.` : ''}
     ${semLeadTime ? `<br><strong style="color:#b45309">⚠ ${semLeadTime} item(ns) com fornecedor sem prazo de entrega cadastrado</strong> — o lead time entrou como 0 e a sugestão pode estar subestimada. Cadastre em <strong>Compras → Fornecedores</strong>.` : ''}
   </div>
   <div style="display:flex;align-items:flex-end;gap:10px;margin-bottom:12px;flex-wrap:wrap">
@@ -13448,14 +13571,15 @@ function renderTabelaSugestao(){
       <th style="${thBase};text-align:center">Disponível</th>
       <th style="${thBase};text-align:center">Em Trânsito</th>
       <th style="${thBase};text-align:center" title="Estoque de segurança = estoque mínimo cadastrado">Est. Mín</th>
-      <th style="${thBase};text-align:center" title="(CMD × Lead Time) + Estoque Mínimo">Ponto Pedido</th>
+      <th style="${thBase};text-align:center" title="Insumos: quantidade exigida pela produção planejada + OPs abertas">Nec. Produção</th>
+      <th style="${thBase};text-align:center" title="Vendáveis: (CMD × Lead Time) + Estoque Mínimo">Ponto Pedido</th>
       <th style="${thBase};text-align:center" title="Dias de estoque restantes no ritmo atual">Cobertura</th>
       <th style="${thBase};text-align:center">Qtd Sugerida</th>
       <th style="${thBase};text-align:center">Qtd a Pedir</th>
     </tr></thead><tbody>`;
 
   Object.entries(porFornecedor).forEach(([forn, itens])=>{
-    html += `<tr style="background:#f8f9fa"><td colspan="13" style="padding:8px 12px;font-weight:700;color:var(--primary);position:sticky;top:41px;z-index:2;background:#f8f9fa">📦 ${forn}</td></tr>`;
+    html += `<tr style="background:#f8f9fa"><td colspan="14" style="padding:8px 12px;font-weight:700;color:var(--primary);position:sticky;top:41px;z-index:2;background:#f8f9fa">📦 ${forn}</td></tr>`;
     itens.forEach(p=>{
       const corCob = p.cobertura <= p.leadTime ? '#dc2626' : (p.cobertura <= p.leadTime+7 ? '#d97706' : '#16a34a');
       const txtCob = isFinite(p.cobertura) ? `${Math.floor(p.cobertura)} d` : '—';
@@ -13468,8 +13592,13 @@ function renderTabelaSugestao(){
         <td style="padding:10px 12px;text-align:center">${p.semLeadTime ? '<span style="color:#b45309" title="Fornecedor sem prazo de entrega cadastrado">—</span>' : p.leadTime}</td>
         <td style="padding:10px 12px;text-align:center;color:${p.disponivel<=0?'#dc2626':'#d97706'};font-weight:700">${fmt(p.disponivel)}</td>
         <td style="padding:10px 12px;text-align:center;color:${p.emTransito>0?'#1565c0':'var(--muted)'}">${p.emTransito ? fmt(p.emTransito) : '—'}</td>
-        <td style="padding:10px 12px;text-align:center">${p.es ? fmt(p.es) : '—'}</td>
-        <td style="padding:10px 12px;text-align:center;font-weight:600">${fmt(p.pontoPedido)}</td>
+        <td style="padding:10px 12px;text-align:center;${p.tipo==='Insumo'?'color:#9ca3af':''}" ${p.tipo==='Insumo'?'title="Insumos não usam estoque mínimo: a necessidade vem da receita ou do consumo histórico"':''}>${p.es ? fmt(p.es) : '—'}</td>
+        <td style="padding:10px 12px;text-align:center;font-weight:600">${p.origem==='receita'
+          ? `${fmt(p.necessidade)}<div style="font-size:10px;color:var(--muted);font-weight:400">${p.necOP>0?`OP: ${fmt(p.necOP)}`:''}${p.necOP>0&&p.necProducao>0?' · ':''}${p.necProducao>0?`${p.qtdPais} pai(s) · ${p.horizonte}d`:''}</div>`
+          : '<span style="color:var(--muted);font-weight:400">—</span>'}</td>
+        <td style="padding:10px 12px;text-align:center;font-weight:600">${p.pontoPedido===null
+          ? '<span style="color:var(--muted);font-weight:400" title="Insumo de receita: não usa ponto de pedido próprio">—</span>'
+          : fmt(p.pontoPedido)}</td>
         <td style="padding:10px 12px;text-align:center;color:${corCob};font-weight:700">${txtCob}</td>
         <td style="padding:10px 12px;text-align:center;font-weight:700">${fmt(p.sugestao)}</td>
         <td style="padding:10px 12px;text-align:center">
@@ -14947,7 +15076,7 @@ function exportarRelatorioExcel(){
     case 'compras-fornecedor': dados = lista.map(g=>({'Fornecedor':g.nome,'Pedidos':g.qtd,'Total':g.total})); break;
     case 'estoque-posicao': dados = lista.map(g=>({'Código':g.codigo,'Produto':g.nome,'Estoque':g.estoque,'Reservado':g.reservado,'Disponível':g.disponivel,'Mínimo':g.minimo})); break;
     case 'auditoria-estoque': dados = lista.map(g=>({'Tipo':g.tipo,'Código':g.codigo,'Produto/Insumo':g.nome,'Saldo Atual':g.saldo,'Saldo Esperado':g.esperado,'Diferença':g.dif,'Movimentos após o balanço':g.aplicados,'Último balanço':g.desdeTs?new Date(g.desdeTs).toLocaleDateString('pt-BR'):''})); break;
-    case 'sugestao-compra': dados = lista.map(g=>({'Tipo':g.tipo||'—','Código':g.codigo,'Produto/Insumo':g.nome,'Fornecedor':g.fornecedor,'CMD':Number(g.cmd.toFixed(3)),'Lead Time (dias)':g.leadTime,'Disponível':g.disponivel,'Em Trânsito':g.emTransito,'Estoque Mínimo':g.es,'Ponto de Pedido':Number(g.pontoPedido.toFixed(2)),'Cobertura (dias)':isFinite(g.cobertura)?Math.floor(g.cobertura):'','Sugestão de Compra':g.sugestao})); break;
+    case 'sugestao-compra': dados = lista.map(g=>({'Tipo':g.tipo||'—','Código':g.codigo,'Produto/Insumo':g.nome,'Fornecedor':g.fornecedor,'CMD':Number(g.cmd.toFixed(3)),'Lead Time (dias)':g.leadTime,'Disponível':g.disponivel,'Em Trânsito':g.emTransito,'Estoque Mínimo':g.es,'Nec. Produção':g.origem==='receita'?Number(g.necessidade.toFixed(2)):'','Ponto de Pedido':g.pontoPedido===null?'':Number(g.pontoPedido.toFixed(2)),'Cobertura (dias)':isFinite(g.cobertura)?Math.floor(g.cobertura):'','Sugestão de Compra':g.sugestao})); break;
     case 'estoque-minimo': return exportarRelatorioExcelEstoqueMinimo(lista);
     case 'diagnostico-consumo': return exportarRelatorioExcelDiagnosticoConsumo();
     case 'mrp': return exportarMRPExcel();
