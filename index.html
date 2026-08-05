@@ -4330,8 +4330,8 @@ async function cancelarBipagemPedido(id){
   for(const item of p.itens){
     const prodSnap = await db.ref('produtos/'+item.codigo).once('value');
     if(prodSnap.exists()){
-      await aplicarDeltaEstoque('produto', item.codigo, item.qtd);
-      await registrarMovimentoEstoque(item.codigo, item.nome, 'entrada', item.qtd, `Cancelamento de bipagem — Pedido #${p.numero}`, 'pedido', id);
+      await movimentarEstoque('produto', item.codigo, { codigo:item.codigo, nome:item.nome, delta:item.qtd,
+        motivo:`Cancelamento de bipagem — Pedido #${p.numero}`, origemTipo:'pedido', origemId:id });
     }
     // Resetar marcações de separação/bipagem do item
     item.separado = false;
@@ -4646,9 +4646,8 @@ async function cancelarPedido(id){
       for(const item of p.itens){
         const prodSnap = await db.ref('produtos/'+item.codigo).once('value');
         if(prodSnap.exists()){
-          await aplicarDeltaEstoque('produto', item.codigo, item.qtd);
-          await registrarMovimentoEstoque(item.codigo, item.nome, 'entrada', item.qtd,
-            `Estorno — cancelamento do Pedido #${p.numero} (${p.cliente_nome})`, 'pedido', id);
+          await movimentarEstoque('produto', item.codigo, { codigo:item.codigo, nome:item.nome, delta:item.qtd,
+            motivo:`Estorno — cancelamento do Pedido #${p.numero} (${p.cliente_nome})`, origemTipo:'pedido', origemId:id });
         }
       }
       toast(`✅ Pedido cancelado e ${p.itens.length} item(ns) estornado(s) ao estoque.`,'success');
@@ -7001,14 +7000,15 @@ async function concluirOP(key){
       const snap = await db.ref('insumos/'+insumoKey).once('value');
       const insumo = snap.val();
       if(insumo){
-        await aplicarDeltaEstoque('insumo', insumoKey, -consumir);
-        await registrarMovimentoEstoque(item.codigo, insumo.nome, 'saida', consumir, `Consumo em produção — OP #${op.numero}`, 'op', key);
+        await movimentarEstoque('insumo', insumoKey, { codigo:item.codigo, nome:insumo.nome, delta:-consumir,
+          motivo:`Consumo em produção — OP #${op.numero}`, origemTipo:'op', origemId:key });
       }
     }
 
     // Soma no estoque do produto pronto (cria o registro se ainda não existir)
     const prodSnap = await db.ref('produtos/'+op.produto_codigo).once('value');
     let novaQtdProduto;
+    let movimentoProdutoRegistrado = false;
     if(prodSnap.exists()){
       const valProd = prodSnap.val();
       if(valProd.quantidade === undefined && valProd.estoque !== undefined){
@@ -7016,7 +7016,10 @@ async function concluirOP(key){
         novaQtdProduto = Number(valProd.estoque||0) + qtdProduzida;
         await db.ref('produtos/'+op.produto_codigo+'/quantidade').set(novaQtdProduto);
       } else {
-        novaQtdProduto = (await aplicarDeltaEstoque('produto', op.produto_codigo, qtdProduzida)).novo;
+        novaQtdProduto = (await movimentarEstoque('produto', op.produto_codigo, { codigo:op.produto_codigo,
+          nome:op.produto_nome, delta:qtdProduzida, motivo:`Produção concluída — OP #${op.numero}`,
+          origemTipo:'op', origemId:key })).novo;
+        movimentoProdutoRegistrado = true;
       }
     } else {
       novaQtdProduto = qtdProduzida;
@@ -7037,7 +7040,11 @@ async function concluirOP(key){
       ts_conclusao: Date.now()
     });
 
-    await registrarMovimentoEstoque(op.produto_codigo, op.produto_nome, 'entrada', qtdProduzida, `Produção concluída — OP #${op.numero}`, 'op', key);
+    // Nos caminhos legado (campo 'estoque') e de produto novo o saldo é gravado direto,
+    // então o movimento ainda precisa ser lançado aqui.
+    if(!movimentoProdutoRegistrado){
+      await registrarMovimentoEstoque(op.produto_codigo, op.produto_nome, 'entrada', qtdProduzida, `Produção concluída — OP #${op.numero}`, 'op', key);
+    }
 
     fecharModal('modal-op-detalhe');
     INSUMOS_DB = []; // força recarregar com novos saldos
@@ -7113,6 +7120,78 @@ async function definirEstoqueAbsoluto(tipo, chave, valor){
   });
   sincronizarEstoqueMemoria(tipo, chave, v);
   return { anterior, novo: v };
+}
+
+// ══════════════════════════════════════════════
+// ══ MOVIMENTAÇÃO EM DUAS FASES ══
+// Saldo e histórico ficam em nós diferentes do Firebase, e o banco não oferece transação
+// entre nós a partir do navegador. Então gravamos o movimento PRIMEIRO, marcado como
+// pendente, e só depois aplicamos o saldo. Se algo falhar no meio, sobra um registro
+// pendente — evidência explícita — em vez de um saldo alterado sem histórico.
+// Cada movimento guarda saldo_antes e saldo_apos: a auditoria passa a conferir a
+// continuidade lançamento a lançamento, em vez de reconstruir tudo desde o balanço.
+// ══════════════════════════════════════════════
+
+async function gravarMovimentoPendente(dados){
+  const movKey = db.ref('movimentos_estoque').push().key;
+  await db.ref('movimentos_estoque/'+movKey).set({
+    codigo: dados.codigo, nome: dados.nome || '',
+    tipo: dados.tipoPrevisto, qtd: Number(dados.qtdPrevista)||0,
+    motivo: dados.motivo || '',
+    usuario: usuarioLogado?.nome || 'Sistema',
+    ts: Date.now(),
+    origem_tipo: dados.origemTipo || null,
+    origem_id: dados.origemId || null,
+    pendente: true
+  });
+  return movKey;
+}
+
+async function finalizarMovimento(movKey, r, motivoFinal){
+  const dif = r.novo - r.anterior;
+  await db.ref('movimentos_estoque/'+movKey).update({
+    pendente: null,
+    tipo: dif >= 0 ? 'entrada' : 'saida',
+    qtd: Math.abs(dif),
+    saldo_antes: r.anterior,
+    saldo_apos: r.novo,
+    ...(motivoFinal !== undefined ? { motivo: motivoFinal } : {})
+  });
+}
+
+// Soma/subtrai no saldo e registra o movimento. Substitui o par
+// aplicarDeltaEstoque() + registrarMovimentoEstoque().
+async function movimentarEstoque(tipo, chave, dados){
+  const delta = Number(dados.delta)||0;
+  const movKey = await gravarMovimentoPendente({
+    ...dados, tipoPrevisto: delta >= 0 ? 'entrada' : 'saida', qtdPrevista: Math.abs(delta)
+  });
+  try {
+    const r = await aplicarDeltaEstoque(tipo, chave, delta);
+    await finalizarMovimento(movKey, r);
+    return { ...r, movKey };
+  } catch(e){
+    await db.ref('movimentos_estoque/'+movKey).update({ pendente:null, falhou:true, erro:String(e?.message||e) });
+    throw e;
+  }
+}
+
+// Grava saldo absoluto (balanço/contagem) e registra o movimento com a diferença REAL.
+// motivoFn recebe (anterior, novo) para montar o texto com os números certos.
+async function balancearEstoque(tipo, chave, dados){
+  const movKey = await gravarMovimentoPendente({ ...dados, tipoPrevisto:'entrada', qtdPrevista:0 });
+  try {
+    const r = await definirEstoqueAbsoluto(tipo, chave, dados.valor);
+    if(r.novo === r.anterior && dados.omitirSeZero){
+      await db.ref('movimentos_estoque/'+movKey).remove();
+      return { ...r, movKey:null };
+    }
+    await finalizarMovimento(movKey, r, dados.motivoFn ? dados.motivoFn(r.anterior, r.novo) : dados.motivo);
+    return { ...r, movKey };
+  } catch(e){
+    await db.ref('movimentos_estoque/'+movKey).update({ pendente:null, falhou:true, erro:String(e?.message||e) });
+    throw e;
+  }
 }
 
 async function reservarEstoquePedido(itens){
@@ -7573,21 +7652,16 @@ async function confirmarEstornoProducao(){
 
   try {
     // 1) Saída no produto pronto
-    const novoEstoqueProduto = (await aplicarDeltaEstoque('produto', dados.produto.codigo, -dados.qtd)).novo;
+    const novoEstoqueProduto = (await movimentarEstoque('produto', dados.produto.codigo, {
+      codigo:dados.produto.codigo, nome:dados.produto.nome, delta:-dados.qtd,
+      motivo:`Estorno de Produção${motivoTexto}` })).novo;
     dados.produto.quantidade = novoEstoqueProduto;
-    await registrarMovimentoEstoque(
-      dados.produto.codigo, dados.produto.nome, 'saida', dados.qtd,
-      `Estorno de Produção${motivoTexto}`, null, null
-    );
 
     // 2) Entrada em cada insumo (menos embalagem, já filtrado no preview)
     for(const it of dados.itensDevolucao){
       const key = it.key || ('ins_'+it.codigo);
-      await aplicarDeltaEstoque('insumo', key, it.qtdDevolver);
-      await registrarMovimentoEstoque(
-        it.codigo, it.nome, 'entrada', it.qtdDevolver,
-        `Estorno de Produção — desmontagem de ${dados.qtd}x ${dados.produto.nome}${motivoTexto}`, null, null
-      );
+      await movimentarEstoque('insumo', key, { codigo:it.codigo, nome:it.nome, delta:it.qtdDevolver,
+        motivo:`Estorno de Produção — desmontagem de ${dados.qtd}x ${dados.produto.nome}${motivoTexto}` });
     }
 
     fecharModal('modal-estorno-producao');
@@ -7682,29 +7756,20 @@ async function confirmarMovimentoEstoque(){
 
   // Entrada/saída somam ou subtraem no servidor. Balanço grava o valor contado, mas
   // devolve o saldo real anterior — o histórico passa a registrar a diferença correta.
-  let resultado, qtdMovimento, tipoRegistro;
+  const motivoManual = obs || (tipo==='entrada' ? 'Entrada manual' : 'Saída manual');
+  let resultado;
   if(tipo === 'entrada'){
-    resultado = await aplicarDeltaEstoque(tipoItem, chaveItem, valor);
-    qtdMovimento = valor; tipoRegistro = 'entrada';
+    resultado = await movimentarEstoque(tipoItem, chaveItem, { codigo, nome, delta:valor, motivo:motivoManual });
   } else if(tipo === 'saida'){
-    resultado = await aplicarDeltaEstoque(tipoItem, chaveItem, -valor);
-    qtdMovimento = valor; tipoRegistro = 'saida';
+    resultado = await movimentarEstoque(tipoItem, chaveItem, { codigo, nome, delta:-valor, motivo:motivoManual });
   } else { // balanco
-    resultado = await definirEstoqueAbsoluto(tipoItem, chaveItem, valor);
-    const diferenca = resultado.novo - resultado.anterior;
-    qtdMovimento = Math.abs(diferenca);
-    tipoRegistro = diferenca >= 0 ? 'entrada' : 'saida';
+    resultado = await balancearEstoque(tipoItem, chaveItem, { codigo, nome, valor,
+      motivoFn: (de, para) => `Balanço: ${de} → ${para}${obs ? ' — '+obs : ''}` });
   }
   const estoqueAtual = resultado.anterior;
   const novoEstoque  = resultado.novo;
   movProdutoSelecionado.quantidade = novoEstoque;
   if(tipoItem === 'insumo') movProdutoSelecionado.estoque_atual = novoEstoque;
-
-  const motivoFinal = tipo === 'balanco'
-    ? `Balanço: ${estoqueAtual} → ${novoEstoque}${obs ? ' — '+obs : ''}`
-    : (obs || (tipo==='entrada' ? 'Entrada manual' : 'Saída manual'));
-
-  await registrarMovimentoEstoque(codigo, nome, tipoRegistro, qtdMovimento, motivoFinal);
 
   fecharModal('modal-movimento-estoque');
   await renderEstoque();
@@ -8434,7 +8499,7 @@ async function salvarPedidoCompra(){
 
   // Se está sendo marcado como "recebido" agora (e não estava antes), dá entrada no estoque
   if(novoStatus === 'recebido' && statusAnterior !== 'recebido'){
-    await darEntradaEstoqueCompra(key, compraAtual);
+    await darEntradaEstoqueCompra(key, compraAtual, statusAnterior);
   }
 
   // Registra no histórico se o status mudou (seja na criação ou edição)
@@ -8447,15 +8512,63 @@ async function salvarPedidoCompra(){
   toast('✓ Pedido de compra salvo!','success');
 }
 
-async function darEntradaEstoqueCompra(compraId, compra){
-  for(const item of compra.itens){
+// Identificador estável de um item dentro da compra. Índice + tipo + código, porque a
+// mesma compra pode ter o mesmo código em duas linhas, e código pode conter caracteres
+// que o Firebase não aceita em chave.
+function chaveItemCompra(item, idx){
+  return idx + '_' + (item.tipo==='insumo'?'i':'v') + '_' + String(item.codigo||'').replace(/[.#$\[\]\/]/g,'-');
+}
+
+async function darEntradaEstoqueCompra(compraId, compra, statusAnterior){
+  const snapAplicado = await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado').once('value');
+  const aplicados = snapAplicado.val() || {};
+
+  // Compras salvas antes deste controle não têm o registro de itens aplicados. Se houver
+  // indício de que já foram recebidas alguma vez, perguntamos antes de lançar: reaplicar
+  // duplicaria o estoque, e pular calado poderia esconder uma entrada legítima.
+  if(!snapAplicado.exists()){
+    const jaTeveRecebimento = Object.values(compra.historico_status || {}).some(h => h.para === 'recebido')
+      || ['recebido','concluido'].includes(statusAnterior);
+    if(jaTeveRecebimento){
+      const ok = confirm('⚠ Esta compra de "' + compra.fornecedor + '" já foi marcada como recebida antes.'
+        + '\n\nO estoque provavelmente já recebeu esses itens. Lançar a entrada NOVAMENTE?'
+        + '\n\nOK = lançar de novo (só se a entrada anterior não tiver acontecido)'
+        + '\nCancelar = não lançar (recomendado)');
+      if(!ok){
+        await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado').set({ legado:true, ts:Date.now() });
+        toast('Entrada não repetida — compra marcada como já aplicada','success');
+        return;
+      }
+    }
+  }
+
+  let entraram = 0, pulados = 0;
+
+  for(let idx = 0; idx < compra.itens.length; idx++){
+    const item = compra.itens[idx];
+    const chaveItem = chaveItemCompra(item, idx);
+
+    // Idempotência: se este item desta compra já entrou, não entra de novo. Protege tanto
+    // contra reexecução após queda no meio quanto contra alternar o status Recebido→volta→Recebido.
+    if(aplicados[chaveItem]){ pulados++; continue; }
+
     if(item.tipo === 'insumo'){
       const insumo = INSUMOS_DB.find(x=>x.codigo===item.codigo);
-      await aplicarDeltaEstoque('insumo', insumo?.key || ('ins_'+item.codigo), item.qtd);
+      await movimentarEstoque('insumo', insumo?.key || ('ins_'+item.codigo), { codigo:item.codigo, nome:item.nome,
+        delta:item.qtd, motivo:`Compra ${compra.nf?'NF '+compra.nf:''} — ${compra.fornecedor}`, origemTipo:'compra', origemId:compraId });
     } else {
-      await aplicarDeltaEstoque('produto', item.codigo, item.qtd);
+      await movimentarEstoque('produto', item.codigo, { codigo:item.codigo, nome:item.nome,
+        delta:item.qtd, motivo:`Compra ${compra.nf?'NF '+compra.nf:''} — ${compra.fornecedor}`, origemTipo:'compra', origemId:compraId });
     }
-    await registrarMovimentoEstoque(item.codigo, item.nome, 'entrada', item.qtd, `Compra ${compra.nf?'NF '+compra.nf:''} — ${compra.fornecedor}`, 'compra', compraId);
+
+    // Marca item a item, logo após aplicar: se cair aqui, o próximo recebimento retoma
+    // exatamente de onde parou.
+    await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado/'+chaveItem).set({ qtd:item.qtd, ts:Date.now() });
+    entraram++;
+  }
+
+  if(pulados){
+    toast(`✓ ${entraram} item(ns) lançados · ${pulados} já haviam entrado antes`,'success');
   }
 }
 
@@ -8884,9 +8997,11 @@ async function alterarStatusManualCompra(id, novoStatus){
 
   if(novoStatus === 'recebido' && statusAnterior !== 'recebido'){
     if(!confirm(`Marcar como "Recebido"?\n\nIsso vai dar entrada automática no estoque de ${c.itens.length} item(ns).`)) return;
+    // Entrada primeiro: se cair no meio, o status não avança e o recebimento pode ser
+    // refeito sem duplicar os itens que já entraram.
+    await darEntradaEstoqueCompra(id, c, statusAnterior);
     await db.ref('pedidos_compra/'+id+'/status').set(novoStatus);
     await registrarHistoricoStatusCompra(id, statusAnterior, novoStatus);
-    await darEntradaEstoqueCompra(id, c);
   } else {
     await db.ref('pedidos_compra/'+id+'/status').set(novoStatus);
     await registrarHistoricoStatusCompra(id, statusAnterior, novoStatus);
@@ -8925,9 +9040,11 @@ async function marcarCompraRecebida(id){
   if(!confirm(`Marcar compra de "${c.fornecedor}" como recebida?\n\nIsso vai dar entrada automática no estoque de ${c.itens.length} item(ns).`)) return;
 
   const statusAnterior = c.status;
+  // Entrada primeiro: se cair no meio, o status não avança e o recebimento pode ser
+  // refeito sem duplicar os itens que já entraram.
+  await darEntradaEstoqueCompra(id, c, statusAnterior);
   await db.ref('pedidos_compra/'+id+'/status').set('recebido');
   await registrarHistoricoStatusCompra(id, statusAnterior, 'recebido');
-  await darEntradaEstoqueCompra(id, c);
 
   fecharModal('modal-compra-detalhe');
   await renderCompras();
@@ -9033,6 +9150,9 @@ async function confirmarRegistroDefeito(){
 
   const i = insumoDefeitoSelecionado;
   const ehManual = !opContextoDefeito?.key;
+  const motivoDefeito = ehManual
+    ? 'Defeito — produto retornado (garantia manual)'
+    : `Defeito identificado na produção — OP #${opContextoDefeito.numero}`;
   const darBaixa = ehManual ? document.getElementById('defeito-dar-baixa').checked : true;
   const ehProduto = i._tipo === 'vendavel';
 
@@ -9043,14 +9163,13 @@ async function confirmarRegistroDefeito(){
       // O Math.max(0,...) antigo escondia o problema: se o saldo já estava errado, a
       // baixa era engolida em silêncio. Agora a subtração é real e um saldo negativo
       // fica visível para ser investigado.
-      i.quantidade = (await aplicarDeltaEstoque('produto', i.codigo, -qtd)).novo;
+      i.quantidade = (await movimentarEstoque('produto', i.codigo, { codigo:i.codigo, nome:i.nome, delta:-qtd,
+        motivo: motivoDefeito, origemTipo: ehManual ? null : 'op', origemId: ehManual ? null : opContextoDefeito.key })).novo;
     } else {
       const key = i.key || ('ins_'+i.codigo);
-      i.estoque_atual = (await aplicarDeltaEstoque('insumo', key, -qtd)).novo;
+      i.estoque_atual = (await movimentarEstoque('insumo', key, { codigo:i.codigo, nome:i.nome, delta:-qtd,
+        motivo: motivoDefeito, origemTipo: ehManual ? null : 'op', origemId: ehManual ? null : opContextoDefeito.key })).novo;
     }
-    await registrarMovimentoEstoque(i.codigo, i.nome, 'saida', qtd,
-      ehManual ? `Defeito — produto retornado (garantia manual)` : `Defeito identificado na produção — OP #${opContextoDefeito.numero}`,
-      ehManual ? null : 'op', ehManual ? null : opContextoDefeito.key);
   }
 
   // Registra na lista de garantias
@@ -9777,8 +9896,8 @@ async function finalizarPedidoBipado(){
     for(const item of p.itens){
       const prodSnap = await db.ref('produtos/'+item.codigo).once('value');
       if(prodSnap.exists()){
-        await aplicarDeltaEstoque('produto', item.codigo, -item.qtd);
-        await registrarMovimentoEstoque(item.codigo, item.nome, 'saida', item.qtd, `Pedido #${p.numero} — ${p.cliente_nome}`, 'pedido', p.id);
+        await movimentarEstoque('produto', item.codigo, { codigo:item.codigo, nome:item.nome, delta:-item.qtd,
+          motivo:`Pedido #${p.numero} — ${p.cliente_nome}`, origemTipo:'pedido', origemId:p.id });
       }
     }
 
@@ -11226,12 +11345,8 @@ async function salvarEdicaoInsumo(codigo){
   if(insumo) Object.assign(insumo, cadastro);
 
   if(insumo && Number(estoque_atual||0) !== Number(insumo.estoque_atual||0)){
-    const r = await definirEstoqueAbsoluto('insumo', key, Number(estoque_atual||0));
-    const dif = r.novo - r.anterior;
-    if(dif !== 0){
-      await registrarMovimentoEstoque(codigo, nome, dif > 0 ? 'entrada' : 'saida', Math.abs(dif),
-        `Balanço: ${r.anterior} → ${r.novo} — ajuste manual pelo cadastro do insumo`);
-    }
+    await balancearEstoque('insumo', key, { codigo, nome, valor:Number(estoque_atual||0), omitirSeZero:true,
+      motivoFn: (de, para) => `Balanço: ${de} → ${para} — ajuste manual pelo cadastro do insumo` });
   }
 
   produtoDetalheModo = 'ver';
@@ -14467,7 +14582,11 @@ async function relAuditoriaEstoque(el){
     db.ref('insumos').once('value')
   ]);
 
-  const movs = Object.values(snapMov.val() || {});
+  const todosMovs = Object.entries(snapMov.val() || {}).map(([k,v])=>({ key:k, ...v }));
+  // Movimento pendente = gravado, mas o saldo não chegou a ser confirmado. Não pode
+  // entrar na reconstrução (não se sabe se foi aplicado) nem sumir sem aviso.
+  const pendentes = todosMovs.filter(m => m && (m.pendente || m.falhou));
+  const movs = todosMovs.filter(m => m && !m.pendente && !m.falhou);
   const prods = Object.values(snapProd.val() || {});
   const insumos = Object.entries(snapIns.val() || {}).map(([k,v])=>({ key:k, ...v }));
 
@@ -14487,9 +14606,16 @@ async function relAuditoriaEstoque(el){
     movimentos: 0
   }));
 
+  // Movimentos incompletos: gravados antes de aplicar o saldo e nunca finalizados (queda
+  // de conexão no meio) ou marcados como falha. NÃO entram na reconstrução — o saldo deles
+  // pode ou não ter sido aplicado, então somá-los inventaria uma divergência que não existe.
+  const incompletos = movs.filter(m => m && m.codigo && (m.pendente || m.falhou))
+    .sort((a,b)=> (b.ts||0) - (a.ts||0));
+
   const porCodigo = {};
   movs.forEach(m=>{
     if(!m || !m.codigo) return;
+    if(m.pendente || m.falhou) return;
     (porCodigo[m.codigo] = porCodigo[m.codigo] || []).push(m);
   });
   Object.values(porCodigo).forEach(lista=> lista.sort((a,b)=> (a.ts||0) - (b.ts||0)) );
@@ -14499,16 +14625,28 @@ async function relAuditoriaEstoque(el){
     const lista = porCodigo[codigo] || [];
     if(!lista.length) return { status:'sem-movimento' };
 
-    // Âncora: o último balanço registrado. Antes dele não há como reconstruir,
-    // porque o estoque inicial nunca passou pelo histórico.
-    let ancora = null, tsAncora = -1;
+    // Âncora ideal: o movimento mais recente que gravou saldo_apos. Como esse valor veio
+    // do próprio servidor no momento da gravação, ele é um ponto de partida confiável e
+    // dispensa depender de um balanço antigo.
+    let ancora = null, tsAncora = -1, tipoAncora = null;
     lista.forEach(m=>{
-      const mm = RX_BALANCO.exec(m.motivo || '');
-      if(mm && (m.ts||0) >= tsAncora){
-        ancora = Number(String(mm[2]).replace(',','.'));
+      if(m.saldo_apos !== undefined && m.saldo_apos !== null && (m.ts||0) >= tsAncora){
+        ancora = Number(m.saldo_apos);
         tsAncora = m.ts || 0;
+        tipoAncora = 'saldo';
       }
     });
+    // Sem saldo_apos (movimentos anteriores a esta versão), cai no último balanço.
+    if(ancora === null){
+      lista.forEach(m=>{
+        const mm = RX_BALANCO.exec(m.motivo || '');
+        if(mm && (m.ts||0) >= tsAncora){
+          ancora = Number(String(mm[2]).replace(',','.'));
+          tsAncora = m.ts || 0;
+          tipoAncora = 'balanco';
+        }
+      });
+    }
     if(ancora === null) return { status:'sem-balanco', movimentos: lista.length };
 
     let esperado = ancora, aplicados = 0;
@@ -14522,8 +14660,9 @@ async function relAuditoriaEstoque(el){
     });
 
     const dif = Number((saldoAtual - esperado).toFixed(4));
+    const temIncompleto = incompletos.some(m => m.codigo === codigo);
     return { status: dif === 0 ? 'ok' : 'divergente',
-      esperado, dif, aplicados, desdeTs: tsAncora, ancora };
+      esperado, dif, aplicados, desdeTs: tsAncora, ancora, tipoAncora, temIncompleto };
   }
 
   const linhas = [];
@@ -14540,8 +14679,9 @@ async function relAuditoriaEstoque(el){
         refTipo:'insumo', refKey:i.key, ambiguo: ambiguos.has(i.codigo), ...r });
   });
 
-  const divergentes = linhas.filter(l=>l.status==='divergente' && !l.ambiguo)
+  const divergentes = linhas.filter(l=>l.status==='divergente' && !l.ambiguo && !l.temIncompleto)
     .sort((a,b)=> Math.abs(b.dif) - Math.abs(a.dif));
+  const comIncompleto = linhas.filter(l=>l.status==='divergente' && l.temIncompleto);
   const semBalanco  = linhas.filter(l=>l.status==='sem-balanco').length;
   const negativos   = [...prods.map(p=>({t:'Vendável',c:p.codigo,n:p.nome,v:Number(p.quantidade||0)})),
                        ...insumos.map(i=>({t:'Insumo',c:i.codigo,n:i.nome,v:Number(i.estoque_atual||0)}))]
@@ -14559,8 +14699,69 @@ async function relAuditoriaEstoque(el){
         ? `<strong>⚠ ${divergentes.length} item(ns) com saldo divergente do histórico.</strong> O saldo gravado não bate com o último balanço mais os movimentos posteriores.`
         : `<strong>✅ Nenhuma divergência encontrada</strong> entre o saldo gravado e o histórico de movimentos.`}
       ${negativos.length ? `<br>🔻 <strong>${negativos.length} item(ns) com saldo negativo</strong> — sinal clássico de lançamento perdido.` : ''}
+      ${comIncompleto.length ? `<br>⚠️ ${comIncompleto.length} item(ns) divergentes ficaram FORA da correção em lote por terem lançamento incompleto.` : ''}
       ${semBalanco ? `<br>ℹ️ ${semBalanco} item(ns) sem nenhum balanço no histórico: não há ponto de partida para reconstruir o saldo. Faça um balanço neles para que passem a ser conferíveis.` : ''}
     </div>`;
+
+  // Bloco de movimentos pendentes — interrupções no meio de um lançamento
+  if(pendentes.length){
+    const fmtP = n => Number(n||0).toLocaleString('pt-BR',{maximumFractionDigits:2});
+    html += `<div style="padding:12px 16px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:6px;margin-bottom:14px;font-size:13px;color:#7f1d1d;line-height:1.7">
+      <strong>⚠ ${pendentes.length} movimento(s) ficaram pendentes.</strong><br>
+      São lançamentos que começaram e não terminaram — normalmente conexão caída no meio.
+      Não dá para saber se o saldo chegou a ser alterado, então eles ficam de fora da conferência.
+      Confira cada item na mão e, se preciso, ajuste por balanço.
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px;background:#fff;border-radius:6px;overflow:hidden">
+        <thead><tr style="background:#fecaca">
+          <th style="padding:7px 10px;text-align:left">Data</th>
+          <th style="padding:7px 10px;text-align:left">Código</th>
+          <th style="padding:7px 10px;text-align:left">Motivo</th>
+          <th style="padding:7px 10px;text-align:center">Qtd prevista</th>
+          <th style="padding:7px 10px;text-align:left">Usuário</th>
+        </tr></thead><tbody>
+        ${pendentes.sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0,50).map(m=>`<tr style="border-top:1px solid #fecaca">
+          <td style="padding:7px 10px">${m.ts ? new Date(m.ts).toLocaleString('pt-BR') : '—'}</td>
+          <td style="padding:7px 10px"><strong>${m.codigo||'—'}</strong></td>
+          <td style="padding:7px 10px">${m.motivo||'—'}${m.falhou?' <span style="color:#b91c1c">(falhou)</span>':''}</td>
+          <td style="padding:7px 10px;text-align:center">${m.tipo==='saida'?'-':'+'}${fmtP(m.qtd)}</td>
+          <td style="padding:7px 10px;color:#6b7280">${m.usuario||'—'}</td>
+        </tr>`).join('')}
+        </tbody></table>
+    </div>`;
+  }
+
+  // Bloco de lançamentos incompletos — só aparece quando há algo a resolver
+  if(incompletos.length){
+    const fmtData = ts => ts ? new Date(ts).toLocaleString('pt-BR') : '—';
+    html += `<div style="padding:12px 16px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:6px;margin-bottom:14px;font-size:13px;color:#7f1d1d;line-height:1.7">
+      <strong>⚠ ${incompletos.length} lançamento(s) incompleto(s).</strong><br>
+      O movimento foi gravado mas o sistema não confirmou a aplicação no saldo — tipicamente
+      queda de conexão no meio da operação. Não dá para saber automaticamente se o saldo
+      entrou ou não, então esses itens ficam <strong>fora da correção em lote</strong>.
+      Confira o estoque físico de cada um e resolva por balanço.
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px;background:#fff;border-radius:6px;overflow:hidden">
+        <thead><tr style="background:#fecaca">
+          <th style="padding:7px 10px;text-align:left">Quando</th>
+          <th style="padding:7px 10px;text-align:left">Código</th>
+          <th style="padding:7px 10px;text-align:left">Item</th>
+          <th style="padding:7px 10px;text-align:center">Situação</th>
+          <th style="padding:7px 10px;text-align:center">Qtd</th>
+          <th style="padding:7px 10px;text-align:left">Motivo</th>
+          <th style="padding:7px 10px;text-align:left">Usuário</th>
+        </tr></thead><tbody>
+        ${incompletos.slice(0,50).map(m=>`<tr style="border-top:1px solid #fecaca">
+          <td style="padding:7px 10px;white-space:nowrap">${fmtData(m.ts)}</td>
+          <td style="padding:7px 10px"><strong>${m.codigo}</strong></td>
+          <td style="padding:7px 10px">${m.nome||''}</td>
+          <td style="padding:7px 10px;text-align:center">${m.falhou?'<span style="color:#b91c1c">falhou</span>':'pendente'}</td>
+          <td style="padding:7px 10px;text-align:center">${Number(m.qtd||0)}</td>
+          <td style="padding:7px 10px">${m.motivo||''}</td>
+          <td style="padding:7px 10px">${m.usuario||''}</td>
+        </tr>`).join('')}
+        </tbody></table>
+      ${incompletos.length>50 ? `<div style="margin-top:6px">… e mais ${incompletos.length-50}.</div>` : ''}
+    </div>`;
+  }
 
   // Bloco de códigos duplicados — aparece sempre, inclusive para confirmar que não há
   html += colisoes.length
@@ -14627,7 +14828,7 @@ async function relAuditoriaEstoque(el){
       <th style="${thBase};text-align:center" title="Último balanço + movimentos posteriores">Saldo Esperado</th>
       <th style="${thBase};text-align:center">Diferença</th>
       <th style="${thBase};text-align:center" title="Movimentos considerados após o último balanço">Movs.</th>
-      <th style="${thBase};text-align:center">Último balanço</th>
+      <th style="${thBase};text-align:center" title="Ponto de partida da reconstrução">Referência</th>
     </tr></thead><tbody>`;
 
   divergentes.forEach((l, idx)=>{
@@ -14640,7 +14841,7 @@ async function relAuditoriaEstoque(el){
       <td style="padding:10px 12px;text-align:center;font-weight:700;color:#16a34a">${fmt(l.esperado)}</td>
       <td style="padding:10px 12px;text-align:center;font-weight:700;color:#dc2626">${l.dif>0?'+':''}${fmt(l.dif)}</td>
       <td style="padding:10px 12px;text-align:center;color:var(--muted)">${l.aplicados}</td>
-      <td style="padding:10px 12px;text-align:center;color:var(--muted);font-size:12px">${l.desdeTs ? new Date(l.desdeTs).toLocaleDateString('pt-BR') : '—'}</td>
+      <td style="padding:10px 12px;text-align:center;color:var(--muted);font-size:12px">${l.desdeTs ? new Date(l.desdeTs).toLocaleDateString('pt-BR') : '—'}<br><span style="font-size:10px">${l.tipoAncora==='saldo'?'saldo registrado':'balanço'}</span></td>
     </tr>`;
   });
   html += '</tbody></table></div>';
@@ -14680,12 +14881,8 @@ async function aplicarCorrecaoAuditoria(){
     let feitos = 0, falhas = [];
     for(const l of marcados){
       try {
-        const r = await definirEstoqueAbsoluto(l.refTipo, l.refKey, l.esperado);
-        const dif = r.novo - r.anterior;
-        if(dif !== 0){
-          await registrarMovimentoEstoque(l.codigo, l.nome, dif > 0 ? 'entrada' : 'saida', Math.abs(dif),
-            `Balanço: ${r.anterior} → ${r.novo} — correção de auditoria de saldo`);
-        }
+        await balancearEstoque(l.refTipo, l.refKey, { codigo:l.codigo, nome:l.nome, valor:l.esperado, omitirSeZero:true,
+          motivoFn: (de, para) => `Balanço: ${de} → ${para} — correção de auditoria de saldo` });
       } catch(e){ falhas.push(l.codigo); }
       feitos++;
       if(contador && feitos % 5 === 0) contador.textContent = `⏳ Corrigindo... ${feitos}/${marcados.length}`;
@@ -14722,12 +14919,8 @@ async function desfazerCorrecaoAuditoria(){
 
   try {
     for(const it of itens){
-      const r = await definirEstoqueAbsoluto(it.refTipo, it.refKey, it.anterior);
-      const dif = r.novo - r.anterior;
-      if(dif !== 0){
-        await registrarMovimentoEstoque(it.codigo, it.nome, dif > 0 ? 'entrada' : 'saida', Math.abs(dif),
-          `Balanço: ${r.anterior} → ${r.novo} — reversão de correção de auditoria`);
-      }
+      await balancearEstoque(it.refTipo, it.refKey, { codigo:it.codigo, nome:it.nome, valor:it.anterior, omitirSeZero:true,
+        motivoFn: (de, para) => `Balanço: ${de} → ${para} — reversão de correção de auditoria` });
     }
     await db.ref('backups_saldo_estoque/'+chave).remove();
     toast(`✓ ${itens.length} item(ns) revertidos`,'success');
@@ -15498,7 +15691,6 @@ function importarEstoque(){
 
       document.getElementById('import-estoque-result').innerHTML = `<span style="color:var(--accent)">⏳ Atualizando estoque no Firebase...</span>`;
       let atualizados=0, atualizadosInsumo=0, semMudanca=0;
-      const updates = {};
       const movimentos = []; // { codigo, nome, de, para } — só os que realmente mudam viram lançamento de Balanço
       const codigosEncontrados = new Set();
 
@@ -15509,9 +15701,9 @@ function importarEstoque(){
           codigosEncontrados.add(est.codigo.toUpperCase());
           const anterior = Number(p.quantidade||0);
           if(anterior !== est.quantidade){
-            movimentos.push({ codigo:p.codigo, nome:p.nome, de:anterior, para:est.quantidade });
+            movimentos.push({ codigo:p.codigo, nome:p.nome, de:anterior, para:est.quantidade,
+              tipoItem:'produto', refKey:p.codigo });
             p.quantidade=est.quantidade;
-            updates['produtos/'+p.codigo+'/quantidade'] = est.quantidade;
             atualizados++;
           } else semMudanca++;
         }
@@ -15524,9 +15716,9 @@ function importarEstoque(){
           codigosEncontrados.add(est.codigo.toUpperCase());
           const anterior = Number(i.estoque_atual||0);
           if(anterior !== est.quantidade){
-            movimentos.push({ codigo:i.codigo, nome:i.nome, de:anterior, para:est.quantidade });
+            movimentos.push({ codigo:i.codigo, nome:i.nome, de:anterior, para:est.quantidade,
+              tipoItem:'insumo', refKey:i.key });
             i.estoque_atual=est.quantidade;
-            updates['insumos/'+i.key+'/estoque_atual'] = est.quantidade;
             atualizadosInsumo++;
           } else semMudanca++;
         }
@@ -15534,20 +15726,14 @@ function importarEstoque(){
 
       const naoEncontrados = rows.filter(r => !codigosEncontrados.has(r.codigo.toUpperCase()));
 
-      await db.ref().update(updates);
-
-      // Registra um Balanço no histórico para cada item que realmente mudou — rastreável,
-      // igual ao balanço feito item por item (evita repetir o problema de estoque "sumindo" sem explicação)
-      document.getElementById('import-estoque-result').innerHTML = `<span style="color:var(--accent)">⏳ Registrando ${movimentos.length} lançamento(s) de balanço no histórico...</span>`;
+      // Saldo e histórico gravados juntos, item a item, com o valor anterior lido do
+      // servidor. O update() em bloco não é usado aqui: ele parte do saldo em memória e
+      // apagaria qualquer movimento feito enquanto a tela estava aberta.
+      document.getElementById('import-estoque-result').innerHTML = `<span style="color:var(--accent)">⏳ Aplicando ${movimentos.length} lançamento(s) de balanço...</span>`;
       for(const m of movimentos){
-        const diff = m.para - m.de;
-        await registrarMovimentoEstoque(
-          m.codigo, m.nome,
-          diff >= 0 ? 'entrada' : 'saida',
-          Math.abs(diff),
-          `Balanço — importação de estoque do Bling: ${m.de} → ${m.para}`,
-          null, null
-        );
+        await balancearEstoque(m.tipoItem || 'produto', m.refKey, { codigo:m.codigo, nome:m.nome,
+          valor:m.para, omitirSeZero:true,
+          motivoFn:(de,para)=>`Balanço — importação de estoque do Bling: ${de} → ${para}` });
       }
 
       document.getElementById('import-estoque-result').innerHTML=`<span style="color:var(--success)">✓ ${atualizados} produtos + ${atualizadosInsumo} insumos atualizados (com balanço registrado no histórico)</span><br><span style="color:var(--muted)">${semMudanca} já estavam corretos, sem mudança</span>${naoEncontrados.length>0?`<br><span style="color:#d97706">⚠ ${naoEncontrados.length} código(s) da planilha não encontrados no cadastro:</span>
@@ -15781,16 +15967,18 @@ async function aplicarImportCategoria(){
         const insumo = it.existente;
         const key = insumo.key || ('ins_'+insumo.codigo);
         const estoqueAnterior = Number(insumo.estoque_atual||0);
+        // Mesmo critério do produto: o saldo sai do update de cadastro e vira balanço.
         const dadosUpd = {
           nome: it.nome || insumo.nome, unidade: it.unidade || insumo.unidade,
-          estoque_atual: it.estoque, estoque_minimo: it.estoque_minimo || insumo.estoque_minimo || 0,
+          estoque_minimo: it.estoque_minimo || insumo.estoque_minimo || 0,
           localizacao: it.localizacao || insumo.localizacao || '',
           categoria: cache.categoria || insumo.categoria || '',
           inativo: it.inativo
         };
         await db.ref('insumos/'+key).update(dadosUpd);
         Object.assign(insumo, dadosUpd);
-        if(estoqueAnterior !== it.estoque) movimentosBalanco.push({ codigo: it.codigo, nome: it.nome, de: estoqueAnterior, para: it.estoque });
+        if(estoqueAnterior !== it.estoque) movimentosBalanco.push({ codigo: it.codigo, nome: it.nome,
+          de: estoqueAnterior, para: it.estoque, tipoItem:'insumo', refKey: key });
         atualizados++;
       } else {
         const key = 'ins_' + it.codigo;
@@ -15809,16 +15997,19 @@ async function aplicarImportCategoria(){
       if(it.existe){
         const prod = it.existente;
         const estoqueAnterior = Number(prod.quantidade||0);
+        // O saldo NÃO vai no update do cadastro: seria gravado às cegas por cima do que
+        // estiver no servidor. Vai como balanço, logo abaixo, com rastro no histórico.
         const dadosUpd = {
           nome: it.nome || prod.nome, unidade: it.unidade || prod.unidade,
-          quantidade: it.estoque, estoque_minimo: it.estoque_minimo || prod.estoque_minimo || 0,
+          estoque_minimo: it.estoque_minimo || prod.estoque_minimo || 0,
           localizacao: it.localizacao || prod.localizacao || '',
           categoria: cache.categoria || prod.categoria || '',
           inativo: it.inativo
         };
         await db.ref('produtos/'+prod.codigo).update(dadosUpd);
         Object.assign(prod, dadosUpd);
-        if(estoqueAnterior !== it.estoque) movimentosBalanco.push({ codigo: it.codigo, nome: it.nome, de: estoqueAnterior, para: it.estoque });
+        if(estoqueAnterior !== it.estoque) movimentosBalanco.push({ codigo: it.codigo, nome: it.nome,
+          de: estoqueAnterior, para: it.estoque, tipoItem:'produto', refKey: prod.codigo });
         atualizados++;
       } else {
         const novoProduto = {
@@ -15840,8 +16031,10 @@ async function aplicarImportCategoria(){
   if(movimentosBalanco.length){
     el.innerHTML = `<div style="padding:16px;text-align:center;color:var(--muted)">⏳ Registrando ${movimentosBalanco.length} balanço(s) de estoque...</div>`;
     for(const m of movimentosBalanco){
-      const diff = m.para - m.de;
-      await registrarMovimentoEstoque(m.codigo, m.nome, diff>=0?'entrada':'saida', Math.abs(diff), `Balanço — importação de cadastro do Bling: ${m.de} → ${m.para}`, null, null);
+      if(!m.refKey) continue;   // item recém-criado: já nasceu com o saldo, não gera balanço
+      await balancearEstoque(m.tipoItem || 'produto', m.refKey, { codigo:m.codigo, nome:m.nome,
+        valor:m.para, omitirSeZero:true,
+        motivoFn:(de,para)=>`Balanço — importação de cadastro do Bling: ${de} → ${para}` });
     }
   }
 
@@ -16088,16 +16281,10 @@ async function aplicarBalancoImportado(){
   let ok = 0, falhas = [];
   for(const it of validos){
     try {
-      await definirEstoqueAbsoluto('insumo', it.key, it.contagem);
-      const mem = INSUMOS_DB.find(x => x.codigo === it.codigo);
-      if(mem) mem.estoque_atual = it.contagem;
-      await registrarMovimentoEstoque(
-        it.codigo, it.nome,
-        it.diff >= 0 ? 'entrada' : 'saida',
-        Math.abs(it.diff),
-        `Balanço em massa — contagem física (importação): ${it.estoqueAtual} → ${it.contagem}`,
-        null, null
-      );
+      // O "de" vem do saldo REAL do servidor, não do que a tela tinha em memória
+      await balancearEstoque('insumo', it.key, { codigo:it.codigo, nome:it.nome, valor:it.contagem,
+        omitirSeZero:true,
+        motivoFn:(de,para)=>`Balanço em massa — contagem física (importação): ${de} → ${para}` });
       ok++;
     } catch(err){
       falhas.push(`${it.codigo}: ${err.message}`);
