@@ -688,6 +688,8 @@ tbody td{padding:11px 16px;font-size:14px}
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('diagnostico-consumo',this)">🩺 Diagnóstico de Consumo (OPs)</button>
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('mrp',this)">📈 MRP — Necessidade de Compra</button>
           <button class="btn btn-outline btn-sm rel-btn admin-only" onclick="mostrarRelatorio('comissionamento',this)">💰 Comissionamento</button>
+          <button class="btn btn-outline btn-sm rel-btn admin-only" onclick="mostrarRelatorio('recalc-estoque-minimo',this)">🎯 Recalcular Estoque Mínimo</button>
+          <button class="btn btn-outline btn-sm rel-btn admin-only" onclick="mostrarRelatorio('auditoria-estoque',this)">🔍 Auditoria de Saldo × Movimentos</button>
         </div>
 
         <!-- Filtros específicos do relatório Abaixo do Mínimo -->
@@ -4309,11 +4311,7 @@ async function cancelarBipagemPedido(id){
   for(const item of p.itens){
     const prodSnap = await db.ref('produtos/'+item.codigo).once('value');
     if(prodSnap.exists()){
-      const estoqueAtual = Number(prodSnap.val().quantidade||0);
-      const novoEstoque = estoqueAtual + item.qtd;
-      await db.ref('produtos/'+item.codigo+'/quantidade').set(novoEstoque);
-      const prodMem = PRODUTOS_DB.find(x=>x.codigo===item.codigo);
-      if(prodMem) prodMem.quantidade = novoEstoque;
+      await aplicarDeltaEstoque('produto', item.codigo, item.qtd);
       await registrarMovimentoEstoque(item.codigo, item.nome, 'entrada', item.qtd, `Cancelamento de bipagem — Pedido #${p.numero}`, 'pedido', id);
     }
     // Resetar marcações de separação/bipagem do item
@@ -4629,11 +4627,7 @@ async function cancelarPedido(id){
       for(const item of p.itens){
         const prodSnap = await db.ref('produtos/'+item.codigo).once('value');
         if(prodSnap.exists()){
-          const estoqueAtual = Number(prodSnap.val().quantidade||0);
-          const novoEstoque = estoqueAtual + item.qtd;
-          await db.ref('produtos/'+item.codigo+'/quantidade').set(novoEstoque);
-          const prodMem = PRODUTOS_DB.find(x=>x.codigo===item.codigo);
-          if(prodMem) prodMem.quantidade = novoEstoque;
+          await aplicarDeltaEstoque('produto', item.codigo, item.qtd);
           await registrarMovimentoEstoque(item.codigo, item.nome, 'entrada', item.qtd,
             `Estorno — cancelamento do Pedido #${p.numero} (${p.cliente_nome})`, 'pedido', id);
         }
@@ -6988,8 +6982,7 @@ async function concluirOP(key){
       const snap = await db.ref('insumos/'+insumoKey).once('value');
       const insumo = snap.val();
       if(insumo){
-        const novoEstoque = Number(insumo.estoque_atual||0) - consumir;
-        await db.ref('insumos/'+insumoKey+'/estoque_atual').set(novoEstoque);
+        await aplicarDeltaEstoque('insumo', insumoKey, -consumir);
         await registrarMovimentoEstoque(item.codigo, insumo.nome, 'saida', consumir, `Consumo em produção — OP #${op.numero}`, 'op', key);
       }
     }
@@ -6998,9 +6991,14 @@ async function concluirOP(key){
     const prodSnap = await db.ref('produtos/'+op.produto_codigo).once('value');
     let novaQtdProduto;
     if(prodSnap.exists()){
-      const estoqueAtual = Number(prodSnap.val().quantidade || prodSnap.val().estoque || 0);
-      novaQtdProduto = estoqueAtual + qtdProduzida;
-      await db.ref('produtos/'+op.produto_codigo+'/quantidade').set(novaQtdProduto);
+      const valProd = prodSnap.val();
+      if(valProd.quantidade === undefined && valProd.estoque !== undefined){
+        // Registro antigo que ainda guarda o saldo no campo 'estoque'
+        novaQtdProduto = Number(valProd.estoque||0) + qtdProduzida;
+        await db.ref('produtos/'+op.produto_codigo+'/quantidade').set(novaQtdProduto);
+      } else {
+        novaQtdProduto = (await aplicarDeltaEstoque('produto', op.produto_codigo, qtdProduzida)).novo;
+      }
     } else {
       novaQtdProduto = qtdProduzida;
       await db.ref('produtos/'+op.produto_codigo).set({
@@ -7044,6 +7042,59 @@ async function concluirOP(key){
 // em pedidos confirmados (AA/AP/EX) mas ainda não baixado fisicamente (bipado).
 // Estoque disponível para venda = quantidade (físico) - reservado.
 // ══════════════════════════════════════════════
+
+// ══════════════════════════════════════════════
+// ══ GRAVAÇÃO ATÔMICA DE SALDO DE ESTOQUE ══
+// Toda alteração de saldo passa por transaction(): o Firebase lê o valor ATUAL no
+// servidor e aplica a diferença lá, num passo só. Isso elimina duas falhas do padrão
+// antigo (ler o saldo, somar em JS e gravar com set()):
+//   1) o saldo lido da memória do navegador ficava velho e a gravação apagava
+//      lançamentos feitos no intervalo — foi assim que uma entrada de compra de 400
+//      unidades sumiu 3 minutos depois, com uma entrada manual de 6;
+//   2) dois usuários lançando ao mesmo tempo — um sobrescrevia o outro.
+// Regra: nunca "grave este número". Sempre "some/subtraia esta diferença".
+// ══════════════════════════════════════════════
+
+function caminhoEstoque(tipo, chave){
+  return tipo === 'insumo' ? 'insumos/'+chave+'/estoque_atual' : 'produtos/'+chave+'/quantidade';
+}
+
+function sincronizarEstoqueMemoria(tipo, chave, valor){
+  if(tipo === 'insumo'){
+    const m = INSUMOS_DB.find(x=>x.key===chave) || INSUMOS_DB.find(x=>('ins_'+x.codigo)===chave);
+    if(m) m.estoque_atual = valor;
+  } else {
+    const m = PRODUTOS_DB.find(x=>x.codigo===chave);
+    if(m) m.quantidade = valor;
+  }
+}
+
+// Soma no saldo (delta negativo para subtrair). Retorna { anterior, novo } com os
+// valores REAIS do servidor — não o que a tela achava que estava lá.
+async function aplicarDeltaEstoque(tipo, chave, delta){
+  const d = Number(delta)||0;
+  let anterior = 0;
+  const res = await db.ref(caminhoEstoque(tipo, chave)).transaction(atual => {
+    anterior = Number(atual)||0;
+    return anterior + d;
+  });
+  const novo = Number(res.snapshot.val())||0;
+  sincronizarEstoqueMemoria(tipo, chave, novo);
+  return { anterior, novo };
+}
+
+// Define saldo absoluto (balanço / contagem física). Também devolve o valor real
+// anterior, para o histórico registrar a diferença verdadeira.
+async function definirEstoqueAbsoluto(tipo, chave, valor){
+  const v = Number(valor)||0;
+  let anterior = 0;
+  await db.ref(caminhoEstoque(tipo, chave)).transaction(atual => {
+    anterior = Number(atual)||0;
+    return v;
+  });
+  sincronizarEstoqueMemoria(tipo, chave, v);
+  return { anterior, novo: v };
+}
 
 async function reservarEstoquePedido(itens){
   for(const item of itens){
@@ -7503,9 +7554,7 @@ async function confirmarEstornoProducao(){
 
   try {
     // 1) Saída no produto pronto
-    const estoqueAnteriorProduto = Number(dados.produto.quantidade||0);
-    const novoEstoqueProduto = estoqueAnteriorProduto - dados.qtd;
-    await db.ref('produtos/'+dados.produto.codigo+'/quantidade').set(novoEstoqueProduto);
+    const novoEstoqueProduto = (await aplicarDeltaEstoque('produto', dados.produto.codigo, -dados.qtd)).novo;
     dados.produto.quantidade = novoEstoqueProduto;
     await registrarMovimentoEstoque(
       dados.produto.codigo, dados.produto.nome, 'saida', dados.qtd,
@@ -7515,10 +7564,7 @@ async function confirmarEstornoProducao(){
     // 2) Entrada em cada insumo (menos embalagem, já filtrado no preview)
     for(const it of dados.itensDevolucao){
       const key = it.key || ('ins_'+it.codigo);
-      const novoEstoqueInsumo = it.estoqueAtual + it.qtdDevolver;
-      await db.ref('insumos/'+key+'/estoque_atual').set(novoEstoqueInsumo);
-      const mem = INSUMOS_DB.find(x=>x.codigo===it.codigo);
-      if(mem) mem.estoque_atual = novoEstoqueInsumo;
+      await aplicarDeltaEstoque('insumo', key, it.qtdDevolver);
       await registrarMovimentoEstoque(
         it.codigo, it.nome, 'entrada', it.qtdDevolver,
         `Estorno de Produção — desmontagem de ${dados.qtd}x ${dados.produto.nome}${motivoTexto}`, null, null
@@ -7610,33 +7656,30 @@ async function confirmarMovimentoEstoque(){
 
   const codigo = movProdutoSelecionado.codigo;
   const nome = movProdutoSelecionado.nome;
-  const estoqueAtual = Number(movProdutoSelecionado.quantidade||0);
-  let novoEstoque, qtdMovimento, tipoRegistro;
+  const tipoItem = movProdutoSelecionado._tipo === 'insumo' ? 'insumo' : 'produto';
+  const chaveItem = tipoItem === 'insumo'
+    ? (movProdutoSelecionado.key || ('ins_'+codigo))
+    : codigo;
 
+  // Entrada/saída somam ou subtraem no servidor. Balanço grava o valor contado, mas
+  // devolve o saldo real anterior — o histórico passa a registrar a diferença correta.
+  let resultado, qtdMovimento, tipoRegistro;
   if(tipo === 'entrada'){
-    novoEstoque = estoqueAtual + valor;
+    resultado = await aplicarDeltaEstoque(tipoItem, chaveItem, valor);
     qtdMovimento = valor; tipoRegistro = 'entrada';
   } else if(tipo === 'saida'){
-    novoEstoque = estoqueAtual - valor;
+    resultado = await aplicarDeltaEstoque(tipoItem, chaveItem, -valor);
     qtdMovimento = valor; tipoRegistro = 'saida';
   } else { // balanco
-    const diferenca = valor - estoqueAtual;
-    novoEstoque = valor;
+    resultado = await definirEstoqueAbsoluto(tipoItem, chaveItem, valor);
+    const diferenca = resultado.novo - resultado.anterior;
     qtdMovimento = Math.abs(diferenca);
     tipoRegistro = diferenca >= 0 ? 'entrada' : 'saida';
   }
-
-  if(movProdutoSelecionado._tipo === 'insumo'){
-    const insumoKey = movProdutoSelecionado.key || ('ins_'+codigo);
-    await db.ref('insumos/'+insumoKey+'/estoque_atual').set(novoEstoque);
-    const insumoMem = INSUMOS_DB.find(x=>x.codigo===codigo);
-    if(insumoMem) insumoMem.estoque_atual = novoEstoque;
-  } else {
-    await db.ref('produtos/'+codigo+'/quantidade').set(novoEstoque);
-    const prodMem = PRODUTOS_DB.find(x=>x.codigo===codigo);
-    if(prodMem) prodMem.quantidade = novoEstoque;
-  }
+  const estoqueAtual = resultado.anterior;
+  const novoEstoque  = resultado.novo;
   movProdutoSelecionado.quantidade = novoEstoque;
+  if(tipoItem === 'insumo') movProdutoSelecionado.estoque_atual = novoEstoque;
 
   const motivoFinal = tipo === 'balanco'
     ? `Balanço: ${estoqueAtual} → ${novoEstoque}${obs ? ' — '+obs : ''}`
@@ -8389,18 +8432,9 @@ async function darEntradaEstoqueCompra(compraId, compra){
   for(const item of compra.itens){
     if(item.tipo === 'insumo'){
       const insumo = INSUMOS_DB.find(x=>x.codigo===item.codigo);
-      const insumoKey = insumo?.key || ('ins_'+item.codigo);
-      const estoqueAtual = insumo ? Number(insumo.estoque_atual||0) : 0;
-      const novoEstoque = estoqueAtual + item.qtd;
-      await db.ref('insumos/'+insumoKey+'/estoque_atual').set(novoEstoque);
-      if(insumo) insumo.estoque_atual = novoEstoque;
+      await aplicarDeltaEstoque('insumo', insumo?.key || ('ins_'+item.codigo), item.qtd);
     } else {
-      const prodSnap = await db.ref('produtos/'+item.codigo).once('value');
-      const estoqueAtual = prodSnap.exists() ? Number(prodSnap.val().quantidade||0) : 0;
-      const novoEstoque = estoqueAtual + item.qtd;
-      await db.ref('produtos/'+item.codigo+'/quantidade').set(novoEstoque);
-      const prodMem = PRODUTOS_DB.find(x=>x.codigo===item.codigo);
-      if(prodMem) prodMem.quantidade = novoEstoque;
+      await aplicarDeltaEstoque('produto', item.codigo, item.qtd);
     }
     await registrarMovimentoEstoque(item.codigo, item.nome, 'entrada', item.qtd, `Compra ${compra.nf?'NF '+compra.nf:''} — ${compra.fornecedor}`, 'compra', compraId);
   }
@@ -8987,16 +9021,13 @@ async function confirmarRegistroDefeito(){
   // ficam em coleções e campos diferentes no banco
   if(darBaixa){
     if(ehProduto){
-      const estoqueAtual = Number(i.quantidade||0);
-      const novoEstoque = Math.max(0, estoqueAtual - qtd);
-      await db.ref('produtos/'+i.codigo+'/quantidade').set(novoEstoque);
-      i.quantidade = novoEstoque;
+      // O Math.max(0,...) antigo escondia o problema: se o saldo já estava errado, a
+      // baixa era engolida em silêncio. Agora a subtração é real e um saldo negativo
+      // fica visível para ser investigado.
+      i.quantidade = (await aplicarDeltaEstoque('produto', i.codigo, -qtd)).novo;
     } else {
-      const estoqueAtual = Number(i.estoque_atual||0);
-      const novoEstoque = Math.max(0, estoqueAtual - qtd);
       const key = i.key || ('ins_'+i.codigo);
-      await db.ref('insumos/'+key+'/estoque_atual').set(novoEstoque);
-      i.estoque_atual = novoEstoque;
+      i.estoque_atual = (await aplicarDeltaEstoque('insumo', key, -qtd)).novo;
     }
     await registrarMovimentoEstoque(i.codigo, i.nome, 'saida', qtd,
       ehManual ? `Defeito — produto retornado (garantia manual)` : `Defeito identificado na produção — OP #${opContextoDefeito.numero}`,
@@ -9727,11 +9758,7 @@ async function finalizarPedidoBipado(){
     for(const item of p.itens){
       const prodSnap = await db.ref('produtos/'+item.codigo).once('value');
       if(prodSnap.exists()){
-        const estoqueAtual = Number(prodSnap.val().quantidade||0);
-        const novoEstoque = estoqueAtual - item.qtd;
-        await db.ref('produtos/'+item.codigo+'/quantidade').set(novoEstoque);
-        const prodMem = PRODUTOS_DB.find(x=>x.codigo===item.codigo);
-        if(prodMem) prodMem.quantidade = novoEstoque;
+        await aplicarDeltaEstoque('produto', item.codigo, -item.qtd);
         await registrarMovimentoEstoque(item.codigo, item.nome, 'saida', item.qtd, `Pedido #${p.numero} — ${p.cliente_nome}`, 'pedido', p.id);
       }
     }
@@ -11168,9 +11195,25 @@ async function salvarEdicaoInsumo(codigo){
 
   const insumo = INSUMOS_DB.find(x=>x.codigo===codigo);
   const key = insumo?.key || ('ins_'+codigo);
-  await db.ref('insumos/'+key).update({ nome, unidade, estoque_atual, estoque_minimo, fornecedor, preco_custo, localizacao, gtin, categoria });
 
-  if(insumo) Object.assign(insumo, { nome, unidade, estoque_atual, estoque_minimo, fornecedor, preco_custo, localizacao, gtin, categoria });
+  // O saldo NÃO vai junto no update do cadastro. O número do formulário foi lido quando
+  // o modal abriu e pode estar velho: regravá-lo apagaria em silêncio qualquer entrada
+  // ou baixa feita no intervalo. Só gravamos saldo na criação, ou quando o valor foi
+  // deliberadamente alterado — e aí passa por balanço, deixando rastro no histórico.
+  const cadastro = { nome, unidade, estoque_minimo, fornecedor, preco_custo, localizacao, gtin, categoria };
+  if(!insumo) cadastro.estoque_atual = Number(estoque_atual||0);
+
+  await db.ref('insumos/'+key).update(cadastro);
+  if(insumo) Object.assign(insumo, cadastro);
+
+  if(insumo && Number(estoque_atual||0) !== Number(insumo.estoque_atual||0)){
+    const r = await definirEstoqueAbsoluto('insumo', key, Number(estoque_atual||0));
+    const dif = r.novo - r.anterior;
+    if(dif !== 0){
+      await registrarMovimentoEstoque(codigo, nome, dif > 0 ? 'entrada' : 'saida', Math.abs(dif),
+        `Balanço: ${r.anterior} → ${r.novo} — ajuste manual pelo cadastro do insumo`);
+    }
+  }
 
   produtoDetalheModo = 'ver';
   renderModalProduto(codigo);
@@ -12646,7 +12689,7 @@ function mostrarRelatorio(tipo, btnEl){
     tipo === 'estoque-minimo' ? 'flex' : 'none';
   // Diagnóstico de Consumo não usa período/vendedor/agrupamento — esconde só esses campos,
   // mantendo visíveis os botões Gerar/Excel que ficam no mesmo container
-  const escondePeriodoVendedorAgrupar = tipo === 'diagnostico-consumo' || tipo === 'mrp' || tipo === 'comissionamento';
+  const escondePeriodoVendedorAgrupar = ['diagnostico-consumo','mrp','comissionamento','sugestao-compra','recalc-estoque-minimo','auditoria-estoque'].includes(tipo);
   document.querySelector('#rel-filtros .filtro-group:nth-child(1)').style.display = escondePeriodoVendedorAgrupar ? 'none' : '';
   document.querySelector('#rel-filtros .filtro-group:nth-child(2)').style.display = escondePeriodoVendedorAgrupar ? 'none' : '';
 
@@ -12667,6 +12710,13 @@ async function gerarRelatorio(){
   const vendedorFiltro = document.getElementById('rel-vendedor').value;
   const agrupar = document.getElementById('rel-agrupar').value;
   const el = document.getElementById('rel-conteudo');
+
+  // Estes relatórios montam a própria base e NÃO usam a lista de pedidos faturados:
+  // carregá-la aqui seria uma leitura pesada e inútil no Firebase.
+  if(tipo === 'sugestao-compra'){ await relSugestaoCompra(el); return; }
+  if(tipo === 'recalc-estoque-minimo'){ await relRecalcEstoqueMinimo(el); return; }
+  if(tipo === 'auditoria-estoque'){ await relAuditoriaEstoque(el); return; }
+
   el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:40px">⏳ Carregando...</div>';
 
   const snap = await db.ref('pedidos').orderByChild('faturado').equalTo(true).once('value');
@@ -12693,12 +12743,13 @@ async function gerarRelatorio(){
     case 'compras-fornecedor': await relComprasFornecedor(dataIni, dataFim, el); break;
     case 'estoque-posicao': relEstoquePosicao(el); break;
     case 'vendas-cidade': relVendasCidade(pedidos, el); break;
-    case 'sugestao-compra': relSugestaoCompra(el); break;
+    case 'sugestao-compra': await relSugestaoCompra(el); break;
     case 'estoque-minimo': relEstoqueAbaixoMinimo(el); break;
     case 'sugestao-jornal': await relSugestaoJornal(pedidos, el); break;
     case 'diagnostico-consumo': await relDiagnosticoConsumoInsumos(el); break;
     case 'mrp': await relMRP(el); break;
     case 'comissionamento': await relComissionamento(el); break;
+    case 'recalc-estoque-minimo': await relRecalcEstoqueMinimo(el); break;
   }
 }
 
@@ -13003,48 +13054,141 @@ function fornecedorPadrao(item){
 
 let SUGESTAO_LISTA = [];
 
-async function relSugestaoCompra(el){
-  if(!PRODUTOS_DB.length){
-    el.innerHTML='<div style="color:#dc2626;padding:20px">⏳ Produtos ainda não carregados. Aguarde e tente novamente.</div>';
-    await carregarProdutosFirebase(); relSugestaoCompra(el); return;
+// ── Sugestão de Compra baseada em MRP / Ponto de Pedido ──
+// Fórmulas aplicadas:
+//   CMD (Consumo Médio Diário) = consumo dos últimos 365 dias / 365
+//     (vendáveis: só pedidos CONCLUÍDOS — status anteriores ainda podem mudar)
+//   Estoque de Segurança (ES)  = estoque_minimo cadastrado do item
+//   Ponto de Pedido (PP)       = (CMD × Lead Time) + ES
+//   Qtd Sugerida               = CMD × (Lead Time + Cobertura) + ES − Disponível − Em Trânsito
+// O item entra na lista quando Disponível + Em Trânsito <= Ponto de Pedido.
+const SUG_DIAS_HISTORICO = 365;   // janela do consumo médio (1 ano)
+const SUG_DIAS_COBERTURA = 45;    // dias de estoque que a compra deve garantir além do lead time
+
+// Cache do consumo anual: a leitura de 365 dias de pedidos + movimentos é pesada no
+// Firebase, então guardamos o resultado por 30 min. Trocar a cobertura na tela apenas
+// recalcula em memória, sem reler o banco.
+let SUGESTAO_CONSUMO_CACHE = null;
+
+async function carregarConsumoAnualSugestao(forcar){
+  if(SUGESTAO_CONSUMO_CACHE && !forcar && (Date.now() - SUGESTAO_CONSUMO_CACHE.ts) < 30*60*1000){
+    return SUGESTAO_CONSUMO_CACHE;
   }
-  if(!INSUMOS_DB.length) await carregarInsumosFirebase();
+  const desdeTs = Date.now() - SUG_DIAS_HISTORICO*24*60*60*1000;
+  // Dois cenarios de demanda na mesma leitura, pro seletor da tela alternar sem reler o Firebase
+  const consumo    = { concluidos:{vendavel:{},insumo:{}}, ampliado:{vendavel:{},insumo:{}} };
+  const emTransito = { vendavel:{}, insumo:{} };
 
-  // Monta lista unificada — vendáveis (por estoque físico - reservado) e insumos (por estoque_atual)
-  const itensVendaveis = PRODUTOS_DB.filter(p=>!p.inativo).map(p=>{
-    const disp = Number(p.quantidade||0) - Number(p.reservado||0);
-    const min = Number(p.estoque_minimo||0);
-    return { tipo:'Vendável', codigo:p.codigo, nome:p.nome||'', unidade:p.unidade||'UN',
-      disponivel:disp, minimo:min,
-      fornecedor:fornecedorPadrao(p),
-      cod_fornecedor:(p.fornecedores||[])[0]?.codigo_fornecedor||'',
-      sugestao:Math.max(1, min*2 - disp) };
-  }).filter(p=> p.minimo>0 ? p.disponivel<=p.minimo : p.disponivel<=0);
+  // Demanda de vendáveis: vendas reais em pedidos confirmados/concluídos no período
+  const snapPedidos = await db.ref('pedidos').once('value');
+  Object.values(snapPedidos.val() || {}).forEach(p=>{
+    // Só pedidos concluídos contam como demanda real: status anteriores podem ser
+    // cancelados ou ter itens alterados antes da liberação, o que distorceria o CMD.
+    const concluido = ['CC','Concluído'].includes(p.status);
+    const aberto    = ['AP','EX'].includes(p.status);
+    if(!concluido && !aberto) return;
+    const dataPedido = new Date(p.data).getTime();
+    if(isNaN(dataPedido) || dataPedido < desdeTs) return;
+    (p.itens||[]).forEach(it=>{
+      const qtd = Number(it.qtd||0);
+      if(concluido) consumo.concluidos.vendavel[it.codigo] = (consumo.concluidos.vendavel[it.codigo]||0) + qtd;
+      consumo.ampliado.vendavel[it.codigo] = (consumo.ampliado.vendavel[it.codigo]||0) + qtd;
+    });
+  });
 
-  const itensInsumo = INSUMOS_DB.filter(i=>!i.inativo).map(i=>{
-    const estq = Number(i.estoque_atual||0);
-    const min = Number(i.estoque_minimo||0);
-    return { tipo:'Insumo', codigo:i.codigo, nome:i.nome||'', unidade:i.unidade||'UN',
-      disponivel:estq, minimo:min,
-      fornecedor:fornecedorPadrao(i),
-      cod_fornecedor:(i.fornecedores||[])[0]?.codigo_fornecedor||'',
-      sugestao:Math.max(1, min*2 - estq) };
-  }).filter(i=> i.minimo>0 ? i.disponivel<=i.minimo : i.disponivel<=0);
+  // Consumo de insumos: saídas de estoque (produção), ignorando balanço/estorno
+  const snapMov = await db.ref('movimentos_estoque').once('value');
+  Object.values(snapMov.val() || {}).forEach(m=>{
+    if(m.tipo !== 'saida') return;
+    if(m.ts < desdeTs) return;
+    const motivoLower = (m.motivo||'').toLowerCase();
+    if(motivoLower.includes('balanço') || motivoLower.includes('balanco') || motivoLower.includes('estorno')) return;
+    // Saida de insumo e consumo ja realizado: vale para os dois cenarios
+    consumo.concluidos.insumo[m.codigo] = (consumo.concluidos.insumo[m.codigo]||0) + Number(m.qtd||0);
+    consumo.ampliado.insumo[m.codigo]   = (consumo.ampliado.insumo[m.codigo]||0) + Number(m.qtd||0);
+  });
 
-  const lista = [...itensVendaveis, ...itensInsumo].sort((a,b)=>a.disponivel-b.disponivel);
+  // Em trânsito: compras já fora da negociação (Separação em diante)
+  const snapCompras = await db.ref('pedidos_compra').once('value');
+  Object.values(snapCompras.val() || {}).forEach(c=>{
+    if(!['separacao','importacao','transito'].includes(c.status)) return;
+    (c.itens||[]).forEach(it=>{
+      const bucket = it.tipo === 'insumo' ? emTransito.insumo : emTransito.vendavel;
+      bucket[it.codigo] = (bucket[it.codigo]||0) + Number(it.qtd||0);
+    });
+  });
+
+  // OPs abertas também são entrada futura de produto vendável
+  if(!OPS_DB.length) await carregarOPsFirebase();
+  OPS_DB.filter(op=>op.status!=='concluida').forEach(op=>{
+    emTransito.vendavel[op.produto_codigo] = (emTransito.vendavel[op.produto_codigo]||0) + Number(op.qtd_solicitada||0);
+  });
+
+  SUGESTAO_CONSUMO_CACHE = { ts:Date.now(), consumo, emTransito };
+  return SUGESTAO_CONSUMO_CACHE;
+}
+
+async function relSugestaoCompra(el, forcarRecarga){
+  // ATENÇÃO: os parâmetros precisam ser lidos ANTES de limpar o innerHTML, senão os
+  // campos são destruídos junto com a tela e o código volta sempre pro padrão.
+  const diasCobertura = Number(document.getElementById('sugestao-cobertura')?.value) || SUG_DIAS_COBERTURA;
+  const baseDemanda   = document.getElementById('sugestao-base-demanda')?.value || 'concluidos';
+  const tipoAnterior  = document.getElementById('sugestao-filtro-tipo')?.value || '';
+
+  el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px">⏳ Calculando sugestão de compra (MRP · 365 dias de histórico)...</div>';
+
+  if(!PRODUTOS_DB.length)     await carregarProdutosFirebase();
+  if(!INSUMOS_DB.length)      await carregarInsumosFirebase();
+  if(!FORNECEDORES_DB.length) await carregarFornecedoresFirebase();
+
+  const dados = await carregarConsumoAnualSugestao(forcarRecarga);
+  const mapaConsumo   = dados.consumo[baseDemanda] || dados.consumo.concluidos;
+
+  // Monta a linha MRP de um item (vendável ou insumo)
+  function montarLinha(item, tipo){
+    const chave      = tipo === 'Insumo' ? 'insumo' : 'vendavel';
+    const disponivel = tipo === 'Insumo'
+      ? Number(item.estoque_atual||0)
+      : Number(item.quantidade||0) - Number(item.reservado||0);
+    const transito   = dados.emTransito[chave][item.codigo] || 0;
+    const consumoAno = mapaConsumo[chave][item.codigo] || 0;
+    const cmd        = consumoAno / SUG_DIAS_HISTORICO;
+    const es         = Number(item.estoque_minimo||0);
+
+    const nomeForn   = fornecedorPadrao(item);
+    const cadastro   = FORNECEDORES_DB.find(f=>f.nome === nomeForn);
+    const leadTime   = Number(cadastro?.prazo_entrega_dias||0);
+
+    const pontoPedido = cmd*leadTime + es;
+    const posicao     = disponivel + transito;
+    const alvo        = cmd*(leadTime + diasCobertura) + es;
+    const sugestao    = Math.max(0, Math.ceil(alvo - posicao));
+    const cobertura   = cmd > 0 ? disponivel/cmd : Infinity;
+
+    return { tipo, codigo:item.codigo, nome:item.nome||'', unidade:item.unidade||'UN',
+      fornecedor:nomeForn, cod_fornecedor:(item.fornecedores||[])[0]?.codigo_fornecedor||'',
+      cmd, leadTime, es, disponivel, emTransito:transito, pontoPedido, cobertura, sugestao,
+      semLeadTime: leadTime === 0, semConsumo: cmd === 0 };
+  }
+
+  const lista = [
+    ...PRODUTOS_DB.filter(p=>!p.inativo).map(p=>montarLinha(p,'Vendável')),
+    ...INSUMOS_DB.filter(i=>!i.inativo).map(i=>montarLinha(i,'Insumo'))
+  ].filter(l => l.disponivel + l.emTransito <= l.pontoPedido && l.sugestao > 0)
+   // Infinity - Infinity dá NaN e deixa a ordenação indefinida: comparamos explicitamente
+   .sort((a,b)=>{
+     if(a.cobertura === b.cobertura) return a.codigo.localeCompare(b.codigo,'pt-BR');
+     return a.cobertura < b.cobertura ? -1 : 1;
+   });
 
   relatorioCache = { tipo:'sugestao-compra', lista };
-
-  if(!lista.length){
-    el.innerHTML='<div style="padding:24px;text-align:center;color:var(--success)">✅ Nenhum item abaixo do estoque mínimo ou com estoque zerado.</div>';
-    return;
-  }
-
-  // Guarda a lista completa para o filtro por fornecedor poder re-renderizar sem
-  // consultar o banco de novo (o filtro é aplicado em memória, resposta instantânea).
   SUGESTAO_LISTA = lista;
 
-  // Fornecedores que realmente têm itens pendentes, com a contagem de cada um
+  const semLeadTime = lista.filter(l=>l.semLeadTime).length;
+
+  const totVend = lista.filter(p=>p.tipo==='Vendável').length;
+  const totIns  = lista.filter(p=>p.tipo==='Insumo').length;
+
   const contagemForn = {};
   lista.forEach(p=>{ contagemForn[p.fornecedor] = (contagemForn[p.fornecedor]||0) + 1; });
   const opcoesForn = Object.keys(contagemForn).sort((a,b)=>a.localeCompare(b,'pt-BR'))
@@ -13054,7 +13198,21 @@ async function relSugestaoCompra(el){
     <span id="sugestao-contador" style="font-size:13px;color:#92400e;font-weight:700"></span>
     <button class="btn btn-primary btn-sm" style="background:#1565c0" onclick="criarPedidoCompraDoRelatorio()">🛒 Criar Pedido com Selecionados</button>
   </div>
+  <div style="padding:10px 14px;background:#eff6ff;border-left:4px solid #1565c0;border-radius:6px;margin-bottom:12px;font-size:12px;color:#1e3a5f;line-height:1.6">
+    <strong>Cálculo MRP:</strong> CMD = itens de <strong>${baseDemanda==='ampliado'?'pedidos concluídos + aprovados + em separação':'pedidos concluídos'}</strong> nos últimos 365 dias ÷ 365 &nbsp;·&nbsp;
+    Ponto de Pedido = (CMD × Lead Time) + Estoque Mínimo &nbsp;·&nbsp;
+    Qtd Sugerida = CMD × (Lead Time + ${diasCobertura} dias) + Estoque Mínimo − Disponível − Em Trânsito.
+    ${semLeadTime ? `<br><strong style="color:#b45309">⚠ ${semLeadTime} item(ns) com fornecedor sem prazo de entrega cadastrado</strong> — o lead time entrou como 0 e a sugestão pode estar subestimada. Cadastre em <strong>Compras → Fornecedores</strong>.` : ''}
+  </div>
   <div style="display:flex;align-items:flex-end;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+    <div class="filtro-group" style="margin:0">
+      <label>Tipo de item</label>
+      <select id="sugestao-filtro-tipo" onchange="atualizarFornecedoresSugestao()">
+        <option value="" ${tipoAnterior===''?'selected':''}>Todos (${lista.length})</option>
+        <option value="Vendável" ${tipoAnterior==='Vendável'?'selected':''}>Só vendáveis (${totVend})</option>
+        <option value="Insumo" ${tipoAnterior==='Insumo'?'selected':''}>Só insumos (${totIns})</option>
+      </select>
+    </div>
     <div class="filtro-group" style="margin:0">
       <label>Fornecedor</label>
       <select id="sugestao-filtro-forn" onchange="renderTabelaSugestao()">
@@ -13062,8 +13220,54 @@ async function relSugestaoCompra(el){
         ${opcoesForn}
       </select>
     </div>
+    <div class="filtro-group" style="margin:0">
+      <label>Base de demanda</label>
+      <select id="sugestao-base-demanda">
+        <option value="concluidos" ${baseDemanda==='concluidos'?'selected':''}>Só pedidos concluídos</option>
+        <option value="ampliado" ${baseDemanda==='ampliado'?'selected':''}>Concluídos + aprovados + em separação</option>
+      </select>
+    </div>
+    <div class="form-group" style="margin:0;width:160px">
+      <label>Cobertura (dias)</label>
+      <input type="number" id="sugestao-cobertura" value="${diasCobertura}" min="1">
+    </div>
+    <button class="btn btn-outline btn-sm" onclick="recalcularSugestaoCompra()">🔄 Recalcular</button>
   </div>
   <div id="sugestao-tabela-wrap"></div>`;
+
+  if(!lista.length){
+    document.getElementById('sugestao-tabela-wrap').innerHTML =
+      '<div style="padding:24px;text-align:center;color:var(--success)">✅ Nenhum item atingiu o ponto de pedido. Estoque em dia.</div>';
+    const c = document.getElementById('sugestao-contador');
+    if(c) c.textContent = '🛒 0 item(ns) precisam de reposição';
+    return;
+  }
+
+  renderTabelaSugestao();
+}
+
+// Recalcula com a cobertura editada na tela, reaproveitando o consumo já lido do Firebase
+async function recalcularSugestaoCompra(){
+  const el = document.getElementById('rel-conteudo');
+  if(el) await relSugestaoCompra(el);
+}
+
+// Ao trocar o tipo de item, o seletor de fornecedor é remontado só com quem tem item
+// daquele tipo — evita opção que devolveria lista vazia. Mantém a seleção se ainda valer.
+function atualizarFornecedoresSugestao(){
+  const selTipo = document.getElementById('sugestao-filtro-tipo');
+  const selForn = document.getElementById('sugestao-filtro-forn');
+  if(!selTipo || !selForn) return;
+  const tipo = selTipo.value;
+  const anterior = selForn.value;
+  const base = (SUGESTAO_LISTA||[]).filter(p => !tipo || p.tipo === tipo);
+
+  const contagem = {};
+  base.forEach(p=>{ contagem[p.fornecedor] = (contagem[p.fornecedor]||0) + 1; });
+  selForn.innerHTML = `<option value="">Todos os fornecedores (${base.length})</option>` +
+    Object.keys(contagem).sort((a,b)=>a.localeCompare(b,'pt-BR'))
+      .map(f=>`<option value="${f.replace(/"/g,'&quot;')}">${f} (${contagem[f]})</option>`).join('');
+  selForn.value = contagem[anterior] ? anterior : '';
 
   renderTabelaSugestao();
 }
@@ -13073,14 +13277,16 @@ async function relSugestaoCompra(el){
 function renderTabelaSugestao(){
   const wrap = document.getElementById('sugestao-tabela-wrap');
   if(!wrap) return;
-  const filtro = document.getElementById('sugestao-filtro-forn')?.value || '';
-  const lista = (SUGESTAO_LISTA||[]).filter(p => !filtro || p.fornecedor === filtro);
+  const filtro     = document.getElementById('sugestao-filtro-forn')?.value || '';
+  const filtroTipo = document.getElementById('sugestao-filtro-tipo')?.value || '';
+  const lista = (SUGESTAO_LISTA||[]).filter(p =>
+    (!filtroTipo || p.tipo === filtroTipo) && (!filtro || p.fornecedor === filtro));
 
   const contador = document.getElementById('sugestao-contador');
   if(contador){
     const vend = lista.filter(p=>p.tipo==='Vendável').length;
     const ins  = lista.filter(p=>p.tipo==='Insumo').length;
-    contador.textContent = `🛒 ${lista.length} item(ns) precisam de reposição (${vend} vendáveis + ${ins} insumos)`;
+    contador.textContent = `🛒 ${lista.length} item(ns) atingiram o ponto de pedido (${vend} vendáveis + ${ins} insumos)`;
   }
 
   if(!lista.length){
@@ -13091,37 +13297,49 @@ function renderTabelaSugestao(){
   const porFornecedor = {};
   lista.forEach(p=>{ if(!porFornecedor[p.fornecedor]) porFornecedor[p.fornecedor]=[]; porFornecedor[p.fornecedor].push(p); });
 
+  const fmt = n => n.toLocaleString('pt-BR',{maximumFractionDigits:2});
+
   // Cabeçalho fixo: o container tem altura máxima e rolagem própria, e cada <th> usa
   // position:sticky. Sem a altura máxima aqui o sticky não gruda em lugar nenhum,
   // porque o overflow-x do container já cria um contexto de rolagem próprio.
-  const thBase = 'padding:10px 12px;position:sticky;top:0;z-index:3;background:var(--primary);color:rgba(255,255,255,.85)';
+  const thBase = 'padding:10px 12px;position:sticky;top:0;z-index:3;background:var(--primary);color:rgba(255,255,255,.85);white-space:nowrap';
   let html = `<div style="overflow:auto;max-height:70vh;border:1px solid var(--border);border-radius:8px">
     <table style="width:100%;border-collapse:collapse;font-size:13px">
     <thead><tr>
       <th style="${thBase};width:30px"><input type="checkbox" id="rel-sel-todos" onchange="selecionarTodosSugestao(this.checked)"></th>
       <th style="${thBase}">Código</th><th style="${thBase}">Produto/Insumo</th>
       <th style="${thBase};text-align:center">Tipo</th>
-      <th style="${thBase}">Fornecedor</th>
+      <th style="${thBase};text-align:center" title="Consumo Médio Diário — últimos 365 dias">CMD</th>
+      <th style="${thBase};text-align:center" title="Prazo de entrega do fornecedor">Lead (d)</th>
       <th style="${thBase};text-align:center">Disponível</th>
-      <th style="${thBase};text-align:center">Mínimo</th>
+      <th style="${thBase};text-align:center">Em Trânsito</th>
+      <th style="${thBase};text-align:center" title="Estoque de segurança = estoque mínimo cadastrado">Est. Mín</th>
+      <th style="${thBase};text-align:center" title="(CMD × Lead Time) + Estoque Mínimo">Ponto Pedido</th>
+      <th style="${thBase};text-align:center" title="Dias de estoque restantes no ritmo atual">Cobertura</th>
       <th style="${thBase};text-align:center">Qtd Sugerida</th>
       <th style="${thBase};text-align:center">Qtd a Pedir</th>
     </tr></thead><tbody>`;
 
   Object.entries(porFornecedor).forEach(([forn, itens])=>{
-    html += `<tr style="background:#f8f9fa"><td colspan="9" style="padding:8px 12px;font-weight:700;color:var(--primary);position:sticky;top:41px;z-index:2;background:#f8f9fa">📦 ${forn}</td></tr>`;
+    html += `<tr style="background:#f8f9fa"><td colspan="13" style="padding:8px 12px;font-weight:700;color:var(--primary);position:sticky;top:41px;z-index:2;background:#f8f9fa">📦 ${forn}</td></tr>`;
     itens.forEach(p=>{
+      const corCob = p.cobertura <= p.leadTime ? '#dc2626' : (p.cobertura <= p.leadTime+7 ? '#d97706' : '#16a34a');
+      const txtCob = isFinite(p.cobertura) ? `${Math.floor(p.cobertura)} d` : '—';
       html += `<tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:10px 12px;text-align:center"><input type="checkbox" class="rel-sugestao-check" data-codigo="${p.codigo}" checked></td>
+        <td style="padding:10px 12px;text-align:center"><input type="checkbox" class="rel-sugestao-check" data-id="${p.tipo}|${p.codigo}" checked></td>
         <td style="padding:10px 12px"><strong>${p.codigo}</strong></td>
         <td style="padding:10px 12px">${p.nome}</td>
         <td style="padding:10px 12px;text-align:center"><span class="badge badge-gray" style="font-size:10px">${p.tipo}</span></td>
-        <td style="padding:10px 12px;color:var(--muted)">${forn}</td>
-        <td style="padding:10px 12px;text-align:center;color:${p.disponivel<=0?'#dc2626':'#d97706'};font-weight:700">${p.disponivel.toLocaleString('pt-BR')}</td>
-        <td style="padding:10px 12px;text-align:center">${p.minimo?p.minimo.toLocaleString('pt-BR'):'—'}</td>
-        <td style="padding:10px 12px;text-align:center">${p.sugestao.toLocaleString('pt-BR')}</td>
+        <td style="padding:10px 12px;text-align:center">${p.semConsumo ? '<span style="color:#9ca3af" title="Sem consumo no último ano — sugestão baseada só no estoque mínimo">0</span>' : fmt(p.cmd)}</td>
+        <td style="padding:10px 12px;text-align:center">${p.semLeadTime ? '<span style="color:#b45309" title="Fornecedor sem prazo de entrega cadastrado">—</span>' : p.leadTime}</td>
+        <td style="padding:10px 12px;text-align:center;color:${p.disponivel<=0?'#dc2626':'#d97706'};font-weight:700">${fmt(p.disponivel)}</td>
+        <td style="padding:10px 12px;text-align:center;color:${p.emTransito>0?'#1565c0':'var(--muted)'}">${p.emTransito ? fmt(p.emTransito) : '—'}</td>
+        <td style="padding:10px 12px;text-align:center">${p.es ? fmt(p.es) : '—'}</td>
+        <td style="padding:10px 12px;text-align:center;font-weight:600">${fmt(p.pontoPedido)}</td>
+        <td style="padding:10px 12px;text-align:center;color:${corCob};font-weight:700">${txtCob}</td>
+        <td style="padding:10px 12px;text-align:center;font-weight:700">${fmt(p.sugestao)}</td>
         <td style="padding:10px 12px;text-align:center">
-          <input type="number" class="rel-sugestao-qtd" data-codigo="${p.codigo}" value="${p.sugestao}" min="1"
+          <input type="number" class="rel-sugestao-qtd" data-id="${p.tipo}|${p.codigo}" value="${p.sugestao}" min="1"
             style="width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;font-size:12px;text-align:center">
         </td>
       </tr>`;
@@ -13820,10 +14038,14 @@ async function criarPedidoCompraDoRelatorio(){
   // Agrupa por fornecedor para criar um pedido por fornecedor
   const porFornecedor = {};
   checkboxes.forEach(cb=>{
-    const codigo = cb.getAttribute('data-codigo');
-    const qtdEl = document.querySelector(`.rel-sugestao-qtd[data-codigo="${codigo}"]`);
+    // O identificador é tipo|código: produto vendável e insumo podem ter o MESMO código,
+    // e buscar só pelo código traria o item errado (fornecedor e tipo trocados no pedido).
+    const id = cb.getAttribute('data-id');
+    const [tipoItem, ...restoCod] = String(id).split('|');
+    const codigo = restoCod.join('|');
+    const qtdEl = document.querySelector(`.rel-sugestao-qtd[data-id="${id}"]`);
     const qtd = Number(qtdEl?.value)||1;
-    const prod = relatorioCache.lista.find(p=>p.codigo===codigo);
+    const prod = relatorioCache.lista.find(p=>p.codigo===codigo && p.tipo===tipoItem);
     if(!prod) return;
     if(!porFornecedor[prod.fornecedor]) porFornecedor[prod.fornecedor]=[];
     porFornecedor[prod.fornecedor].push({ ...prod, qtdPedir: qtd });
@@ -13844,7 +14066,7 @@ async function criarPedidoCompraDoRelatorio(){
     const snapNum = await db.ref('contador_pedidos_compra').transaction(v=>(v||0)+1);
     const numero = snapNum.snapshot.val();
     const itensPedido = itens.map(p=>({
-      codigo: p.codigo, nome: p.nome, tipo: 'vendavel',
+      codigo: p.codigo, nome: p.nome, tipo: (p.tipo==='Insumo'?'insumo':'vendavel'),
       codigo_fornecedor: p.cod_fornecedor||'',
       qtd: p.qtdPedir, preco_unit: 0, ipi_pct: 0, st_valor: 0,
       valorBruto:0, valorIpi:0, valorSt:0, rateioFrete:0, custoTotalItem:0, custoFinalUnitario:0
@@ -13867,6 +14089,489 @@ async function criarPedidoCompraDoRelatorio(){
 
 // ── Sugestão Jornal do Mês ──
 
+// ── Recalcular Estoque Mínimo em lote (fórmula do consumo máximo) ──
+// ES = (Consumo Máximo Diário × Lead Time Máximo) − (CMD × Lead Time)
+// onde Lead Time Máximo = prazo do fornecedor × fator (padrão 1,5).
+// Só considera pedidos CONCLUÍDOS (vendáveis) e saídas de estoque (insumos).
+const REC_DIAS_HISTORICO = 365;
+let RECALC_LISTA = [];
+let RECALC_SERIE_CACHE = null;
+
+// Monta a série de consumo DIÁRIO por item — necessária para extrair o consumo máximo.
+// O total anual sozinho não serve: precisamos do pico observado em um único dia.
+async function carregarSerieDiariaConsumo(forcar){
+  if(RECALC_SERIE_CACHE && !forcar && (Date.now() - RECALC_SERIE_CACHE.ts) < 30*60*1000){
+    return RECALC_SERIE_CACHE;
+  }
+  const desdeTs = Date.now() - REC_DIAS_HISTORICO*24*60*60*1000;
+  const porDia = { vendavel:{}, insumo:{} };
+
+  const add = (grupo, codigo, dia, qtd)=>{
+    if(!porDia[grupo][codigo]) porDia[grupo][codigo] = {};
+    porDia[grupo][codigo][dia] = (porDia[grupo][codigo][dia]||0) + qtd;
+  };
+
+  const snapPedidos = await db.ref('pedidos').once('value');
+  Object.values(snapPedidos.val() || {}).forEach(p=>{
+    if(!['CC','Concluído'].includes(p.status)) return;
+    const ts = new Date(p.data).getTime();
+    if(isNaN(ts) || ts < desdeTs) return;
+    const dia = String(p.data).slice(0,10);
+    (p.itens||[]).forEach(it=> add('vendavel', it.codigo, dia, Number(it.qtd||0)) );
+  });
+
+  const snapMov = await db.ref('movimentos_estoque').once('value');
+  Object.values(snapMov.val() || {}).forEach(m=>{
+    if(m.tipo !== 'saida') return;
+    if(m.ts < desdeTs) return;
+    const motivoLower = (m.motivo||'').toLowerCase();
+    if(motivoLower.includes('balanço') || motivoLower.includes('balanco') || motivoLower.includes('estorno')) return;
+    const dia = new Date(m.ts).toISOString().slice(0,10);
+    add('insumo', m.codigo, dia, Number(m.qtd||0));
+  });
+
+  RECALC_SERIE_CACHE = { ts:Date.now(), porDia };
+  return RECALC_SERIE_CACHE;
+}
+
+async function relRecalcEstoqueMinimo(el){
+  if(!usuarioLogado || !usuarioLogado.admin){
+    el.innerHTML = '<div style="padding:24px;text-align:center;color:#dc2626">🔒 Ferramenta restrita a administradores.</div>';
+    return;
+  }
+  el.innerHTML = `
+    <div style="padding:12px 16px;background:#fef3c7;border-left:4px solid #d97706;border-radius:6px;margin-bottom:14px;font-size:13px;color:#78350f;line-height:1.6">
+      <strong>⚠ Esta ferramenta grava no cadastro de produtos e insumos.</strong><br>
+      O cálculo abaixo apenas gera uma prévia — nada é alterado até você revisar e clicar em <strong>Aplicar selecionados</strong>.
+      Os valores anteriores são salvos em backup antes da gravação, e é possível desfazer.
+    </div>
+    <div style="display:flex;align-items:flex-end;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+      <div class="filtro-group" style="margin:0">
+        <label>Calcular para</label>
+        <select id="rec-filtro-tipo">
+          <option value="">Vendáveis e insumos</option>
+          <option value="Vendável">Só produtos vendáveis</option>
+          <option value="Insumo">Só insumos</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin:0;width:190px">
+        <label>Fator do Lead Time máximo</label>
+        <input type="number" step="0.1" min="1" id="rec-fator-lt" value="1.5">
+      </div>
+      <div class="filtro-group" style="margin:0">
+        <label>Consumo máximo diário</label>
+        <select id="rec-base-max">
+          <option value="max">Maior dia observado (clássico)</option>
+          <option value="janela">Pior período de lead time (recomendado)</option>
+          <option value="p95">Percentil 95 (ignora pico isolado)</option>
+        </select>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="calcularRecalcEstoqueMinimo()">🧮 Calcular prévia</button>
+      <button class="btn btn-outline btn-sm" style="color:#dc2626;border-color:#dc2626" onclick="desfazerRecalcEstoqueMinimo()">↺ Desfazer último recálculo</button>
+    </div>
+    <div id="rec-resultado"></div>`;
+}
+
+async function calcularRecalcEstoqueMinimo(){
+  const wrap = document.getElementById('rec-resultado');
+  wrap.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px">⏳ Lendo 365 dias de histórico...</div>';
+
+  const filtroTipo = document.getElementById('rec-filtro-tipo')?.value || '';
+  const querVend   = filtroTipo !== 'Insumo';
+  const querIns    = filtroTipo !== 'Vendável';
+
+  if(querVend && !PRODUTOS_DB.length) await carregarProdutosFirebase();
+  if(querIns  && !INSUMOS_DB.length)  await carregarInsumosFirebase();
+  if(!FORNECEDORES_DB.length)         await carregarFornecedoresFirebase();
+
+  const fatorLt = Number(document.getElementById('rec-fator-lt').value) || 1.5;
+  const baseMax = document.getElementById('rec-base-max').value;
+  const { porDia } = await carregarSerieDiariaConsumo();
+
+  // Pico de consumo diário: maior dia observado ou percentil 95 dos dias COM movimento
+  function consumoMaximo(mapaDias){
+    const vals = Object.values(mapaDias||{}).filter(v=>v>0).sort((a,b)=>a-b);
+    if(!vals.length) return 0;
+    if(baseMax === 'max') return vals[vals.length-1];
+    return vals[Math.max(0, Math.ceil(vals.length*0.95) - 1)];
+  }
+
+  // Consumo por LOTE distorce o "maior dia": uma OP que consome um mês de insumo de uma
+  // vez vira um pico diário irreal. Aqui olhamos o pior período de lead time inteiro e
+  // dividimos pelo número de dias — a taxa diária sustentada no pior cenário observado.
+  function consumoMaximoJanela(mapaDias, lt){
+    if(lt <= 0) return 0;
+    const pontos = Object.keys(mapaDias||{})
+      .map(d=>({ t: Date.parse(d + 'T00:00:00Z'), q: mapaDias[d] }))
+      .filter(x=>!isNaN(x.t)).sort((a,b)=>a.t-b.t);
+    if(!pontos.length) return 0;
+    const janelaMs = (lt-1)*86400000;
+    let melhor = 0;
+    for(let i=0;i<pontos.length;i++){
+      let soma = 0;
+      for(let j=i; j<pontos.length && pontos[j].t <= pontos[i].t + janelaMs; j++) soma += pontos[j].q;
+      if(soma > melhor) melhor = soma;
+    }
+    return melhor / lt;
+  }
+
+  function montar(item, tipo){
+    const grupo    = tipo === 'Insumo' ? 'insumo' : 'vendavel';
+    const dias     = porDia[grupo][item.codigo] || {};
+    const total    = Object.values(dias).reduce((a,b)=>a+b, 0);
+    const cmd      = total / REC_DIAS_HISTORICO;
+
+    const nomeForn = fornecedorPadrao(item);
+    const cadastro = FORNECEDORES_DB.find(f=>f.nome === nomeForn);
+    const lt       = Number(cadastro?.prazo_entrega_dias||0);
+    const ltMax    = lt * fatorLt;
+    const cmax     = baseMax === 'janela' ? consumoMaximoJanela(dias, lt) : consumoMaximo(dias);
+
+    const sugerido = Math.max(0, Math.ceil(cmax*ltMax - cmd*lt));
+    const atual    = Number(item.estoque_minimo||0);
+
+    // Sugestão acima de 180 dias de consumo médio indica pico isolado distorcendo a conta
+    const exagerado = cmd > 0 && sugerido > cmd*180;
+
+    return { tipo, codigo:item.codigo, nome:item.nome||'', fornecedor:nomeForn,
+      refKey: tipo === 'Insumo' ? item.key : item.codigo,
+      cmd, cmax, lt, ltMax, atual, sugerido, delta: sugerido - atual,
+      diasCobertos: cmd > 0 ? sugerido/cmd : 0,
+      semConsumo: total === 0, semLeadTime: lt === 0, exagerado };
+  }
+
+  const lista = [
+    ...(querVend ? PRODUTOS_DB.filter(p=>!p.inativo).map(p=>montar(p,'Vendável')) : []),
+    ...(querIns  ? INSUMOS_DB.filter(i=>!i.inativo).map(i=>montar(i,'Insumo'))    : [])
+  ].filter(l => l.sugerido !== l.atual)
+   .sort((a,b)=> Math.abs(b.delta) - Math.abs(a.delta));
+
+  RECALC_LISTA = lista;
+
+  if(!lista.length){
+    const escopoTxt = filtroTipo === 'Vendável' ? 'produto vendável' : (filtroTipo === 'Insumo' ? 'insumo' : 'item');
+    wrap.innerHTML = `<div style="padding:24px;text-align:center;color:var(--success)">✅ Nenhum ${escopoTxt} teria o estoque mínimo alterado com estes parâmetros.</div>`;
+    return;
+  }
+
+  const semConsumo   = lista.filter(l=>l.semConsumo).length;
+  const semLeadTime  = lista.filter(l=>l.semLeadTime && !l.semConsumo).length;
+  const zerariam     = lista.filter(l=>l.sugerido === 0 && l.atual > 0).length;
+  const exagerados   = lista.filter(l=>l.exagerado).length;
+
+  const fmt = n => n.toLocaleString('pt-BR',{maximumFractionDigits:2});
+  const thBase = 'padding:9px 11px;position:sticky;top:0;z-index:3;background:var(--primary);color:rgba(255,255,255,.85);white-space:nowrap';
+
+  let html = `
+    <div style="padding:12px 16px;background:#eff6ff;border-left:4px solid #1565c0;border-radius:6px;margin-bottom:12px;font-size:12px;color:#1e3a5f;line-height:1.7">
+      <strong>Fórmula:</strong> Estoque Mínimo = (Consumo Máx. Diário × Lead Time × ${fatorLt}) − (CMD × Lead Time)<br>
+      <strong>Escopo:</strong> ${filtroTipo === 'Vendável' ? 'somente produtos vendáveis' : (filtroTipo === 'Insumo' ? 'somente insumos' : 'vendáveis e insumos')}<br>
+      <strong>${lista.length}</strong> item(ns) teriam o mínimo alterado.
+      ${zerariam ? `<br><strong style="color:#b45309">⚠ ${zerariam} item(ns) seriam ZERADOS</strong> (têm mínimo hoje e a fórmula devolve 0).` : ''}
+      ${semLeadTime ? `<br><strong style="color:#b45309">⚠ ${semLeadTime} item(ns) com fornecedor sem prazo de entrega</strong> — a fórmula devolve 0 porque o lead time é 0. Vêm desmarcados.` : ''}
+      ${semConsumo ? `<br><strong style="color:#b45309">⚠ ${semConsumo} item(ns) sem nenhum consumo em 365 dias</strong> — a fórmula devolve 0. Vêm desmarcados.` : ''}
+      ${exagerados ? `<br><strong style="color:#dc2626">⚠ ${exagerados} item(ns) com sugestão acima de 180 dias de consumo</strong> — típico de consumo em lote (uma OP grande vira "pico diário"). Vêm desmarcados; considere a opção <em>Pior período de lead time</em>.` : ''}
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+      <span id="rec-contador" style="font-size:13px;font-weight:700;color:#92400e"></span>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-outline btn-sm" onclick="marcarTodosRecalc(true)">Marcar todos</button>
+        <button class="btn btn-outline btn-sm" onclick="marcarTodosRecalc(false)">Desmarcar todos</button>
+        <button class="btn btn-primary btn-sm" style="background:#16a34a" onclick="aplicarRecalcEstoqueMinimo()">💾 Aplicar selecionados</button>
+      </div>
+    </div>
+    <div style="overflow:auto;max-height:65vh;border:1px solid var(--border);border-radius:8px">
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+    <thead><tr>
+      <th style="${thBase};width:30px"><input type="checkbox" onchange="marcarTodosRecalc(this.checked)"></th>
+      <th style="${thBase}">Código</th><th style="${thBase}">Produto/Insumo</th>
+      <th style="${thBase};text-align:center">Tipo</th>
+      <th style="${thBase}">Fornecedor</th>
+      <th style="${thBase};text-align:center" title="Consumo médio diário">CMD</th>
+      <th style="${thBase};text-align:center" title="Maior consumo em um único dia">Cons. Máx/dia</th>
+      <th style="${thBase};text-align:center">Lead (d)</th>
+      <th style="${thBase};text-align:center">Lead Máx</th>
+      <th style="${thBase};text-align:center">Mín. Atual</th>
+      <th style="${thBase};text-align:center">Mín. Sugerido</th>
+      <th style="${thBase};text-align:center" title="Quantos dias de consumo médio o mínimo sugerido representa">Equivale a</th>
+      <th style="${thBase};text-align:center">Δ</th>
+    </tr></thead><tbody>`;
+
+  lista.forEach((l, idx)=>{
+    const marcar = !l.semConsumo && !l.semLeadTime && !l.exagerado;
+    const corLinha = marcar ? '' : (l.exagerado ? 'background:#fef2f2;' : 'background:#fffbeb;');
+    const corDelta = l.delta > 0 ? '#16a34a' : '#dc2626';
+    html += `<tr style="border-bottom:1px solid var(--border);${corLinha}">
+      <td style="padding:9px 11px;text-align:center"><input type="checkbox" class="rec-check" data-idx="${idx}" ${marcar?'checked':''} onchange="atualizarContadorRecalc()"></td>
+      <td style="padding:9px 11px"><strong>${l.codigo}</strong></td>
+      <td style="padding:9px 11px">${l.nome}</td>
+      <td style="padding:9px 11px;text-align:center"><span class="badge badge-gray" style="font-size:10px">${l.tipo}</span></td>
+      <td style="padding:9px 11px;color:var(--muted)">${l.fornecedor}</td>
+      <td style="padding:9px 11px;text-align:center">${l.semConsumo?'<span style="color:#b45309" title="Sem consumo em 365 dias">0</span>':fmt(l.cmd)}</td>
+      <td style="padding:9px 11px;text-align:center">${fmt(l.cmax)}</td>
+      <td style="padding:9px 11px;text-align:center">${l.semLeadTime?'<span style="color:#b45309" title="Fornecedor sem prazo cadastrado">—</span>':l.lt}</td>
+      <td style="padding:9px 11px;text-align:center">${l.semLeadTime?'—':fmt(l.ltMax)}</td>
+      <td style="padding:9px 11px;text-align:center">${fmt(l.atual)}</td>
+      <td style="padding:9px 11px;text-align:center;font-weight:700">${fmt(l.sugerido)}</td>
+      <td style="padding:9px 11px;text-align:center;color:${l.exagerado?'#dc2626':'var(--muted)'};font-weight:${l.exagerado?'700':'400'}">${l.cmd>0?Math.round(l.diasCobertos)+' d':'—'}</td>
+      <td style="padding:9px 11px;text-align:center;color:${corDelta};font-weight:700">${l.delta>0?'+':''}${fmt(l.delta)}</td>
+    </tr>`;
+  });
+  html += '</tbody></table></div>';
+  wrap.innerHTML = html;
+  atualizarContadorRecalc();
+}
+
+function marcarTodosRecalc(marcado){
+  document.querySelectorAll('.rec-check').forEach(cb=>cb.checked=marcado);
+  atualizarContadorRecalc();
+}
+
+function atualizarContadorRecalc(){
+  const n = document.querySelectorAll('.rec-check:checked').length;
+  const el = document.getElementById('rec-contador');
+  if(el) el.textContent = `✅ ${n} de ${RECALC_LISTA.length} item(ns) selecionados para gravação`;
+}
+
+async function aplicarRecalcEstoqueMinimo(){
+  if(!usuarioLogado || !usuarioLogado.admin){ toast('Ação restrita a administradores','error'); return; }
+  const marcados = Array.from(document.querySelectorAll('.rec-check:checked'))
+    .map(cb=>RECALC_LISTA[Number(cb.getAttribute('data-idx'))]).filter(Boolean);
+  if(!marcados.length){ toast('Nenhum item selecionado','error'); return; }
+
+  const zerariam = marcados.filter(l=>l.sugerido === 0 && l.atual > 0).length;
+  let msg = `Gravar novo estoque mínimo em ${marcados.length} item(ns)?`;
+  if(zerariam) msg += `\n\n⚠ ATENÇÃO: ${zerariam} item(ns) terão o mínimo ZERADO.`;
+  msg += `\n\nOs valores atuais serão salvos em backup e podem ser desfeitos.`;
+  if(!confirm(msg)) return;
+
+  const btnWrap = document.getElementById('rec-contador');
+  if(btnWrap) btnWrap.textContent = '⏳ Gravando...';
+
+  try {
+    // 1) Backup dos valores atuais ANTES de qualquer escrita
+    const backupKey = 'bk_' + Date.now();
+    await db.ref('backups_estoque_minimo/'+backupKey).set({
+      ts: Date.now(),
+      data: new Date().toISOString(),
+      usuario: usuarioLogado.nome || '',
+      itens: marcados.map(l=>({ tipo:l.tipo==='Insumo'?'insumo':'produto', ref:l.refKey,
+        codigo:l.codigo, anterior:l.atual, novo:l.sugerido }))
+    });
+
+    // 2) Gravação em lotes de 400 caminhos (update multi-path é atômico por lote)
+    const caminhos = marcados.map(l=>({
+      path: (l.tipo==='Insumo' ? 'insumos/' : 'produtos/') + l.refKey + '/estoque_minimo',
+      valor: l.sugerido
+    }));
+    for(let i=0; i<caminhos.length; i+=400){
+      const updates = {};
+      caminhos.slice(i, i+400).forEach(c=>{ updates[c.path] = c.valor; });
+      await db.ref().update(updates);
+    }
+
+    // 3) Reflete nos caches locais para a tela não ficar desatualizada
+    marcados.forEach(l=>{
+      const alvo = l.tipo==='Insumo'
+        ? INSUMOS_DB.find(i=>i.key === l.refKey)
+        : PRODUTOS_DB.find(p=>p.codigo === l.refKey);
+      if(alvo) alvo.estoque_minimo = l.sugerido;
+    });
+    SUGESTAO_CONSUMO_CACHE = null; // força a Sugestão de Compra a recalcular com os novos mínimos
+
+    toast(`✓ Estoque mínimo atualizado em ${marcados.length} item(ns)`,'success');
+    document.getElementById('rec-resultado').innerHTML =
+      `<div style="padding:18px;background:#dcfce7;border-radius:8px;color:#166534;font-size:13.5px;line-height:1.7">
+        ✅ <strong>${marcados.length} item(ns)</strong> atualizados com sucesso.<br>
+        Backup salvo como <code>${backupKey}</code> — use <strong>Desfazer último recálculo</strong> se precisar reverter.<br>
+        A Sugestão de Compra já vai considerar os novos mínimos na próxima geração.
+      </div>`;
+  } catch(e){
+    console.error(e);
+    toast('Erro ao gravar: ' + (e.message||e),'error');
+    if(btnWrap) atualizarContadorRecalc();
+  }
+}
+
+async function desfazerRecalcEstoqueMinimo(){
+  if(!usuarioLogado || !usuarioLogado.admin){ toast('Ação restrita a administradores','error'); return; }
+  const snap = await db.ref('backups_estoque_minimo').orderByKey().limitToLast(1).once('value');
+  const dados = snap.val();
+  if(!dados){ toast('Nenhum backup de estoque mínimo encontrado','error'); return; }
+
+  const chave = Object.keys(dados)[0];
+  const bk = dados[chave];
+  const itens = bk.itens || [];
+  if(!itens.length){ toast('Backup vazio','error'); return; }
+
+  if(!confirm(`↺ Reverter ${itens.length} item(ns) para os valores anteriores?\n\nBackup de ${new Date(bk.ts).toLocaleString('pt-BR')} por ${bk.usuario||'—'}.`)) return;
+
+  try {
+    for(let i=0; i<itens.length; i+=400){
+      const updates = {};
+      itens.slice(i, i+400).forEach(it=>{
+        updates[(it.tipo==='insumo'?'insumos/':'produtos/') + it.ref + '/estoque_minimo'] = it.anterior;
+      });
+      await db.ref().update(updates);
+    }
+    await db.ref('backups_estoque_minimo/'+chave).remove();
+    await carregarProdutosFirebase();
+    await carregarInsumosFirebase();
+    SUGESTAO_CONSUMO_CACHE = null;
+    toast(`✓ ${itens.length} item(ns) revertidos`,'success');
+    document.getElementById('rec-resultado').innerHTML =
+      `<div style="padding:18px;background:#dcfce7;border-radius:8px;color:#166534;font-size:13.5px">
+        ↺ Reversão concluída em <strong>${itens.length} item(ns)</strong>.
+      </div>`;
+  } catch(e){
+    console.error(e);
+    toast('Erro ao reverter: ' + (e.message||e),'error');
+  }
+}
+
+// ── Auditoria de Saldo × Movimentos ──
+// Recalcula o saldo de cada item a partir do último balanço registrado, somando todas
+// as entradas e saídas posteriores, e compara com o saldo gravado hoje. Qualquer
+// divergência significa que algum lançamento não foi aplicado (ou foi aplicado duas
+// vezes) — foi assim que uma entrada de compra de 400 sumiu do saldo de um insumo.
+const RX_BALANCO = /^Balan[çc]o:\s*(-?\d+(?:[.,]\d+)?)\s*(?:→|->)\s*(-?\d+(?:[.,]\d+)?)/;
+
+async function relAuditoriaEstoque(el){
+  el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px">⏳ Lendo movimentos e conferindo saldo item a item...</div>';
+
+  // Auditoria SEMPRE lê direto do Firebase, nunca de cache — o objetivo é justamente
+  // encontrar divergências entre o que está no servidor e o que deveria estar.
+  const [snapMov, snapProd, snapIns] = await Promise.all([
+    db.ref('movimentos_estoque').once('value'),
+    db.ref('produtos').once('value'),
+    db.ref('insumos').once('value')
+  ]);
+
+  const movs = Object.values(snapMov.val() || {});
+  const prods = Object.values(snapProd.val() || {});
+  const insumos = Object.entries(snapIns.val() || {}).map(([k,v])=>({ key:k, ...v }));
+
+  // O movimento grava só o código, sem dizer se é produto ou insumo. Quando o mesmo
+  // código existe nos dois cadastros, não dá para saber a quem pertence cada linha.
+  const codsProd = new Set(prods.map(p=>p.codigo));
+  const codsIns  = new Set(insumos.map(i=>i.codigo));
+  const ambiguos = new Set([...codsProd].filter(c=>codsIns.has(c)));
+
+  const porCodigo = {};
+  movs.forEach(m=>{
+    if(!m || !m.codigo) return;
+    (porCodigo[m.codigo] = porCodigo[m.codigo] || []).push(m);
+  });
+  Object.values(porCodigo).forEach(lista=> lista.sort((a,b)=> (a.ts||0) - (b.ts||0)) );
+
+  function conferir(codigo, saldoAtual){
+    const lista = porCodigo[codigo] || [];
+    if(!lista.length) return { status:'sem-movimento' };
+
+    // Âncora: o último balanço registrado. Antes dele não há como reconstruir,
+    // porque o estoque inicial nunca passou pelo histórico.
+    let ancora = null, tsAncora = -1;
+    lista.forEach(m=>{
+      const mm = RX_BALANCO.exec(m.motivo || '');
+      if(mm && (m.ts||0) >= tsAncora){
+        ancora = Number(String(mm[2]).replace(',','.'));
+        tsAncora = m.ts || 0;
+      }
+    });
+    if(ancora === null) return { status:'sem-balanco', movimentos: lista.length };
+
+    let esperado = ancora, aplicados = 0;
+    lista.forEach(m=>{
+      if((m.ts||0) <= tsAncora) return;
+      const q = Number(m.qtd||0);
+      if(m.tipo === 'entrada') esperado += q;
+      else if(m.tipo === 'saida') esperado -= q;
+      else return;
+      aplicados++;
+    });
+
+    const dif = Number((saldoAtual - esperado).toFixed(4));
+    return { status: dif === 0 ? 'ok' : 'divergente',
+      esperado, dif, aplicados, desdeTs: tsAncora, ancora };
+  }
+
+  const linhas = [];
+  prods.filter(p=>!p.inativo).forEach(p=>{
+    const r = conferir(p.codigo, Number(p.quantidade||0));
+    if(r.status === 'divergente' || r.status === 'sem-balanco')
+      linhas.push({ tipo:'Vendável', codigo:p.codigo, nome:p.nome||'', saldo:Number(p.quantidade||0),
+        ambiguo: ambiguos.has(p.codigo), ...r });
+  });
+  insumos.filter(i=>!i.inativo).forEach(i=>{
+    const r = conferir(i.codigo, Number(i.estoque_atual||0));
+    if(r.status === 'divergente' || r.status === 'sem-balanco')
+      linhas.push({ tipo:'Insumo', codigo:i.codigo, nome:i.nome||'', saldo:Number(i.estoque_atual||0),
+        ambiguo: ambiguos.has(i.codigo), ...r });
+  });
+
+  const divergentes = linhas.filter(l=>l.status==='divergente' && !l.ambiguo)
+    .sort((a,b)=> Math.abs(b.dif) - Math.abs(a.dif));
+  const semBalanco  = linhas.filter(l=>l.status==='sem-balanco').length;
+  const duvidosos   = linhas.filter(l=>l.ambiguo).length;
+  const negativos   = [...prods.map(p=>({t:'Vendável',c:p.codigo,n:p.nome,v:Number(p.quantidade||0)})),
+                       ...insumos.map(i=>({t:'Insumo',c:i.codigo,n:i.nome,v:Number(i.estoque_atual||0)}))]
+                       .filter(x=>x.v < 0).sort((a,b)=>a.v-b.v);
+
+  relatorioCache = { tipo:'auditoria-estoque', lista: divergentes };
+
+  const fmt = n => Number(n).toLocaleString('pt-BR',{maximumFractionDigits:2});
+  const thBase = 'padding:10px 12px;position:sticky;top:0;z-index:3;background:var(--primary);color:rgba(255,255,255,.85);white-space:nowrap';
+
+  let html = `
+    <div style="padding:12px 16px;background:${divergentes.length?'#fef2f2':'#dcfce7'};border-left:4px solid ${divergentes.length?'#dc2626':'#16a34a'};border-radius:6px;margin-bottom:14px;font-size:13px;color:${divergentes.length?'#7f1d1d':'#166534'};line-height:1.7">
+      ${divergentes.length
+        ? `<strong>⚠ ${divergentes.length} item(ns) com saldo divergente do histórico.</strong> O saldo gravado não bate com o último balanço mais os movimentos posteriores.`
+        : `<strong>✅ Nenhuma divergência encontrada</strong> entre o saldo gravado e o histórico de movimentos.`}
+      ${negativos.length ? `<br>🔻 <strong>${negativos.length} item(ns) com saldo negativo</strong> — sinal clássico de lançamento perdido.` : ''}
+      ${semBalanco ? `<br>ℹ️ ${semBalanco} item(ns) sem nenhum balanço no histórico: não há ponto de partida para reconstruir o saldo. Faça um balanço neles para que passem a ser conferíveis.` : ''}
+      ${duvidosos ? `<br>ℹ️ ${duvidosos} item(ns) com o mesmo código usado em produto e insumo — o histórico não guarda o tipo, então não dá para separar os movimentos. Conferir à mão.` : ''}
+    </div>`;
+
+  if(negativos.length){
+    html += `<div style="margin-bottom:14px;font-size:13px">
+      <strong style="color:#dc2626">Saldos negativos:</strong> ` +
+      negativos.slice(0,20).map(x=>`${x.c} (${fmt(x.v)})`).join(' · ') +
+      (negativos.length>20 ? ` … e mais ${negativos.length-20}` : '') + `</div>`;
+  }
+
+  if(!divergentes.length){
+    el.innerHTML = html;
+    return;
+  }
+
+  html += `<div style="overflow:auto;max-height:65vh;border:1px solid var(--border);border-radius:8px">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr>
+      <th style="${thBase}">Código</th><th style="${thBase}">Produto/Insumo</th>
+      <th style="${thBase};text-align:center">Tipo</th>
+      <th style="${thBase};text-align:center" title="Saldo gravado no sistema hoje">Saldo Atual</th>
+      <th style="${thBase};text-align:center" title="Último balanço + movimentos posteriores">Saldo Esperado</th>
+      <th style="${thBase};text-align:center">Diferença</th>
+      <th style="${thBase};text-align:center" title="Movimentos considerados após o último balanço">Movs.</th>
+      <th style="${thBase};text-align:center">Último balanço</th>
+    </tr></thead><tbody>`;
+
+  divergentes.forEach(l=>{
+    html += `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:10px 12px"><strong>${l.codigo}</strong></td>
+      <td style="padding:10px 12px">${l.nome}</td>
+      <td style="padding:10px 12px;text-align:center"><span class="badge badge-gray" style="font-size:10px">${l.tipo}</span></td>
+      <td style="padding:10px 12px;text-align:center;color:${l.saldo<0?'#dc2626':'inherit'};font-weight:700">${fmt(l.saldo)}</td>
+      <td style="padding:10px 12px;text-align:center;font-weight:700;color:#16a34a">${fmt(l.esperado)}</td>
+      <td style="padding:10px 12px;text-align:center;font-weight:700;color:#dc2626">${l.dif>0?'+':''}${fmt(l.dif)}</td>
+      <td style="padding:10px 12px;text-align:center;color:var(--muted)">${l.aplicados}</td>
+      <td style="padding:10px 12px;text-align:center;color:var(--muted);font-size:12px">${l.desdeTs ? new Date(l.desdeTs).toLocaleDateString('pt-BR') : '—'}</td>
+    </tr>`;
+  });
+  html += '</tbody></table></div>';
+  el.innerHTML = html;
+}
+
 // ── Exportar Excel ──
 function exportarRelatorioExcel(){
   if(!relatorioCache){ toast('Gere um relatório primeiro','error'); return; }
@@ -13883,7 +14588,8 @@ function exportarRelatorioExcel(){
     case 'vendas-produto': dados = lista.map(g=>({'Código':g.cod,'Produto':g.nome,'Qtd':g.qtd,'Total':g.total})); break;
     case 'compras-fornecedor': dados = lista.map(g=>({'Fornecedor':g.nome,'Pedidos':g.qtd,'Total':g.total})); break;
     case 'estoque-posicao': dados = lista.map(g=>({'Código':g.codigo,'Produto':g.nome,'Estoque':g.estoque,'Reservado':g.reservado,'Disponível':g.disponivel,'Mínimo':g.minimo})); break;
-    case 'sugestao-compra': dados = lista.map(g=>({'Tipo':g.tipo||'—','Código':g.codigo,'Produto/Insumo':g.nome,'Fornecedor':g.fornecedor,'Disponível':g.disponivel,'Mínimo':g.minimo,'Sugestão de Compra':g.sugestao})); break;
+    case 'auditoria-estoque': dados = lista.map(g=>({'Tipo':g.tipo,'Código':g.codigo,'Produto/Insumo':g.nome,'Saldo Atual':g.saldo,'Saldo Esperado':g.esperado,'Diferença':g.dif,'Movimentos após o balanço':g.aplicados,'Último balanço':g.desdeTs?new Date(g.desdeTs).toLocaleDateString('pt-BR'):''})); break;
+    case 'sugestao-compra': dados = lista.map(g=>({'Tipo':g.tipo||'—','Código':g.codigo,'Produto/Insumo':g.nome,'Fornecedor':g.fornecedor,'CMD':Number(g.cmd.toFixed(3)),'Lead Time (dias)':g.leadTime,'Disponível':g.disponivel,'Em Trânsito':g.emTransito,'Estoque Mínimo':g.es,'Ponto de Pedido':Number(g.pontoPedido.toFixed(2)),'Cobertura (dias)':isFinite(g.cobertura)?Math.floor(g.cobertura):'','Sugestão de Compra':g.sugestao})); break;
     case 'estoque-minimo': return exportarRelatorioExcelEstoqueMinimo(lista);
     case 'diagnostico-consumo': return exportarRelatorioExcelDiagnosticoConsumo();
     case 'mrp': return exportarMRPExcel();
@@ -15217,7 +15923,7 @@ async function aplicarBalancoImportado(){
   let ok = 0, falhas = [];
   for(const it of validos){
     try {
-      await db.ref('insumos/'+it.key+'/estoque_atual').set(it.contagem);
+      await definirEstoqueAbsoluto('insumo', it.key, it.contagem);
       const mem = INSUMOS_DB.find(x => x.codigo === it.codigo);
       if(mem) mem.estoque_atual = it.contagem;
       await registrarMovimentoEstoque(
