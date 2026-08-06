@@ -4,6 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CROW — Sistema de Vendas | v2.07.2026</title>
+
+<!-- Ícone do atalho na tela inicial do celular e na aba do navegador.
+     Os arquivos ficam ao lado do index.html no repositório. O logo é branco sobre
+     fundo transparente, então os ícones foram gerados com o fundo escuro da barra
+     do sistema — sem isso, o atalho fica branco no branco e não se vê nada. -->
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#3a3a3a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CROW">
+<meta name="mobile-web-app-capable" content="yes">
   <link rel="icon" type="image/png" href="data:image/png;base64,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">
 <!-- SheetJS para exportação Excel -->
 <!-- html2canvas para gerar imagem do pedido -->
@@ -345,8 +358,8 @@ tbody td{padding:11px 16px;font-size:14px}
            ar é mesmo a última versão enviada ao GitHub, ou se o Pages não publicou / o
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
-            style="font-size:10px;opacity:.55;margin:0 8px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 06/08/2026 17:43\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">06/08/2026 17:43</span>
+            style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
+            onclick="alert('Versão desta build: 06/08/2026 19:24\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 06/08/2026 19:24</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
