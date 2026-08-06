@@ -359,7 +359,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 06/08/2026 19:24\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 06/08/2026 19:24</span>
+            onclick="alert('Versão desta build: 06/08/2026 19:39\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 06/08/2026 19:39</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -1003,6 +1003,15 @@ tbody td{padding:11px 16px;font-size:14px}
             <li>Pasta <strong>produtos</strong></li>
             <li>Upload com nome = código do produto (ex: 7493.png)</li>
           </ol>
+          <div style="margin-top:12px;padding:10px 14px;background:#fef3c7;border-left:4px solid #d97706;border-radius:6px;font-size:12.5px;color:#78350f;line-height:1.7">
+            <strong>Para SUBSTITUIR uma foto sem criar duplicata</strong>, ajuste uma única vez em
+            Cloudinary → Settings → Upload → Upload presets → edite o preset usado pela Media Library:<br>
+            • <strong>Use filename as Public ID</strong>: ligado<br>
+            • <strong>Unique filename</strong>: <u>desligado</u><br>
+            • <strong>Overwrite</strong>: ligado<br>
+            Sem isso o Cloudinary acrescenta um sufixo aleatório ao nome e o arquivo antigo continua lá.
+            Depois de reenviar, clique em <strong>Atualizar fotos</strong>.
+          </div>
           <button class="btn btn-outline btn-sm" style="margin-top:10px" onclick="localStorage.removeItem('crow_foto_mapa');localStorage.removeItem('crow_foto_mapa_ts');carregarFotoMapa();toast('✓ Cache de fotos atualizado','success')">🔄 Atualizar fotos</button>
           <div class="alerta alerta-success" style="margin-top:10px">✓ Cloudinary: <strong>dleujtvtq</strong></div>
         </div>
@@ -2436,11 +2445,36 @@ async function carregarFotoMapa(){
     if(r.ok){
       const data = await r.json();
       const mapa = {};
+      const versaoDe = {};
+
+      // Quando o mesmo código tem mais de uma imagem no Cloudinary (ex: 7493.png e
+      // 7493_a1b2c3.png, que é o que acontece quando o upload gera nome único em vez de
+      // substituir), a versão MAIS RECENTE vence. Antes ganhava a última que aparecesse na
+      // listagem, numa ordem que o Cloudinary não garante — por isso trocar a foto às vezes
+      // não surtia efeito nenhum: a duplicata antiga continuava sendo escolhida.
       (data.resources||[]).forEach(res=>{
         const nome = res.public_id.split('/').pop();
         const codigo = nome.split('_')[0].toUpperCase();
-        mapa[codigo] = res.public_id;
+        const versao = Number(res.version || 0) ||
+                       (res.created_at ? Date.parse(res.created_at)/1000 : 0);
+        if(mapa[codigo] === undefined || versao >= (versaoDe[codigo] || 0)){
+          mapa[codigo] = res.public_id;
+          versaoDe[codigo] = versao;
+        }
       });
+
+      // Relatório de duplicatas no console, para saber o que limpar no Cloudinary
+      const contagem = {};
+      (data.resources||[]).forEach(res=>{
+        const cod = res.public_id.split('/').pop().split('_')[0].toUpperCase();
+        contagem[cod] = (contagem[cod]||0) + 1;
+      });
+      const duplicados = Object.entries(contagem).filter(([,n])=>n>1);
+      if(duplicados.length){
+        console.warn(`[CROW] ${duplicados.length} código(s) com mais de uma imagem no Cloudinary. ` +
+          `A mais recente está sendo usada, mas vale limpar as antigas:`,
+          duplicados.map(([c,n])=>`${c} (${n})`).join(', '));
+      }
       FOTO_MAPA = mapa;
       localStorage.setItem('crow_foto_mapa', JSON.stringify(mapa));
       localStorage.setItem('crow_foto_mapa_ts', String(Date.now()));
