@@ -2947,7 +2947,7 @@ async function renderPainel(){
       }
       if(d.getTime()===hoje.getTime()) pedidosHoje++;
     }
-  } catch(e){}
+  } catch(e){ console.warn('[CROW] falha silenciosa ignorada:', e); }
 
   // Total faturado do PRÓPRIO vendedor no mês — visível só pra quem não é admin/expedição
   // (vendedor comum), e mostra só as vendas dele mesmo, nunca da empresa toda.
@@ -2965,7 +2965,7 @@ async function renderPainel(){
         totalFaturadoMeu += Number(p.total||0);
         pedidosFaturadosMeu++;
       });
-    } catch(e){}
+    } catch(e){ console.warn('[CROW] falha silenciosa ignorada:', e); }
   }
 
   const ocultarValoresPainel = ehExpedicao();
@@ -3000,7 +3000,7 @@ async function renderPainel(){
           <div class="pedido-card" style="border-left:3px solid #f59e0b">
             <div class="pedido-card-header">
               <div>
-                <div class="pedido-card-num">${c.nome}</div>
+                <div class="pedido-card-num">${esc(c.nome)}</div>
                 <div style="font-size:12px;color:var(--muted);margin-top:2px">
                   Cadastrado por: <strong>${c.criado_por || c.vendedor_nome || '—'}</strong>
                   ${c.ts_cadastro ? ' · ' + new Date(c.ts_cadastro).toLocaleString('pt-BR') : ''}
@@ -3040,7 +3040,7 @@ async function renderPainel(){
             <div style="font-size:12px;color:var(--muted)">${p.condicao||''}</div>
           </div>
         </div>
-        <div class="pedido-card-info">👤 <span>${p.cliente_nome}</span></div>
+        <div class="pedido-card-info">👤 <span>${esc(p.cliente_nome)}</span></div>
         <div class="pedido-card-actions">
           <button class="btn btn-outline btn-sm" onclick="verPedido('${p.id}')">Ver detalhes</button>
           <button class="btn btn-sm" style="background:#25d366;color:#fff;font-weight:600" onclick="gerarImagemPedido('${p.id}')">📄 Gerar PDF</button>
@@ -3056,7 +3056,7 @@ async function renderPainel(){
         <tbody>${ativos.map(p=>`
           <tr onclick="verPedido('${p.id}')" style="cursor:pointer">
             <td><strong>#${p.numero}</strong></td>
-            <td>${p.cliente_nome}</td>
+            <td>${esc(p.cliente_nome)}</td>
             <td><strong>${fmtMoeda(p.total)}</strong></td>
             <td>${p.condicao||''}</td>
             <td>${statusBadge(p.status)}</td>
@@ -3084,7 +3084,7 @@ async function renderMetaMes(mesInicio, pedidosDoMes){
   try{
     const snap = await db.ref('metas/'+chaveMes).once('value');
     if(snap.val()) cfg = { ...cfg, ...snap.val() };
-  } catch(e){}
+  } catch(e){ console.warn('[CROW] falha silenciosa ignorada:', e); }
 
   // "pedidosDoMes" já veio pronto do Painel (mesma consulta que ele já faz pros cards de
   // cima) — não busca de novo, só reaproveita. Só falta 1 consulta extra: os FATURADOS, pra
@@ -3107,7 +3107,7 @@ async function renderMetaMes(mesInicio, pedidosDoMes){
       if(p.status==='Cancelado' || p.faturado) return;
       vendidoNaoFaturadoMes += Number(p.total||0);
     });
-  } catch(e){}
+  } catch(e){ console.warn('[CROW] falha silenciosa ignorada:', e); }
 
   const somaFaturadosMaisAFaturar = realizadoMes + vendidoNaoFaturadoMes;
   const totalVendidoNoMes = somaFaturadosMaisAFaturar - naoFatMesAnteriorVirou;
@@ -3315,7 +3315,7 @@ async function renderManutencao(){
           <td style="padding:10px">${m.manutencao}</td>
           <td style="padding:10px">${fmtData(m.data_prevista)}</td>
           <td style="padding:10px">${vencida ? '<span class="alerta alerta-danger" style="padding:2px 8px;display:inline-block">Vencida</span>' : '<span class="alerta alerta-success" style="padding:2px 8px;display:inline-block">Em dia</span>'}</td>
-          <td style="padding:10px">${uv ? `${uv.nome} em ${fmtData(uv.data)} ${uv.hora||''}` : '—'}</td>
+          <td style="padding:10px">${uv ? `${esc(uv.nome)} em ${fmtData(uv.data)} ${uv.hora||''}` : '—'}</td>
           <td style="padding:10px;white-space:nowrap">
             <button class="btn btn-outline btn-sm" onclick="abrirModalVerificacaoManutencao('${m.key}')">✓ Verificar</button>
             ${podeEditar ? `<button class="btn btn-outline btn-sm" onclick="abrirModalManutencao('${m.key}')">✏️</button>
@@ -3662,7 +3662,7 @@ async function renderPedidos(){
       totalFaturadoMes += Number(p.total||0);
       qtdFaturadosMes++;
     });
-  } catch(e){}
+  } catch(e){ console.warn('[CROW] falha silenciosa ignorada:', e); }
 
   // Usuários sem permissão de ver valores financeiros
   const ocultarValores = ehExpedicao();
@@ -3705,7 +3705,7 @@ async function renderPedidos(){
             ${desc}
           </div>` : ''}
         </div>
-        <div class="pedido-card-info">👤 <span>${p.cliente_nome}</span></div>
+        <div class="pedido-card-info">👤 <span>${esc(p.cliente_nome)}</span></div>
         <div class="pedido-card-info">📦 <span>${(p.itens||[]).length} iten(s)</span> · ${p.condicao||''}</div>
         ${p.obs ? `<div style="margin-top:6px;padding:5px 10px;background:#fffbeb;border-left:3px solid #fde68a;border-radius:0 6px 6px 0;font-size:12px;color:#92400e">⚠️ ${p.obs}</div>` : ''}
         <div class="pedido-card-actions">
@@ -3727,7 +3727,7 @@ async function renderPedidos(){
         </div>
         <div style="flex-shrink:0;font-size:12px;color:var(--muted);min-width:70px">${fmtData(p.data)}</div>
         <div style="flex:1;min-width:0;overflow:hidden">
-          <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">👤 ${p.cliente_nome}</div>
+          <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">👤 ${esc(p.cliente_nome)}</div>
           <div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">📦 ${(p.itens||[]).length} iten(s) · ${[p.forma,p.condicao].filter(Boolean).join(' · ')||''}</div>
         </div>
         <div style="flex-shrink:0;font-size:12px;color:var(--muted);min-width:80px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${p.vendedor_nome||''}">👤 ${(p.vendedor_nome||'').split(' ')[0]}</div>
@@ -3822,7 +3822,7 @@ async function preVisualizarFaturarRetroativo(){
           ${candidatos.map((p,idx)=>`
             <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
               <td style="padding:5px 8px;font-weight:700">#${p.numero}</td>
-              <td style="padding:5px 8px">${p.cliente_nome}</td>
+              <td style="padding:5px 8px">${esc(p.cliente_nome)}</td>
               <td style="padding:5px 8px">${p.vendedor_nome||'—'}</td>
               <td style="padding:5px 8px;text-align:center">${fmtData(p.data)}</td>
               <td style="padding:5px 8px;text-align:right">${fmtMoeda(p.total)}</td>
@@ -3876,7 +3876,7 @@ async function abrirModalCorrigirVendedorMassa(){
     VENDEDORES_SELECT_CACHE = Object.values(usuarios).filter(u=>u.ativo!==false).sort((a,b)=>a.nome.localeCompare(b.nome));
   }
   const sel = document.getElementById('massa-vendedor-select');
-  sel.innerHTML = VENDEDORES_SELECT_CACHE.map(u=>`<option value="${u.id}" data-nome="${u.nome}">${u.nome} (${u.id})</option>`).join('');
+  sel.innerHTML = VENDEDORES_SELECT_CACHE.map(u=>`<option value="${u.id}" data-nome="${esc(u.nome)}">${esc(u.nome)} (${u.id})</option>`).join('');
   document.getElementById('massa-vendedor-nome').value = '';
   document.getElementById('massa-vendedor-resultado').innerHTML = '';
   pedidosParaCorrigirMassa = [];
@@ -3912,7 +3912,7 @@ async function buscarPedidosParaCorrigirMassa(){
     </div>
     <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;margin-bottom:10px">
       ${pedidosParaCorrigirMassa.map(p=>`<div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:12px">
-        Pedido #${p.numero} — ${p.cliente_nome} — vendedor atual: <strong>${p.vendedor_nome_atual||'—'}</strong> (${fmtData(p.data)})
+        Pedido #${p.numero} — ${esc(p.cliente_nome)} — vendedor atual: <strong>${p.vendedor_nome_atual||'—'}</strong> (${fmtData(p.data)})
       </div>`).join('')}
     </div>
     <button class="btn btn-primary" style="width:100%" onclick="aplicarCorrecaoVendedorMassa()">✓ Corrigir todos para "${novoNome}"</button>
@@ -3966,7 +3966,7 @@ async function abrirCorrigirVendedorPedido(id){
   document.getElementById('corrigir-vendedor-pedido-id').value = id;
   const sel = document.getElementById('corrigir-vendedor-select');
   sel.innerHTML = '<option value="">Sem vendedor vinculado</option>' + VENDEDORES_SELECT_CACHE.map(u=>
-    `<option value="${u.id}" data-nome="${u.nome}" ${u.id===p.vendedor_id?'selected':''}>${u.nome}</option>`
+    `<option value="${u.id}" data-nome="${esc(u.nome)}" ${u.id===p.vendedor_id?'selected':''}>${esc(u.nome)}</option>`
   ).join('');
   abrirModal('modal-corrigir-vendedor');
 }
@@ -4054,7 +4054,7 @@ async function verificarVendedorPedidosW3(){
           <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
             <td style="padding:5px 8px"><input type="checkbox" class="check-corr-vend-w3" data-idx="${idx}" checked></td>
             <td style="padding:5px 8px;font-weight:700">#${d.numero}</td>
-            <td style="padding:5px 8px">${d.cliente_nome}</td>
+            <td style="padding:5px 8px">${esc(d.cliente_nome)}</td>
             <td style="padding:5px 8px;color:#dc2626">${d.vendedorAtualNome}</td>
             <td style="padding:5px 8px;color:#16a34a;font-weight:700">${d.vendedorCorretoNome}</td>
           </tr>`).join('')}
@@ -4118,7 +4118,7 @@ async function verPedido(id){
         ${bloqueado?'🔒 Bloqueado para edição':(tempoRestante>0?'✏️ Editável por mais '+tempoRestante+' min':'✏️ Editável (prazo normal de 1h já passou — liberado para Admin/Expedição)')}
       </div>
       <div style="background:var(--bg);border-radius:10px;padding:14px 18px;margin-bottom:16px">
-        <strong>${p.cliente_nome}</strong><br>
+        <strong>${esc(p.cliente_nome)}</strong><br>
         <span style="font-size:13px;color:var(--muted)">${p.cliente_cpf||''} · ${p.cliente_cidade||''}/${p.cliente_uf||''}</span>
       </div>
       ${(() => {
@@ -4128,7 +4128,7 @@ async function verPedido(id){
         <div class="item-row item-row-header"><span>Produto</span><span>Qtd</span>${!ocultarVal?'<span>Preço Unit.</span><span>Desc.%</span><span>Subtotal</span>':''}<span></span></div>
         ${(p.itens||[]).map(i=>`
           <div class="item-row">
-            <span><strong style="color:${i.codigo&&i.codigo!=='reservado'?'var(--accent)':'#dc2626'}">${i.codigo&&i.codigo!=='reservado'?i.codigo:'SEM CÓD.'}</strong> — ${i.nome}</span>
+            <span><strong style="color:${i.codigo&&i.codigo!=='reservado'?'var(--accent)':'#dc2626'}">${i.codigo&&i.codigo!=='reservado'?i.codigo:'SEM CÓD.'}</strong> — ${esc(i.nome)}</span>
             <span>${i.qtd} ${i.unidade}</span>
             ${!ocultarVal?`<span>${fmtMoeda(i.preco)}</span><span>${Number(i.desconto_item||0).toFixed(2).replace(/\.?0+$/,'')}%</span><span><strong>${fmtMoeda(i.qtd*i.preco*(1-(i.desconto_item||0)/100))}</strong></span>`:''}
             <span></span>
@@ -4218,7 +4218,7 @@ async function abrirLogBipagem(pedidoId){
       ${log.length ? log.map((l,idx)=>`
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border)">
           <div>
-            <div style="font-size:13px;font-weight:600">${idx+1}. ${l.nome} <span style="color:var(--muted);font-size:11px">(unidade ${l.unidade_numero})</span></div>
+            <div style="font-size:13px;font-weight:600">${idx+1}. ${esc(l.nome)} <span style="color:var(--muted);font-size:11px">(unidade ${l.unidade_numero})</span></div>
             <div style="font-size:11px;color:var(--muted)">${l.codigo} ${l.usuario?'· '+l.usuario:''}</div>
           </div>
           <div style="font-weight:700;color:#7c3aed;font-size:13px;white-space:nowrap">${new Date(l.ts).toLocaleString('pt-BR')}</div>
@@ -4396,7 +4396,7 @@ async function editarPedido(id){
     </div>` : '';
   document.getElementById('pedido-cliente-selecionado').innerHTML =
     `<div class="alerta alerta-success" style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
-      <span>✓ ${p.cliente_nome} · ${p.cliente_cidade||''}/${p.cliente_uf||''}</span>
+      <span>✓ ${esc(p.cliente_nome)} · ${p.cliente_cidade||''}/${p.cliente_uf||''}</span>
       ${podeTrocarCliente ? `<button type="button" class="btn btn-outline btn-sm" onclick="habilitarTrocaClientePedido()">🔄 Trocar Cliente</button>` : ''}
     </div>
     ${creditoHtmlEdicao}`;
@@ -4463,7 +4463,7 @@ async function clonarPedido(id){
   document.getElementById('pedido-busca-cliente').value = p.cliente_nome;
   document.getElementById('pedido-cliente-selecionado').innerHTML =
     `<div class="alerta alerta-success" style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
-      <span>✓ ${p.cliente_nome} · ${p.cliente_cidade||''}/${p.cliente_uf||''}</span>
+      <span>✓ ${esc(p.cliente_nome)} · ${p.cliente_cidade||''}/${p.cliente_uf||''}</span>
       <button type="button" class="btn btn-outline btn-sm" onclick="habilitarTrocaClientePedido()">🔄 Trocar Cliente</button>
     </div>`;
   document.getElementById('step-cliente-ped').style.display='none';
@@ -4587,14 +4587,39 @@ async function reativarPedido(id){
   const statusAnterior = p.status_antes_cancelamento || 'AA';
   const labelStatus = { AA:'Aguardando Aprovação', AP:'Aprovado', EX:'Em Separação/Expedição', CC:'Conferido/Concluído' };
 
-  if(!confirm(`Reativar o Pedido #${p.numero}?\n\nEle voltará para o status: "${labelStatus[statusAnterior]||statusAnterior}".\nA reserva de estoque dos itens será restaurada automaticamente.`)) return;
+  const eraBipado = statusAnterior === 'CC';
+  const aviso = eraBipado
+    ? `Reativar o Pedido #${p.numero}?\n\nEle voltará para "Conferido/Concluído".\n\n`
+      + `⚠ ATENÇÃO: se no cancelamento você optou por ESTORNAR os itens, o estoque foi devolvido.\n`
+      + `Voltar para Concluído NÃO baixa de novo — confira o saldo desses itens depois de reativar.`
+    : `Reativar o Pedido #${p.numero}?\n\nEle voltará para o status: "${labelStatus[statusAnterior]||statusAnterior}".\nA reserva de estoque dos itens será restaurada automaticamente.`;
+  if(!confirm(aviso)) return;
 
   try {
     // Restaura o status anterior (ou AA se não tiver registro)
     await db.ref('pedidos/'+id+'/status').set(statusAnterior);
 
-    // Restaura a reserva de estoque (que foi liberada no cancelamento)
-    await reservarEstoquePedido(p.itens||[]);
+    // Só status abertos (AA/AP/EX) têm reserva. Pedido que estava bipado (CC) já teve a
+    // baixa física: reservar aqui criaria uma reserva fantasma que nunca seria liberada.
+    if(statusAnterior !== 'CC'){
+      await reservarEstoquePedido(p.itens||[]);
+    }
+
+    // O cancelamento devolveu o crédito ao cliente; reativar precisa debitar de novo.
+    const creditoDoPedido = Number(p?.credito_aplicado||0);
+    if(creditoDoPedido > 0 && Number(p?.credito_debitado_valor||0) === 0){
+      const cli = CLIENTES_DB.find(x=>x.codigo===p.cliente_codigo);
+      if(cli?._key){
+        const r = await aplicarDeltaCredito(cli._key, -creditoDoPedido);
+        const debitado = -r.aplicado;
+        await db.ref('pedidos/'+id+'/credito_debitado_valor').set(debitado);
+        if(Math.abs(debitado - creditoDoPedido) > 0.001){
+          toast(`⚠ O cliente só tinha ${fmtMoeda(debitado)} de saldo: o pedido usava ${fmtMoeda(creditoDoPedido)} de crédito. Revise o pedido.`,'error');
+        }
+      } else {
+        toast(`⚠ Cliente não localizado: o crédito de ${fmtMoeda(creditoDoPedido)} não foi debitado de volta. Ajuste manualmente.`,'error');
+      }
+    }
 
     // Registra no histórico
     const historico = p.historico_edicoes || [];
@@ -4641,13 +4666,28 @@ async function cancelarPedido(id){
       await liberarReservaEstoquePedido(p.itens);
     }
 
+    // Devolve ao cliente o crédito que este pedido tinha consumido. Sem isso o saldo
+    // ficava retido para sempre num pedido que nem existe mais.
+    const creditoUsado = Number(p?.credito_debitado_valor ?? (p?.credito_debitado ? p?.credito_aplicado : 0) ?? 0);
+    if(creditoUsado > 0){
+      const cli = CLIENTES_DB.find(x=>x.codigo===p.cliente_codigo);
+      if(cli?._key){
+        await aplicarDeltaCredito(cli._key, creditoUsado);
+        await db.ref('pedidos/'+id+'/credito_debitado_valor').set(0);
+        await db.ref('pedidos/'+id+'/credito_devolvido_em').set(Date.now());
+        toast(`💰 ${fmtMoeda(creditoUsado)} de crédito devolvido a ${p.cliente_nome}`,'success');
+      } else {
+        toast(`⚠ Não foi possível devolver ${fmtMoeda(creditoUsado)} de crédito: cliente não localizado no cadastro. Ajuste manualmente.`,'error');
+      }
+    }
+
     // Estorna ao estoque se solicitado
     if(estornarEstoque && p?.itens){
       for(const item of p.itens){
         const prodSnap = await db.ref('produtos/'+item.codigo).once('value');
         if(prodSnap.exists()){
           await movimentarEstoque('produto', item.codigo, { codigo:item.codigo, nome:item.nome, delta:item.qtd,
-            motivo:`Estorno — cancelamento do Pedido #${p.numero} (${p.cliente_nome})`, origemTipo:'pedido', origemId:id });
+            motivo:`Estorno — cancelamento do Pedido #${p.numero} (${esc(p.cliente_nome)})`, origemTipo:'pedido', origemId:id });
         }
       }
       toast(`✅ Pedido cancelado e ${p.itens.length} item(ns) estornado(s) ao estoque.`,'success');
@@ -4761,7 +4801,7 @@ function buscarClientePedido(){
     <div onclick="selecionarClientePedido('${c.codigo}')"
       style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px"
       onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">
-      <strong>${c.nome}</strong><br>
+      <strong>${esc(c.nome)}</strong><br>
       <span style="color:var(--muted)">${c.cpf_cnpj||''} · ${c.cidade||''}/${c.uf||''}</span>
     </div>`).join('');
   lista.style.display='block';
@@ -4802,7 +4842,7 @@ async function selecionarClientePedido(cod){
       VENDEDORES_SELECT_CACHE = Object.values(usuarios).filter(u=>u.ativo!==false).sort((a,b)=>a.nome.localeCompare(b.nome));
     }
     const opcoes = VENDEDORES_SELECT_CACHE.map(u=>
-      `<option value="${u.id}" data-nome="${u.nome}" ${u.id===c.vendedor_id?'selected':''}>${u.nome}</option>`
+      `<option value="${u.id}" data-nome="${esc(u.nome)}" ${u.id===c.vendedor_id?'selected':''}>${esc(u.nome)}</option>`
     ).join('');
     vendedorHtml = `
       <div style="font-size:12px;color:var(--muted);margin-top:6px">
@@ -4817,7 +4857,7 @@ async function selecionarClientePedido(cod){
   }
 
   document.getElementById('pedido-cliente-selecionado').innerHTML=
-    `<div class="alerta alerta-success" style="margin-top:8px">✓ <strong>${c.nome}</strong> · ${c.cidade||''}/${c.uf||''}
+    `<div class="alerta alerta-success" style="margin-top:8px">✓ <strong>${esc(c.nome)}</strong> · ${c.cidade||''}/${c.uf||''}
       <button onclick="trocarCliente()" style="float:right;background:none;border:none;cursor:pointer;color:var(--success);font-weight:600">Trocar</button>
       ${vendedorHtml}
     </div>
@@ -4985,7 +5025,7 @@ function renderItemStaging(){
   el.style.display='';
   el.innerHTML = `
     <div style="border:2px solid var(--accent);border-radius:10px;padding:12px;background:#fff7ed">
-      <div style="font-weight:700;margin-bottom:10px">➕ ${it.nome} <span style="color:var(--muted);font-weight:400;font-size:12px">(${it.codigo})</span></div>
+      <div style="font-weight:700;margin-bottom:10px">➕ ${esc(it.nome)} <span style="color:var(--muted);font-weight:400;font-size:12px">(${it.codigo})</span></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
         <div class="form-group" style="width:90px;margin:0">
           <label>Quantidade</label>
@@ -5324,14 +5364,14 @@ function gerarResumoAlteracoesPedido(original, itensNovos, formaNova, condicaoNo
     const chave = i.codigo||i.nome;
     const antigo = mapAntigo[chave];
     if(!antigo){
-      mudancas.push(`+ Item adicionado: ${i.nome} (qtd ${i.qtd})`);
+      mudancas.push(`+ Item adicionado: ${esc(i.nome)} (qtd ${i.qtd})`);
     } else if(Number(antigo.qtd) !== Number(i.qtd)){
-      mudancas.push(`± ${i.nome}: quantidade ${antigo.qtd} → ${i.qtd}`);
+      mudancas.push(`± ${esc(i.nome)}: quantidade ${antigo.qtd} → ${i.qtd}`);
     }
   });
   itensAntigos.forEach(i=>{
     const chave = i.codigo||i.nome;
-    if(!mapNovo[chave]) mudancas.push(`− Item removido: ${i.nome} (qtd ${i.qtd})`);
+    if(!mapNovo[chave]) mudancas.push(`− Item removido: ${esc(i.nome)} (qtd ${i.qtd})`);
   });
 
   if((original.forma||'') !== (formaNova||'')) mudancas.push(`Forma de pagamento: "${original.forma||'—'}" → "${formaNova||'—'}"`);
@@ -5410,7 +5450,7 @@ async function confirmarPedido(){
   // Avisa se o cliente ainda não foi cadastrado no W3 (não bloqueia, mas registra)
   const clienteCompleto = CLIENTES_DB.find(x=>x.codigo===pedidoAtual.cliente.codigo);
   if(clienteCompleto?.pendente_w3){
-    const ok = await confirmCustom(`⚠️ ATENÇÃO: "${pedidoAtual.cliente.nome}" ainda não foi cadastrado no W3.\n\nSem cadastro no W3, este pedido NÃO poderá ser faturado.\n\nDeseja salvar o pedido mesmo assim e cadastrar o cliente no W3 depois?`, 'Salvar mesmo assim');
+    const ok = await confirmCustom(`⚠️ ATENÇÃO: "${esc(pedidoAtual.cliente.nome)}" ainda não foi cadastrado no W3.\n\nSem cadastro no W3, este pedido NÃO poderá ser faturado.\n\nDeseja salvar o pedido mesmo assim e cadastrar o cliente no W3 depois?`, 'Salvar mesmo assim');
     if(!ok) return;
   }
 
@@ -5547,13 +5587,20 @@ async function confirmarPedido(){
     const deltaCredito = (pedidoAtual.credito_aplicado || 0) - creditoJaDebitadoAntes;
     if(deltaCredito !== 0 && c._key){
       try {
-        const snapClienteFresco = await db.ref('clientes/'+c._key).once('value');
-        const creditoClienteFresco = Number(snapClienteFresco.val()?.credito || 0);
-        const novoCredito = Math.max(0, creditoClienteFresco - deltaCredito);
-        await db.ref('clientes/'+c._key).update({ credito: novoCredito });
-        c.credito = novoCredito;
+        const r = await aplicarDeltaCredito(c._key, -deltaCredito);
+        c.credito = r.novo;
         const cMem = CLIENTES_DB.find(x=>x.codigo===c.codigo);
-        if(cMem) cMem.credito = novoCredito;
+        if(cMem) cMem.credito = r.novo;
+
+        // Se o saldo do servidor não cobria o débito, o crédito realmente aplicado é
+        // menor que o solicitado. Antes isso era descartado em silêncio pelo Math.max(0).
+        const debitadoDeFato = -r.aplicado;
+        if(Math.abs(debitadoDeFato - deltaCredito) > 0.001){
+          const efetivo = creditoJaDebitadoAntes + debitadoDeFato;
+          pedidoAtual.credito_aplicado = efetivo;
+          pedido.credito_aplicado = efetivo;
+          toast(`⚠ O cliente não tinha saldo suficiente: foi aplicado ${fmtMoeda(efetivo)} de crédito em vez de ${fmtMoeda(creditoJaDebitadoAntes + deltaCredito)}. Confira o total do pedido.`,'error');
+        }
         pedido.credito_debitado_valor = pedidoAtual.credito_aplicado || 0;
         pedido.credito_debitado = (pedidoAtual.credito_aplicado || 0) > 0;
       } catch(e){
@@ -5570,9 +5617,16 @@ async function confirmarPedido(){
 
     await db.ref('pedidos/'+pedido.id).update(pedido);
 
-    // Reserva de estoque: pedido novo reserva tudo; pedido editado ajusta a diferença
+    // Reserva de estoque: pedido novo reserva tudo; pedido editado ajusta a diferença.
+    // Pedido já bipado (CC) NÃO tem reserva — a baixa física já aconteceu. Nele, o que
+    // precisa acertar é o saldo real, senão editar a quantidade deixava o estoque errado
+    // e ainda criava uma reserva fantasma que nunca seria liberada.
     if(itensAntigos){
-      await ajustarReservaEdicaoPedido(itensAntigos, pedidoAtual.itens);
+      if(pedidoOriginal?.status === 'CC'){
+        await ajustarBaixaFisicaEdicaoPedido(itensAntigos, pedidoAtual.itens, numero, pedidoAtual.id);
+      } else {
+        await ajustarReservaEdicaoPedido(itensAntigos, pedidoAtual.itens);
+      }
     } else {
       await reservarEstoquePedido(pedidoAtual.itens);
     }
@@ -5726,7 +5780,7 @@ async function renderOrcamentos(){
     Object.assign(mapaOrc, snap2.val()||{});
     const snap3 = await db.ref('pedidos').orderByChild('status_antes_cancelamento').equalTo('Orçamento').once('value');
     Object.assign(mapaOrc, snap3.val()||{});
-  } catch(e){}
+  } catch(e){ console.warn('[CROW] falha silenciosa ignorada:', e); }
 
   let orcamentos=[];
   for(const k in mapaOrc){
@@ -5770,7 +5824,7 @@ async function renderOrcamentos(){
         </div>
         <div style="flex-shrink:0;font-size:12px;color:var(--muted);min-width:70px">${fmtData(p.data)}</div>
         <div style="flex:1;min-width:0;overflow:hidden">
-          <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">👤 ${p.cliente_nome}</div>
+          <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">👤 ${esc(p.cliente_nome)}</div>
           <div style="font-size:11px;color:var(--muted)">📦 ${(p.itens||[]).length} iten(s)${p._status_orcamento==='aprovado'?' · virou Pedido #'+p.numero:''}</div>
         </div>
         <div style="flex-shrink:0;text-align:right;min-width:90px">
@@ -5806,7 +5860,7 @@ async function confirmarOrcamento(id){
     document.getElementById('btn-salvar-orcamento').style.display='none';
     document.getElementById('pedido-busca-cliente').value=p.cliente_nome;
     document.getElementById('pedido-cliente-selecionado').innerHTML=
-      `<div class="alerta alerta-success" style="margin-top:8px">✓ ${p.cliente_nome}</div>`;
+      `<div class="alerta alerta-success" style="margin-top:8px">✓ ${esc(p.cliente_nome)}</div>`;
     document.getElementById('step-cliente-ped').style.display='none';
     document.getElementById('step-itens-ped').style.display='';
     document.getElementById('desc-geral').value=p.desconto_geral||0;
@@ -5893,7 +5947,7 @@ async function renderClientes(){
       const w3Badge = c.pendente_w3 ? '<span class="badge" style="background:#fef2f2;color:#dc2626">⚠️ Pendente no W3</span>' : '';
       const importW3IncompletoBadge = (c.importado_w3 && !c.cpf_cnpj) ? '<span class="badge" style="background:#eff6ff;color:#1565c0">📥 Importado do W3 — falta CNPJ/telefone</span>' : '';
       return `<div class="cliente-card" style="${c.inativo?'opacity:.6':''}${c.pendente_w3?';border-left:3px solid #dc2626':''}">
-        <div class="cliente-card-nome">${c.nome} ${c.inativo?'<span class="badge badge-gray">Inativo</span>':''} ${semVendedorBadge} ${w3Badge} ${importW3IncompletoBadge}</div>
+        <div class="cliente-card-nome">${esc(c.nome)} ${c.inativo?'<span class="badge badge-gray">Inativo</span>':''} ${semVendedorBadge} ${w3Badge} ${importW3IncompletoBadge}</div>
         <div class="cliente-card-info">📄 CNPJ/CPF: <span>${c.cpf_cnpj||'—'}</span></div>
         <div class="cliente-card-info">📞 Tel: <span>${telLink}</span></div>
         ${c.email?`<div class="cliente-card-info">✉️ <span>${c.email}</span></div>`:''}
@@ -5941,7 +5995,7 @@ async function verHistoricoCliente(cod){
     .filter(p=>p.status!=='Cancelado');
   const totalVol=pedidos.reduce((s,p)=>s+(p.total||0),0);
   document.getElementById('ver-pedido-conteudo').innerHTML=`
-    <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:700;margin-bottom:4px">${c.nome}</div>
+    <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:700;margin-bottom:4px">${esc(c.nome)}</div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:20px">${c.cpf_cnpj||''} · ${c.cidade||''}/${c.uf||''}</div>
     <div class="dashboard-cards" style="margin-bottom:20px">
       <div class="dash-card"><div class="dash-card-label">Pedidos</div><div class="dash-card-value">${pedidos.length}</div></div>
@@ -6007,7 +6061,7 @@ async function abrirModalInsumo(key=null){
   if(!temPermissaoEditar('produtos')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   if(!FORNECEDORES_DB.length) await carregarFornecedoresFirebase();
   const sel = document.getElementById('insumo-fornecedor');
-  sel.innerHTML = '<option value="">Selecione...</option>' + FORNECEDORES_DB.map(f=>`<option value="${f.nome}">${f.nome}</option>`).join('');
+  sel.innerHTML = '<option value="">Selecione...</option>' + FORNECEDORES_DB.map(f=>`<option value="${esc(f.nome)}">${esc(f.nome)}</option>`).join('');
 
   if(key){
     const i = INSUMOS_DB.find(x=>x.key===key);
@@ -6060,6 +6114,13 @@ async function salvarInsumo(){
       toast(`❌ O código "${codigo}" já está cadastrado para "${duplicado.nome}". Use outro código ou edite o existente.`, 'error');
       return;
     }
+    // Colisão com produto vendável embaralha o histórico de movimentos, que guarda só
+    // o código e não o tipo — a auditoria de estoque não consegue separar depois.
+    const duplicadoProduto = PRODUTOS_DB.find(pr => (pr.codigo||'').toUpperCase() === codigo);
+    if(duplicadoProduto){
+      toast(`❌ O código "${codigo}" já está em uso pelo PRODUTO "${duplicadoProduto.nome}". Use outro — código repetido entre produto e insumo embaralha o histórico de estoque.`, 'error');
+      return;
+    }
   }
 
   const dados = {
@@ -6094,7 +6155,25 @@ async function salvarInsumo(){
 async function removerInsumo(key){
   if(!temPermissaoEditar('produtos')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const i = INSUMOS_DB.find(x=>x.key===key);
-  if(!confirm(`Remover o insumo "${i?.nome||key}"? Esta ação não pode ser desfeita.`)) return;
+
+  // Remover insumo com saldo faz a quantidade sumir sem nenhum movimento; remover insumo
+  // que está em receita quebra a explosão de necessidades da Sugestão de Compra em silêncio.
+  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
+  const usadoEm = Object.entries(RECEITAS_DB||{})
+    .filter(([,r]) => (r?.itens||[]).some(it => it.codigo === i?.codigo))
+    .map(([cod]) => cod);
+  const saldo = Number(i?.estoque_atual||0);
+
+  if(usadoEm.length){
+    toast(`Não é possível remover: este insumo está em ${usadoEm.length} receita(s) — ${usadoEm.slice(0,5).join(', ')}${usadoEm.length>5?'…':''}. Remova da composição primeiro.`,'error');
+    return;
+  }
+
+  let aviso = `Remover o insumo "${i?.nome||key}"? Esta ação não pode ser desfeita.`;
+  if(saldo !== 0){
+    aviso = `⚠ Este insumo ainda tem ${saldo} em estoque.\n\nRemover agora faz esse saldo desaparecer sem nenhum movimento no histórico — a auditoria não conseguirá explicar a diferença.\n\nO recomendado é zerar por balanço antes, ou marcar como inativo.\n\nRemover mesmo assim?`;
+  }
+  if(!confirm(aviso)) return;
   await db.ref('insumos/'+key).remove();
   INSUMOS_DB = [];
   fecharModal('modal-produto-detalhe');
@@ -6140,7 +6219,7 @@ async function renderFornecedores(){
       <tbody>${pagina.map(f=>{
         const qtdInsumos = INSUMOS_DB.filter(i=>i.fornecedor===f.nome).length;
         return `<tr style="border-bottom:1px solid var(--border)">
-          <td style="padding:10px"><strong>${f.nome}</strong></td>
+          <td style="padding:10px"><strong>${esc(f.nome)}</strong></td>
           <td style="padding:10px">${f.cnpj||'—'}</td>
           <td style="padding:10px">${f.telefone||'—'}</td>
           <td style="padding:10px">${f.contato||'—'}</td>
@@ -6270,7 +6349,7 @@ async function propagarRenomeacaoFornecedor(nomeAntigo, nomeNovo){
         qtd++;
       }
     });
-  } catch(e){}
+  } catch(e){ console.warn('[CROW] falha silenciosa ignorada:', e); }
 
   if(Object.keys(updates).length){
     await db.ref().update(updates);
@@ -6333,7 +6412,7 @@ async function verificarNomesFornecedorDesatualizados(){
   }
 
   const opcoesFornecedores = FORNECEDORES_DB.slice().sort((a,b)=>(a.nome||'').localeCompare(b.nome||''))
-    .map(f=>`<option value="${f.nome}">${f.nome}</option>`).join('');
+    .map(f=>`<option value="${esc(f.nome)}">${esc(f.nome)}</option>`).join('');
 
   el.innerHTML = `
     <div style="text-align:right;margin:10px 0 6px"><button class="btn btn-outline btn-sm" onclick="document.getElementById('fornecedores-nomes-desatualizados-resultado').innerHTML=''">✕ Fechar</button></div>
@@ -6472,7 +6551,7 @@ async function renderProducao(){
         <div style="display:flex;align-items:flex-start;gap:10px">
           <input type="checkbox" class="check-exportar-op" data-key="${op.key}" ${selecionado?'checked':''} onchange="toggleSelecaoOP('${op.key}',this.checked)" onclick="event.stopPropagation()" style="margin-top:4px;width:16px;height:16px;cursor:pointer">
           <div>
-            <div class="pedido-card-num">OP #${op.numero||op.key.slice(-5)} — ${op.produto_nome} ${urgentePendente?'<span style="background:#dc2626;color:#fff;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:700;margin-left:4px">🔴 URGENTE</span>':''}</div>
+            <div class="pedido-card-num">OP #${op.numero||op.key.slice(-5)} — ${esc(op.produto_nome)} ${urgentePendente?'<span style="background:#dc2626;color:#fff;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:700;margin-left:4px">🔴 URGENTE</span>':''}</div>
             <div style="font-size:12px;color:var(--muted);margin-top:2px">Código: <span style="font-weight:700;color:#000;font-size:15px">${op.produto_codigo}</span> ${op.pedido_origem?'· Pedido '+op.pedido_origem:''}</div>
           </div>
         </div>
@@ -6614,7 +6693,7 @@ async function buscarProdutoOP(){
     <div onclick="selecionarProdutoOP('${p.codigo}')"
       style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px"
       onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">
-      <strong>${p.codigo}</strong> — ${p.nome}
+      <strong>${p.codigo}</strong> — ${esc(p.nome)}
     </div>`).join('');
   lista.style.display='block';
 }
@@ -6646,7 +6725,7 @@ async function selecionarProdutoOP(codigo){
 
   document.getElementById('op-produto-selecionado').innerHTML = `
     <div style="background:var(--bg);border-radius:8px;padding:12px 14px;margin-bottom:14px">
-      <strong>${codigo}</strong> — ${p.nome}
+      <strong>${codigo}</strong> — ${esc(p.nome)}
       <button onclick="opProdutoSelecionado=null;document.getElementById('op-produto-selecionado').innerHTML='';document.getElementById('op-receita-preview').style.display='none';document.getElementById('op-qtd-row').style.display='none';document.getElementById('btn-criar-op').style.display='none'"
         style="float:right;background:none;border:none;cursor:pointer;color:var(--muted)">✕ trocar</button>
       ${totalPendente>0 ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:13px;color:#7c3aed">
@@ -6671,7 +6750,7 @@ function atualizarPreviewReceitaOP(){
     const suficiente = disponivel >= necessario;
     return `<tr style="border-bottom:1px solid var(--border);${suficiente?'':'background:#fef2f2'}">
       <td style="padding:8px"><strong>${item.codigo}</strong></td>
-      <td style="padding:8px">${item.nome}</td>
+      <td style="padding:8px">${esc(item.nome)}</td>
       <td style="padding:8px;text-align:center">${necessario.toLocaleString('pt-BR')}</td>
       <td style="padding:8px;text-align:center;${suficiente?'color:var(--success)':'color:#dc2626;font-weight:700'}">${disponivel.toLocaleString('pt-BR')}</td>
       <td style="padding:8px;text-align:center">${suficiente?'✅':'⚠️'}</td>
@@ -6704,11 +6783,14 @@ async function criarOP(){
   const pedidoOrigem = document.getElementById('op-pedido-origem').value.trim();
   const urgente = document.getElementById('op-urgente').checked;
 
-  const numSnap = await db.ref('contador_op').once('value');
-  const numero = (numSnap.val()||0) + 1;
-  await db.ref('contador_op').set(numero);
+  // transaction() incrementa no servidor: duas OPs criadas ao mesmo tempo recebem
+  // números diferentes. Com once()+set() as duas liam o mesmo valor e saíam iguais.
+  const numSnap = await db.ref('contador_op').transaction(v => (v||0) + 1);
+  const numero = numSnap.snapshot.val();
 
-  const key = 'op_' + Date.now();
+  // push() gera chave única mesmo em criações simultâneas. Date.now() colidia quando
+  // duas OPs nasciam no mesmo milissegundo, e uma sobrescrevia a outra por inteiro.
+  const key = 'op_' + db.ref('ordens_producao').push().key;
   await db.ref('ordens_producao/'+key).set({
     numero,
     produto_codigo: opProdutoSelecionado.codigo,
@@ -6744,7 +6826,7 @@ async function verDetalheOP(key){
     const necessario = item.qtd * op.qtd_solicitada;
     return `<tr style="border-bottom:1px solid var(--border)">
       <td style="padding:8px"><strong>${item.codigo}</strong></td>
-      <td style="padding:8px">${item.nome}</td>
+      <td style="padding:8px">${esc(item.nome)}</td>
       <td style="padding:8px;text-align:center" id="op-detalhe-necessario-${item.codigo}">${necessario.toLocaleString('pt-BR')}</td>
     </tr>`;
   }).join('');
@@ -6796,7 +6878,7 @@ async function verDetalheOP(key){
   }
 
   document.getElementById('op-detalhe-conteudo').innerHTML = `
-    <div class="modal-title">OP #${op.numero} — ${op.produto_nome}</div>
+    <div class="modal-title">OP #${op.numero} — ${esc(op.produto_nome)}</div>
     <div style="margin-bottom:14px">
       <span class="badge" style="background:${si.bg};color:${si.cor}">${si.label}</span>
       ${op.pedido_origem?` · Pedido de origem: <strong>${op.pedido_origem}</strong>`:''}
@@ -6866,8 +6948,8 @@ async function salvarQtdEIniciar(key){
     const etiquetaUnica = !!produtoOP?.etiqueta_unica_por_lote;
     opContextoEtiquetas = { codigo: op.produto_codigo, tipo: 'vendavel' };
     document.getElementById('etiquetas-op-info').textContent = etiquetaUnica
-      ? `Produzindo ${novaQtd}x ${op.produto_nome} (${op.produto_codigo}) — item de etiqueta única: todo o lote vai num saco só, com 1 etiqueta`
-      : `Produzindo ${novaQtd}x ${op.produto_nome} (${op.produto_codigo})`;
+      ? `Produzindo ${novaQtd}x ${esc(op.produto_nome)} (${op.produto_codigo}) — item de etiqueta única: todo o lote vai num saco só, com 1 etiqueta`
+      : `Produzindo ${novaQtd}x ${esc(op.produto_nome)} (${op.produto_codigo})`;
     document.getElementById('etiquetas-op-qtd').value = etiquetaUnica ? 1 : novaQtd;
     abrirModal('modal-etiquetas-op');
   }
@@ -6905,7 +6987,7 @@ function imprimirEtiquetasProdutoEmLote(codigo, tipo, quantidade){
 
   const etiquetaHtml = `
     <div class="etq">
-      <div class="nome">${item.nome}</div>
+      <div class="nome">${esc(item.nome)}</div>
       <div class="linha-inferior">
         <div class="barcode-wrap">${svgBarcode}</div>
         <div class="codigo-lateral">${codigo}</div>
@@ -6981,7 +7063,7 @@ async function concluirOP(key){
     }
   }
 
-  let msgConfirm = `Confirmar conclusão da OP #${op.numero}?\n\nIsso vai:\n- Dar baixa nos insumos da receita\n- Somar ${qtdProduzida} unidade(s) no estoque de ${op.produto_nome}\n\nEsta ação não pode ser desfeita.`;
+  let msgConfirm = `Confirmar conclusão da OP #${op.numero}?\n\nIsso vai:\n- Dar baixa nos insumos da receita\n- Somar ${qtdProduzida} unidade(s) no estoque de ${esc(op.produto_nome)}\n\nEsta ação não pode ser desfeita.`;
   if(alertasEstoque.length){
     msgConfirm = `⚠️ ATENÇÃO — estoque insuficiente!\n\nOs insumos abaixo vão ficar NEGATIVOS:\n${alertasEstoque.join('\n')}\n\n` + msgConfirm;
   }
@@ -7080,6 +7162,34 @@ async function concluirOP(key){
 //   2) dois usuários lançando ao mesmo tempo — um sobrescrevia o outro.
 // Regra: nunca "grave este número". Sempre "some/subtraia esta diferença".
 // ══════════════════════════════════════════════
+
+// Aplica DELTA no saldo de crédito do cliente de forma atômica no servidor.
+// delta positivo credita, negativo debita. Mesmo motivo do estoque: ler o saldo, calcular
+// em JS e gravar o resultado faz um lançamento apagar o outro quando há concorrência.
+// Retorna { anterior, novo, aplicado } — 'aplicado' é o quanto realmente foi debitado,
+// que pode ser menor que o pedido se o saldo não cobria.
+async function aplicarDeltaCredito(clienteKey, delta){
+  const d = Number(delta)||0;
+  let anterior = 0, novo = 0;
+  await db.ref('clientes/'+clienteKey+'/credito').transaction(atual => {
+    anterior = Number(atual)||0;
+    novo = Math.max(0, anterior + d);
+    return novo;
+  });
+  const cMem = CLIENTES_DB.find(x=>x._key===clienteKey || x.codigo===clienteKey);
+  if(cMem) cMem.credito = novo;
+  return { anterior, novo, aplicado: novo - anterior };
+}
+
+// Escapa texto digitado por usuário antes de entrar em innerHTML. Sem isso, um nome de
+// cliente ou produto contendo < > & " quebra a renderização da tela — e, no limite,
+// permite injetar HTML/script no navegador de quem abrir a página.
+function esc(v){
+  if(v === null || v === undefined) return '';
+  return String(v)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
 
 function caminhoEstoque(tipo, chave){
   return tipo === 'insumo' ? 'insumos/'+chave+'/estoque_atual' : 'produtos/'+chave+'/quantidade';
@@ -7219,6 +7329,26 @@ async function liberarReservaEstoquePedido(itens){
 }
 
 // Ajusta a reserva quando um pedido é editado: libera os itens antigos e reserva os novos
+// Pedido já bipado: a baixa física existe. Ao editar, aplicamos só a DIFERENÇA de cada
+// item — item removido volta ao estoque, item novo sai, quantidade alterada acerta o saldo.
+async function ajustarBaixaFisicaEdicaoPedido(itensAntigos, itensNovos, numero, pedidoId){
+  const antes = {}, depois = {}, nomes = {};
+  (itensAntigos||[]).forEach(i=>{ if(!i.codigo) return;
+    antes[i.codigo] = (antes[i.codigo]||0) + Number(i.qtd||0); nomes[i.codigo] = i.nome; });
+  (itensNovos||[]).forEach(i=>{ if(!i.codigo) return;
+    depois[i.codigo] = (depois[i.codigo]||0) + Number(i.qtd||0); nomes[i.codigo] = i.nome; });
+
+  for(const codigo of new Set([...Object.keys(antes), ...Object.keys(depois)])){
+    // Saiu mais do que antes -> baixa a diferença. Saiu menos -> devolve.
+    const delta = (antes[codigo]||0) - (depois[codigo]||0);
+    if(delta === 0) continue;
+    const prodSnap = await db.ref('produtos/'+codigo).once('value');
+    if(!prodSnap.exists()) continue;
+    await movimentarEstoque('produto', codigo, { codigo, nome:nomes[codigo]||'', delta,
+      motivo:`Ajuste por edição do Pedido #${numero} (já bipado)`, origemTipo:'pedido', origemId:pedidoId });
+  }
+}
+
 async function ajustarReservaEdicaoPedido(itensAntigos, itensNovos){
   if(itensAntigos && itensAntigos.length) await liberarReservaEstoquePedido(itensAntigos);
   await reservarEstoquePedido(itensNovos);
@@ -7369,7 +7499,7 @@ async function renderMovimentosEstoque(){
         return `<tr ${onclickAttr} style="border-bottom:1px solid var(--border);${temOrigem?'cursor:pointer':''}" ${temOrigem?`onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''"`:''}>
           <td style="padding:10px;white-space:nowrap;font-size:12px">${new Date(m.ts).toLocaleString('pt-BR')}</td>
           <td style="padding:10px"><strong>${m.codigo}</strong></td>
-          <td style="padding:10px">${m.nome}</td>
+          <td style="padding:10px">${esc(m.nome)}</td>
           <td style="padding:10px;text-align:center;color:${tipoCor};font-weight:600">${tipoLabel}</td>
           <td style="padding:10px;text-align:center"><strong>${m.qtd}</strong></td>
           <td style="padding:10px;font-size:12px;color:var(--muted)">${m.motivo||''}</td>
@@ -7466,7 +7596,7 @@ async function renderEstoque(){
         const dispLabel = disponivel<=0 ? `<span class="estoque-zero">${disponivel.toLocaleString('pt-BR')}</span>` : `<span class="${corDisp}">${disponivel.toLocaleString('pt-BR')}</span>`;
         return `<tr style="border-bottom:1px solid var(--border)">
           <td style="padding:10px"><strong>${p.codigo}</strong></td>
-          <td style="padding:10px">${p.nome}</td>
+          <td style="padding:10px">${esc(p.nome)}</td>
           <td style="padding:10px;color:var(--muted)">${p.localizacao ? '📍 '+p.localizacao : '—'}</td>
           <td style="padding:10px;text-align:center">${estqFisico}</td>
           <td style="padding:10px;text-align:center;color:${reservado>0?'#d97706':'var(--muted)'}">${reservado>0?`<span style="cursor:pointer;text-decoration:underline" onclick="abrirReservasItem('${p.codigo}')" title="Ver pedidos que reservaram este item">🔒 ${reservado}</span>`:'—'}</td>
@@ -7580,7 +7710,7 @@ function preVisualizarEstornoProducao(){
 
   const receita = RECEITAS_DB[produto.codigo];
   if(!receita || !(receita.itens||[]).length){
-    el.innerHTML = `<div style="color:#dc2626;padding:10px">"${produto.nome}" não tem receita/composição cadastrada — não há insumos pra devolver.</div>`;
+    el.innerHTML = `<div style="color:#dc2626;padding:10px">"${esc(produto.nome)}" não tem receita/composição cadastrada — não há insumos pra devolver.</div>`;
     return;
   }
 
@@ -7605,11 +7735,11 @@ function preVisualizarEstornoProducao(){
 
   el.innerHTML = `
     <div style="padding:10px 14px;margin-bottom:10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;font-size:13px;color:#9a3412">
-      Isso vai <strong>tirar ${qtd} unidade(s)</strong> de "${produto.nome}" do estoque, e <strong>devolver</strong> os insumos abaixo.
+      Isso vai <strong>tirar ${qtd} unidade(s)</strong> de "${esc(produto.nome)}" do estoque, e <strong>devolver</strong> os insumos abaixo.
     </div>
     ${itensEmbalagemIgnorados.length ? `
     <div style="padding:8px 12px;margin-bottom:10px;background:var(--bg);border-radius:8px;font-size:12px;color:var(--muted)">
-      Não serão devolvidos (embalagem): ${itensEmbalagemIgnorados.map(i=>`${i.nome} (${i.qtd})`).join(', ')}
+      Não serão devolvidos (embalagem): ${itensEmbalagemIgnorados.map(i=>`${esc(i.nome)} (${i.qtd})`).join(', ')}
     </div>` : ''}
     <div style="overflow-x:auto">
     <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -7624,7 +7754,7 @@ function preVisualizarEstornoProducao(){
         ${itensDevolucao.map((it,idx)=>`
           <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
             <td style="padding:6px 10px;font-weight:700">${it.codigo}</td>
-            <td style="padding:6px 10px">${it.nome}</td>
+            <td style="padding:6px 10px">${esc(it.nome)}</td>
             <td style="padding:6px 10px;text-align:center">${it.estoqueAtual.toLocaleString('pt-BR')}</td>
             <td style="padding:6px 10px;text-align:center;color:#16a34a;font-weight:700">+${it.qtdDevolver.toLocaleString('pt-BR')}</td>
             <td style="padding:6px 10px;text-align:center">${(it.estoqueAtual+it.qtdDevolver).toLocaleString('pt-BR')}</td>
@@ -7640,9 +7770,9 @@ async function confirmarEstornoProducao(){
   const dados = estornoProducaoPreview;
   if(!dados){ toast('Nada pra confirmar','error'); return; }
 
-  const motivoTexto = dados.motivo ? ` — ${dados.motivo}` : '';
+  const motivoTexto = dados.motivo ? ` — ${esc(dados.motivo)}` : '';
   const ok = await confirmCustom(
-    `Confirmar estorno de ${dados.qtd} unidade(s) de "${dados.produto.nome}"?\n\nIsso vai dar saída no produto e devolver ${dados.itensDevolucao.length} insumo(s) ao estoque. Esta ação não pode ser desfeita automaticamente.`,
+    `Confirmar estorno de ${dados.qtd} unidade(s) de "${esc(dados.produto.nome)}"?\n\nIsso vai dar saída no produto e devolver ${dados.itensDevolucao.length} insumo(s) ao estoque. Esta ação não pode ser desfeita automaticamente.`,
     'Confirmar Estorno'
   );
   if(!ok) return;
@@ -7661,7 +7791,7 @@ async function confirmarEstornoProducao(){
     for(const it of dados.itensDevolucao){
       const key = it.key || ('ins_'+it.codigo);
       await movimentarEstoque('insumo', key, { codigo:it.codigo, nome:it.nome, delta:it.qtdDevolver,
-        motivo:`Estorno de Produção — desmontagem de ${dados.qtd}x ${dados.produto.nome}${motivoTexto}` });
+        motivo:`Estorno de Produção — desmontagem de ${dados.qtd}x ${esc(dados.produto.nome)}${motivoTexto}` });
     }
 
     fecharModal('modal-estorno-producao');
@@ -7707,7 +7837,7 @@ function buscarProdutoMovimento(){
     return `<div onclick="selecionarProdutoMovimento('${p.codigo}','${p._tipo}')"
       style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px"
       onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">
-      <strong>${p.codigo}</strong> — ${p.nome} ${tipoTag} <span style="color:var(--muted)">(estoque: ${p.quantidade||0})</span>
+      <strong>${p.codigo}</strong> — ${esc(p.nome)} ${tipoTag} <span style="color:var(--muted)">(estoque: ${p.quantidade||0})</span>
     </div>`;
   }).join('');
   lista.style.display='block';
@@ -7722,7 +7852,7 @@ function selecionarProdutoMovimento(codigo, tipo){
   document.getElementById('mov-lista-produtos').style.display = 'none';
   document.getElementById('mov-produto-selecionado').innerHTML = `
     <div style="background:var(--bg);border-radius:8px;padding:12px 14px;margin-bottom:14px">
-      <strong>${codigo}</strong> — ${p.nome}<br>
+      <strong>${codigo}</strong> — ${esc(p.nome)}<br>
       <span style="font-size:12px;color:var(--muted)">Estoque atual: <strong>${estoqueAtual||0}</strong></span>
       <button onclick="movProdutoSelecionado=null;document.getElementById('mov-produto-selecionado').innerHTML='';document.getElementById('mov-form-resto').style.display='none'"
         style="float:right;background:none;border:none;cursor:pointer;color:var(--muted)">✕ trocar</button>
@@ -7808,7 +7938,7 @@ function imprimirEtiquetaEstoque(codigo, tipo){
     </style>
     </head><body>
       <div class="etq">
-        <div class="nome">${item.nome}</div>
+        <div class="nome">${esc(item.nome)}</div>
         <div>
           <div class="loc-label">Localização</div>
           <div class="loc-valor">${localizacao}</div>
@@ -7907,7 +8037,7 @@ function imprimirEtiquetaProduto(codigo, tipo){
     </style>
     </head><body>
       <div class="etq">
-        <div class="nome">${item.nome}</div>
+        <div class="nome">${esc(item.nome)}</div>
         <div class="cod">${codigo}</div>
         <div class="barcode-wrap">${svgBarcode}</div>
       </div>
@@ -8124,7 +8254,7 @@ async function editarPedidoCompra(id){
     }))
   };
 
-  document.getElementById('modal-compra-titulo').textContent = `Editar Pedido — ${c.fornecedor}`;
+  document.getElementById('modal-compra-titulo').textContent = `Editar Pedido — ${esc(c.fornecedor)}`;
   document.getElementById('compra-fornecedor').value = c.fornecedor;
   document.getElementById('compra-nf').value = c.nf || '';
   document.getElementById('compra-data').value = c.data;
@@ -8201,7 +8331,7 @@ async function cancelarPedidoCompra(id){
 async function popularSelectFornecedoresCompra(){
   if(!FORNECEDORES_DB.length) await carregarFornecedoresFirebase();
   const datalist = document.getElementById('compra-fornecedor-datalist');
-  datalist.innerHTML = FORNECEDORES_DB.map(f=>`<option value="${f.nome}">`).join('');
+  datalist.innerHTML = FORNECEDORES_DB.map(f=>`<option value="${esc(f.nome)}">`).join('');
 }
 
 function buscarItemCompra(){
@@ -8221,7 +8351,7 @@ function buscarItemCompra(){
     return `<div onclick="adicionarItemCompra('${p.codigo}','${p._tipo}')"
       style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px"
       onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">
-      <strong>${p.codigo}</strong> — ${p.nome} ${tipoTag}
+      <strong>${p.codigo}</strong> — ${esc(p.nome)} ${tipoTag}
     </div>`;
   }).join('');
   lista.style.display='block';
@@ -8248,7 +8378,7 @@ async function adicionarItemCompra(codigo, tipo){
     const [, c] = pedidoConflito;
     const numeroExibir = c.numero_origem ? '#'+c.numero_origem : c.id;
     const confirmou = confirm(
-      `⚠️ Este item já foi comprado com o fornecedor "${c.fornecedor}", no pedido ${numeroExibir} (status: Em Separação).\n\nDeseja adicionar mesmo assim?`
+      `⚠️ Este item já foi comprado com o fornecedor "${esc(c.fornecedor)}", no pedido ${numeroExibir} (status: Em Separação).\n\nDeseja adicionar mesmo assim?`
     );
     if(!confirmou) return;
   }
@@ -8417,7 +8547,7 @@ function renderItensCompra(){
     <tr style="border-bottom:1px solid var(--border)">
       <td style="padding:4px"><input type="text" value="${item.codigo_fornecedor||''}" style="width:80px;padding:4px;border:1px solid var(--border);border-radius:4px" onchange="atualizarCampoItemCompra(${idx},'codigo_fornecedor',this.value)"></td>
       <td style="padding:4px;text-align:center"><strong>${item.codigo}</strong></td>
-      <td style="padding:4px;font-size:12px">${item.nome}</td>
+      <td style="padding:4px;font-size:12px">${esc(item.nome)}</td>
       <td style="padding:4px"><input type="number" step="0.01" value="${item.qtd}" style="width:60px;padding:4px;border:1px solid var(--border);border-radius:4px;text-align:center" onchange="atualizarCampoItemCompra(${idx},'qtd',this.value)"></td>
       <td style="padding:4px"><input type="number" step="0.01" value="${item.preco_unit}" style="width:80px;padding:4px;border:1px solid var(--border);border-radius:4px;text-align:center" onchange="atualizarCampoItemCompra(${idx},'preco_unit',this.value)"></td>
       <td style="padding:4px"><input type="number" step="0.01" value="${item.ipi_pct}" style="width:55px;padding:4px;border:1px solid var(--border);border-radius:4px;text-align:center" onchange="atualizarCampoItemCompra(${idx},'ipi_pct',this.value)"></td>
@@ -8555,10 +8685,10 @@ async function darEntradaEstoqueCompra(compraId, compra, statusAnterior){
     if(item.tipo === 'insumo'){
       const insumo = INSUMOS_DB.find(x=>x.codigo===item.codigo);
       await movimentarEstoque('insumo', insumo?.key || ('ins_'+item.codigo), { codigo:item.codigo, nome:item.nome,
-        delta:item.qtd, motivo:`Compra ${compra.nf?'NF '+compra.nf:''} — ${compra.fornecedor}`, origemTipo:'compra', origemId:compraId });
+        delta:item.qtd, motivo:`Compra ${compra.nf?'NF '+compra.nf:''} — ${esc(compra.fornecedor)}`, origemTipo:'compra', origemId:compraId });
     } else {
       await movimentarEstoque('produto', item.codigo, { codigo:item.codigo, nome:item.nome,
-        delta:item.qtd, motivo:`Compra ${compra.nf?'NF '+compra.nf:''} — ${compra.fornecedor}`, origemTipo:'compra', origemId:compraId });
+        delta:item.qtd, motivo:`Compra ${compra.nf?'NF '+compra.nf:''} — ${esc(compra.fornecedor)}`, origemTipo:'compra', origemId:compraId });
     }
 
     // Marca item a item, logo após aplicar: se cair aqui, o próximo recebimento retoma
@@ -8687,7 +8817,7 @@ async function renderCompras(){
     return `<div class="pedido-card" style="cursor:pointer" onclick="abrirDetalheCompra('${c.id}')">
       <div class="pedido-card-header">
         <div>
-          <div class="pedido-card-num">${c.fornecedor} ${c.nf?'· NF '+c.nf:''} ${c.origem==='bling'?'<span class="badge" style="background:#dbeafe;color:#1565c0;font-size:10px">🔄 Bling</span>':''}</div>
+          <div class="pedido-card-num">${esc(c.fornecedor)} ${c.nf?'· NF '+c.nf:''} ${c.origem==='bling'?'<span class="badge" style="background:#dbeafe;color:#1565c0;font-size:10px">🔄 Bling</span>':''}</div>
           ${numeroExibir ? `<div style="font-size:12px;color:var(--accent);font-weight:600;margin-top:2px">🔖 ${numeroExibir}</div>` : ''}
           <div style="font-size:12px;color:var(--muted);margin-top:2px">${c.itens?.length||0} itens · ${c.data?new Date(c.data+'T00:00').toLocaleDateString('pt-BR'):''}</div>
         </div>
@@ -8840,10 +8970,10 @@ async function abrirRevisaoItensSemCadastro(){
       ${pendentes.map(p=>`
         <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px">
           <div>
-            <div style="font-weight:600;font-size:13px">${p.item.nome}</div>
+            <div style="font-weight:600;font-size:13px">${esc(p.item.nome)}</div>
             <div style="font-size:12px;color:var(--muted)">
               Código no arquivo: <strong>${p.item.codigo||'(nenhum)'}</strong>
-              · Pedido ${p.numeroOrigem ? '#'+p.numeroOrigem : ''} · ${p.fornecedor}
+              · Pedido ${p.numeroOrigem ? '#'+p.numeroOrigem : ''} · ${esc(p.fornecedor)}
               · Qtd: ${p.item.qtd}
             </div>
           </div>
@@ -8920,7 +9050,7 @@ async function abrirDetalheCompra(id){
   const totalBruto = (c.itens||[]).reduce((s,i)=>s+(i.valorBruto||0),0);
 
   document.getElementById('compra-detalhe-conteudo').innerHTML = `
-    <div class="modal-title">${c.fornecedor} ${c.numero_origem?'— Pedido #'+c.numero_origem:''} ${c.nf?'— NF '+c.nf:''}</div>
+    <div class="modal-title">${esc(c.fornecedor)} ${c.numero_origem?'— Pedido #'+c.numero_origem:''} ${c.nf?'— NF '+c.nf:''}</div>
     <div style="margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <span class="badge" style="background:${statusInfo.bg};color:${statusInfo.cor}">${statusInfo.label}</span>
       ${c.origem==='bling' ? '<span class="badge" style="background:#dbeafe;color:#1565c0">🔄 Importado do Bling</span>' : ''}
@@ -8962,7 +9092,7 @@ async function abrirDetalheCompra(id){
           </td>
           <td style="padding:6px;color:var(--muted)">${i.codigo_fornecedor||'—'}</td>
           <td style="padding:6px" title="${tituloEstoqueCompra}"><strong style="cursor:help;border-bottom:1px dotted var(--muted)">${i.codigo||'—'}</strong>${i.sem_cadastro?' <span class="badge" style="background:#fef2f2;color:#dc2626;font-size:10px">SEM CADASTRO</span>':''}</td>
-          <td style="padding:6px;cursor:help" title="${tituloEstoqueCompra}">${i.nome}${cadastro?` <span style="font-size:10px;color:${estAtual<=estMinimo?'#dc2626':'var(--muted)'}">(estoque: ${estAtual.toLocaleString('pt-BR')})</span>`:''}</td>
+          <td style="padding:6px;cursor:help" title="${tituloEstoqueCompra}">${esc(i.nome)}${cadastro?` <span style="font-size:10px;color:${estAtual<=estMinimo?'#dc2626':'var(--muted)'}">(estoque: ${estAtual.toLocaleString('pt-BR')})</span>`:''}</td>
           <td style="padding:6px;text-align:center">${i.qtd}</td>
           <td style="padding:6px;text-align:center">${fmtMoeda(i.preco_unit)}</td>
           <td style="padding:6px;text-align:center;font-weight:700;color:var(--success)">${fmtMoeda(i.custoFinalUnitario)}</td>
@@ -9059,7 +9189,7 @@ async function marcarCompraRecebida(id){
 function preencherDatalistFornecedores(datalistId){
   const dl = document.getElementById(datalistId);
   if(!dl) return;
-  dl.innerHTML = FORNECEDORES_DB.map(f=>`<option value="${f.nome}">`).join('');
+  dl.innerHTML = FORNECEDORES_DB.map(f=>`<option value="${esc(f.nome)}">`).join('');
 }
 
 async function abrirModalDefeito(opKey, opNumero){
@@ -9109,7 +9239,7 @@ function buscarInsumoDefeito(){
     <div onclick="selecionarInsumoDefeito('${i.codigo}','${i._tipo}')"
       style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px"
       onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">
-      <strong>${i.codigo}</strong> — ${i.nome} ${i._tipo==='vendavel'?'<span class="badge" style="background:#dbeafe;color:#1565c0;font-size:10px">PRODUTO</span>':'<span class="badge" style="background:#ede9fe;color:#7c3aed;font-size:10px">INSUMO</span>'} <span style="color:var(--muted)">(estoque: ${i._estoque})</span>
+      <strong>${i.codigo}</strong> — ${esc(i.nome)} ${i._tipo==='vendavel'?'<span class="badge" style="background:#dbeafe;color:#1565c0;font-size:10px">PRODUTO</span>':'<span class="badge" style="background:#ede9fe;color:#7c3aed;font-size:10px">INSUMO</span>'} <span style="color:var(--muted)">(estoque: ${i._estoque})</span>
     </div>`).join('');
   lista.style.display = 'block';
 }
@@ -9131,7 +9261,7 @@ function selecionarInsumoDefeito(codigo, tipo){
 
   document.getElementById('defeito-insumo-selecionado').innerHTML = `
     <div style="background:var(--bg);border-radius:8px;padding:12px 14px;margin-bottom:14px">
-      <strong>${i.codigo}</strong> — ${i.nome} ${i._tipo==='vendavel'?'<span class="badge" style="background:#dbeafe;color:#1565c0;font-size:10px">PRODUTO</span>':''}<br>
+      <strong>${i.codigo}</strong> — ${esc(i.nome)} ${i._tipo==='vendavel'?'<span class="badge" style="background:#dbeafe;color:#1565c0;font-size:10px">PRODUTO</span>':''}<br>
       <span style="font-size:12px;color:var(--muted)">Estoque atual: <strong>${i._estoque}</strong></span>
       <button onclick="insumoDefeitoSelecionado=null;document.getElementById('defeito-insumo-selecionado').innerHTML='';document.getElementById('defeito-form-resto').style.display='none'"
         style="float:right;background:none;border:none;cursor:pointer;color:var(--muted)">✕ trocar</button>
@@ -9199,12 +9329,12 @@ async function abrirEditarGarantia(id){
   const g = GARANTIAS_CACHE.find(x=>x.id===id);
   if(!g) return;
   document.getElementById('editar-garantia-id').value = id;
-  document.getElementById('editar-garantia-info').textContent = `${g.codigo} — ${g.nome} · Qtd: ${g.qtd}`;
+  document.getElementById('editar-garantia-info').textContent = `${g.codigo} — ${esc(g.nome)} · Qtd: ${g.qtd}`;
   document.getElementById('editar-garantia-fornecedor').value = g.fornecedor||'';
   document.getElementById('editar-garantia-motivo').value = g.motivo||'';
   document.getElementById('editar-garantia-obs').value = g.obs||'';
   const dl = document.getElementById('editar-garantia-fornecedores-list');
-  dl.innerHTML = FORNECEDORES_DB.map(f=>`<option value="${f.nome}">`).join('');
+  dl.innerHTML = FORNECEDORES_DB.map(f=>`<option value="${esc(f.nome)}">`).join('');
   abrirModal('modal-editar-garantia-fornecedor');
 }
 
@@ -9297,14 +9427,14 @@ async function renderGarantias(){
         <div style="display:flex;align-items:flex-start;gap:10px">
           ${podeEditar ? `<input type="checkbox" class="check-garantia" data-id="${g.id}" ${garantiasSelecionadas.has(g.id)?'checked':''} onchange="toggleSelecaoGarantia('${g.id}',this.checked)" style="margin-top:4px;width:16px;height:16px;cursor:pointer;flex-shrink:0">` : '<span style="width:16px;flex-shrink:0"></span>'}
           <div>
-            <div class="pedido-card-num">${g.codigo} — ${g.nome}</div>
-            <div style="font-size:12px;color:var(--muted);margin-top:2px">🚚 ${g.fornecedor} · ${opLabel} · ${new Date(g.ts).toLocaleDateString('pt-BR')}</div>
+            <div class="pedido-card-num">${g.codigo} — ${esc(g.nome)}</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px">🚚 ${esc(g.fornecedor)} · ${opLabel} · ${new Date(g.ts).toLocaleDateString('pt-BR')}</div>
           </div>
         </div>
         <span class="badge" style="background:${si.bg};color:${si.cor}">${si.label}</span>
       </div>
       <div class="pedido-card-info">Quantidade: <span><strong>${g.qtd}</strong></span></div>
-      ${g.motivo?`<div style="font-size:13px;color:var(--muted);margin-top:4px">📝 ${g.motivo}</div>`:''}
+      ${g.motivo?`<div style="font-size:13px;color:var(--muted);margin-top:4px">📝 ${esc(g.motivo)}</div>`:''}
       ${g.obs?`<div style="font-size:13px;color:#1a1a2e;margin-top:4px;padding:6px 10px;background:#f8f9fa;border-radius:6px;border-left:3px solid var(--primary)">💬 ${g.obs}</div>`:''}
       <div style="font-size:11px;color:var(--muted);margin-top:6px">Registrado por ${g.registrado_por} em ${new Date(g.ts).toLocaleString('pt-BR')}</div>
       ${podeEditar ? `
@@ -9448,7 +9578,7 @@ function abrirRelatorioGarantias(){
             <tr style="border-bottom:1px solid var(--border)">
               <td style="padding:8px">${new Date(g.ts).toLocaleDateString('pt-BR')}</td>
               <td style="padding:8px"><strong>${g.codigo}</strong></td>
-              <td style="padding:8px">${g.nome}</td>
+              <td style="padding:8px">${esc(g.nome)}</td>
               <td style="padding:8px;text-align:center">${g.qtd}</td>
               <td style="padding:8px">#${g.op_numero}</td>
               <td style="padding:8px;font-size:12px;color:var(--muted)">${g.motivo||'—'}</td>
@@ -9531,7 +9661,7 @@ async function renderSeparacao(){
       return `<div class="pedido-card" style="cursor:pointer" onclick="abrirSeparacaoPedido('${p.id}')">
         <div class="pedido-card-header">
           <div>
-            <div class="pedido-card-num">#${p.numero} — ${p.cliente_nome}</div>
+            <div class="pedido-card-num">#${p.numero} — ${esc(p.cliente_nome)}</div>
             <div style="font-size:12px;color:var(--muted);margin-top:2px">${p.cliente_cidade||''}/${p.cliente_uf||''} · ${fmtData(p.data)}</div>
           </div>
           ${statusBadge(p.status)}
@@ -9585,7 +9715,7 @@ function renderModalSeparacao(){
     return `<div style="display:flex;align-items:center;gap:12px;padding:12px;border-bottom:1px solid var(--border);${jaSeparado?'opacity:.6':''}">
       <div style="background:var(--primary);color:#fff;border-radius:8px;padding:8px 12px;text-align:center;min-width:70px;font-family:'DM Sans',sans-serif;font-weight:700;font-size:16px">${item.codigo}</div>
       <div style="flex:1">
-        <div style="font-weight:600;font-size:13px">${item.nome}</div>
+        <div style="font-weight:600;font-size:13px">${esc(item.nome)}</div>
         <div style="font-size:12px;color:var(--muted)">Qtd pedida: <strong>${item.qtd}</strong></div>
         <div style="font-size:12px;color:var(--muted)">📍 Localização: <strong>${produto?.localizacao || '—'}</strong></div>
         <div style="font-size:12px;margin-top:2px">${statusVisual}</div>
@@ -9609,7 +9739,7 @@ function renderModalSeparacao(){
   });
 
   document.getElementById('separacao-conteudo').innerHTML = `
-    <div class="modal-title">Pedido #${p.numero} — ${p.cliente_nome}</div>
+    <div class="modal-title">Pedido #${p.numero} — ${esc(p.cliente_nome)}</div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:16px">${p.cliente_cidade||''}/${p.cliente_uf||''} · ${itens.length} itens</div>
     <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:18px">
       ${linhasItens}
@@ -9679,7 +9809,7 @@ async function abrirGerarOPSeparacao(idx){
   const sugestao = capacidadeFinal !== null ? Math.min(totalNecessarioGeral, capacidadeFinal) : totalNecessarioGeral;
 
   document.getElementById('op-separacao-conteudo').innerHTML = `
-    <div class="modal-title">🏭 Gerar OP — ${item.nome}</div>
+    <div class="modal-title">🏭 Gerar OP — ${esc(item.nome)}</div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:16px">Código: ${item.codigo}</div>
 
     <div class="dashboard-cards" style="margin-bottom:16px">
@@ -9692,7 +9822,7 @@ async function abrirGerarOPSeparacao(idx){
       <div style="background:var(--bg);border-radius:10px;padding:14px;margin-bottom:16px">
         <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:6px">📋 Capacidade máxima de produção</div>
         <div style="font-size:22px;font-weight:700;font-family:'DM Sans',sans-serif;color:${capacidadeFinal < totalNecessarioGeral ? '#dc2626' : 'var(--success)'}">${capacidadeFinal} unidades</div>
-        ${insumoLimitante ? `<div style="font-size:12px;color:var(--muted);margin-top:4px">Limitado pelo insumo: <strong>${insumoLimitante.codigo} — ${insumoLimitante.nome}</strong> (estoque: ${insumoLimitante.estoque_atual})</div>` : ''}
+        ${insumoLimitante ? `<div style="font-size:12px;color:var(--muted);margin-top:4px">Limitado pelo insumo: <strong>${insumoLimitante.codigo} — ${esc(insumoLimitante.nome)}</strong> (estoque: ${insumoLimitante.estoque_atual})</div>` : ''}
         ${capacidadeFinal < totalNecessarioGeral ? `<div style="color:#dc2626;font-size:12px;margin-top:6px">⚠️ Não há insumo suficiente para atender toda a demanda. Considere comprar mais insumo.</div>` : ''}
       </div>
     ` : temReceita ? `<div style="background:#fef3c7;color:#92400e;padding:10px;border-radius:8px;font-size:13px;margin-bottom:16px">⚠️ A receita deste item só tem embalagem/etiqueta cadastrada — sem insumo de produção real pra calcular a capacidade. Confirme manualmente quanto dá pra produzir.</div>`
@@ -9727,7 +9857,9 @@ async function confirmarGerarOPSeparacao(){
   const numSnap = await db.ref('contador_op').transaction(v=>(v||0)+1);
   const numero = numSnap.snapshot.val();
 
-  const key = 'op_' + Date.now();
+  // push() gera chave única mesmo em criações simultâneas. Date.now() colidia quando
+  // duas OPs nasciam no mesmo milissegundo, e uma sobrescrevia a outra por inteiro.
+  const key = 'op_' + db.ref('ordens_producao').push().key;
   await db.ref('ordens_producao/'+key).set({
     numero,
     produto_codigo: codigo,
@@ -9792,7 +9924,7 @@ function renderModalBipagem(){
       <div style="background:#fef9e7;border:2px solid #d97706;border-radius:10px;padding:16px;margin-bottom:16px;text-align:center">
         <div style="font-size:12px;color:#92400e;text-transform:uppercase;font-weight:600;margin-bottom:8px">Bipando agora</div>
         <div style="display:inline-block;background:#d97706;color:#fff;border-radius:8px;padding:6px 16px;font-family:'DM Sans',sans-serif;font-weight:700;font-size:22px;margin-bottom:8px">${itemAtual.codigo}</div>
-        <div style="font-size:16px;font-weight:700">${itemAtual.nome}</div>
+        <div style="font-size:16px;font-weight:700">${esc(itemAtual.nome)}</div>
         <div style="font-size:28px;font-weight:900;font-family:'DM Sans',sans-serif;color:#d97706;margin-top:8px">${Number(itemAtual.qtd_bipada||0)} / ${itemAtual.qtd}</div>
       </div>
     ` : '<div style="text-align:center;color:var(--success);font-weight:700;padding:12px">✅ Todos os itens bipados!</div>'}
@@ -9845,7 +9977,7 @@ async function processarBipagem(codigoLido){
       return (gtin && gtin.trim().toUpperCase()===codigoNormalizado) || i.codigo.trim().toUpperCase()===codigoNormalizado;
     });
     msg.innerHTML = pertenceOutro
-      ? `<span style="color:#dc2626">❌ Não é a vez deste item. Bipe primeiro: <strong>${itemAtual.nome}</strong></span>`
+      ? `<span style="color:#dc2626">❌ Não é a vez deste item. Bipe primeiro: <strong>${esc(itemAtual.nome)}</strong></span>`
       : `<span style="color:#dc2626">❌ Código não encontrado neste pedido: ${codigoLido}</span>`;
     return;
   }
@@ -9865,8 +9997,8 @@ async function processarBipagem(codigoLido){
 
   const restante = itemAtual.qtd - itemAtual.qtd_bipada;
   msg.innerHTML = restante > 0
-    ? `<span style="color:var(--success)">✅ ${itemAtual.nome} — ${itemAtual.qtd_bipada}/${itemAtual.qtd} (faltam ${restante})</span>`
-    : `<span style="color:var(--success);font-weight:700">✅ ${itemAtual.nome} — COMPLETO! Próximo item liberado.</span>`;
+    ? `<span style="color:var(--success)">✅ ${esc(itemAtual.nome)} — ${itemAtual.qtd_bipada}/${itemAtual.qtd} (faltam ${restante})</span>`
+    : `<span style="color:var(--success);font-weight:700">✅ ${esc(itemAtual.nome)} — COMPLETO! Próximo item liberado.</span>`;
 
   const totalUnidades = p.itens.reduce((s,i)=>s+Number(i.qtd),0);
   const totalBipado = p.itens.reduce((s,i)=>s+Number(i.qtd_bipada||0),0);
@@ -9897,7 +10029,7 @@ async function finalizarPedidoBipado(){
       const prodSnap = await db.ref('produtos/'+item.codigo).once('value');
       if(prodSnap.exists()){
         await movimentarEstoque('produto', item.codigo, { codigo:item.codigo, nome:item.nome, delta:-item.qtd,
-          motivo:`Pedido #${p.numero} — ${p.cliente_nome}`, origemTipo:'pedido', origemId:p.id });
+          motivo:`Pedido #${p.numero} — ${esc(p.cliente_nome)}`, origemTipo:'pedido', origemId:p.id });
       }
     }
 
@@ -9957,7 +10089,7 @@ async function gerarEImprimirEtiquetas(pedidoId){
         </div>
         <div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:1.5mm">
           <div style="font-size:11px;color:#000">CLIENTE</div>
-          <div style="font-size:15px;font-weight:700;line-height:1.2">${p.cliente_nome}</div>
+          <div style="font-size:15px;font-weight:700;line-height:1.2">${esc(p.cliente_nome)}</div>
           <div style="font-size:13px;margin-top:2mm">${p.cliente_cidade||''} / ${p.cliente_uf||''}</div>
         </div>
         <div style="border-top:1px solid #000;padding-top:2mm;display:flex;justify-content:space-between;align-items:center">
@@ -10000,8 +10132,8 @@ async function abrirModalCliente(dadosPre=null, codigoEdicao=null){
       const usuarios = snap.val()||{};
       vendSel.innerHTML = '<option value="">Sem vendedor específico</option>' +
         Object.values(usuarios).filter(u=>u.ativo!==false).map(u=>
-          `<option value="${u.id}">${u.nome}</option>`).join('');
-    } catch(e){}
+          `<option value="${u.id}">${esc(u.nome)}</option>`).join('');
+    } catch(e){ console.warn('[CROW] falha silenciosa ignorada:', e); }
   } else { vendRow.style.display='none'; }
 
   if(codigoEdicao){
@@ -10227,7 +10359,7 @@ async function verificarVendedorNomeDessincronizado(){
       <tbody>
         ${dessincronizados.map((c,idx)=>`
           <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
-            <td style="padding:5px 10px;font-weight:700">${c.nome}</td>
+            <td style="padding:5px 10px;font-weight:700">${esc(c.nome)}</td>
             <td style="padding:5px 10px;color:#dc2626">${c.vendedor_nome||'—'}</td>
             <td style="padding:5px 10px;color:#16a34a;font-weight:700">${c.vendedor_nome_correto}</td>
           </tr>`).join('')}
@@ -10297,7 +10429,7 @@ async function verificarClientesDuplicadosCNPJ(){
         <div style="font-size:12px;color:var(--muted);margin-bottom:8px">CNPJ/CPF: <strong>${lista[0].cpf_cnpj}</strong> — ${lista.length} cadastro(s)</div>
         ${lista.map(c=>`
           <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">
-            <div><strong>${c.nome}</strong> <span style="color:var(--muted)">(código ${c.codigo})</span> ${c.inativo?'<span class="badge badge-gray">Inativo</span>':''}</div>
+            <div><strong>${esc(c.nome)}</strong> <span style="color:var(--muted)">(código ${c.codigo})</span> ${c.inativo?'<span class="badge badge-gray">Inativo</span>':''}</div>
             <button class="btn btn-outline btn-sm" onclick="abrirModalMesclarCliente('${c._key}')">🔗 Mesclar</button>
           </div>`).join('')}
       </div>`).join('')}
@@ -10352,7 +10484,7 @@ function renderCandidatosMesclagem(principal, candidatos, semTitulo){
     ${semTitulo?'':'<div style="font-size:13px;margin-bottom:10px">Encontramos o(s) seguinte(s) cadastro(s) com o mesmo nome. Escolha qual mesclar com <strong>'+principal.nome+'</strong> (código '+principal.codigo+'):</div>'}
     ${candidatos.map(c => `
       <div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;font-size:13px">
-        <div style="font-weight:700">${c.nome} <span style="font-weight:400;color:var(--muted)">(código ${c.codigo}${c.codigo===principal.codigo?' — mesmo código do principal!':''})</span></div>
+        <div style="font-weight:700">${esc(c.nome)} <span style="font-weight:400;color:var(--muted)">(código ${c.codigo}${c.codigo===principal.codigo?' — mesmo código do principal!':''})</span></div>
         <div>📄 CNPJ/CPF: ${c.cpf_cnpj||'—'} · 📞 ${c.telefone||'—'}</div>
         <div>📍 ${c.cidade||''}/${c.uf||''} ${c.endereco?'— '+c.endereco:''}</div>
         <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="prepararMesclagem('${principal._key}','${c._key}')">Mesclar este com o principal →</button>
@@ -10374,12 +10506,12 @@ function prepararMesclagem(chavePrincipal, chaveDuplicado){
   const conteudo = document.getElementById('mesclar-cliente-conteudo');
   conteudo.innerHTML = `
     <div style="padding:12px 14px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;font-size:13px;color:#9a3412;margin-bottom:14px">
-      ⚠️ O cadastro <strong>${duplicado.codigo} — ${duplicado.nome}</strong> será removido. Todos os pedidos que estavam ligados a ele passam a ficar ligados ao cadastro principal <strong>${principal.codigo}</strong>. Esta ação não pode ser desfeita automaticamente.
+      ⚠️ O cadastro <strong>${duplicado.codigo} — ${esc(duplicado.nome)}</strong> será removido. Todos os pedidos que estavam ligados a ele passam a ficar ligados ao cadastro principal <strong>${principal.codigo}</strong>. Esta ação não pode ser desfeita automaticamente.
       ${duplicado.codigo===principal.codigo?'<br><br>⚠️ <strong>Os dois cadastros têm o mesmo código</strong> — isso é o que estava impedindo a mesclagem automática antes. Como o código já é igual, os pedidos não precisam de reatribuição, só o cadastro duplicado será removido.':''}
     </div>
     <div style="font-size:13px;font-weight:700;margin-bottom:6px">Resultado final (cadastro principal, código ${principal.codigo}):</div>
     <div style="border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;margin-bottom:14px">
-      <div><strong>${resultado.nome}</strong></div>
+      <div><strong>${esc(resultado.nome)}</strong></div>
       <div>📄 CNPJ/CPF: ${resultado.cpf_cnpj||'—'}</div>
       <div>📞 Tel: ${resultado.telefone||'—'} ${resultado.email?' · ✉️ '+resultado.email:''}</div>
       <div>📍 ${resultado.cidade||''}/${resultado.uf||''} ${resultado.endereco?'— '+resultado.endereco:''}</div>
@@ -10395,7 +10527,7 @@ async function confirmarMesclagemCliente(chavePrincipal, chaveDuplicado){
   const principal = CLIENTES_DB.find(c => c._key === chavePrincipal);
   const duplicado = CLIENTES_DB.find(c => c._key === chaveDuplicado);
   if(!principal || !duplicado) return;
-  const ok = await confirmCustom(`Confirmar mesclagem?\n\n"${duplicado.nome}" (${duplicado.codigo}) será removido e seus pedidos passam a ficar ligados a "${principal.nome}" (${principal.codigo}).`, 'Confirmar Mesclagem');
+  const ok = await confirmCustom(`Confirmar mesclagem?\n\n"${esc(duplicado.nome)}" (${duplicado.codigo}) será removido e seus pedidos passam a ficar ligados a "${esc(principal.nome)}" (${principal.codigo}).`, 'Confirmar Mesclagem');
   if(!ok) return;
 
   const conteudo = document.getElementById('mesclar-cliente-conteudo');
@@ -10536,7 +10668,7 @@ async function verificarPrecosAbaixoMinimo(){
         ${bloqueados.map((p,idx)=>`
           <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
             <td style="padding:7px 10px;font-weight:700">${p.codigo}</td>
-            <td style="padding:7px 10px">${p.nome}</td>
+            <td style="padding:7px 10px">${esc(p.nome)}</td>
             <td style="padding:7px 10px;text-align:center;color:#dc2626;font-weight:700">${fmtMoeda(p.preco_venda)}</td>
             <td style="padding:7px 10px;text-align:center">${fmtMoeda(p.preco_minimo)}</td>
             <td style="padding:7px 10px;text-align:center"><button class="btn btn-primary btn-sm" onclick="abrirDetalheItem('${p.codigo}','vendavel')">✏️ Editar</button></td>
@@ -10578,7 +10710,7 @@ async function verificarInsumosSemFornecedor(){
         ${semFornecedor.map((i,idx)=>`
           <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
             <td style="padding:7px 10px;font-weight:700">${i.codigo}</td>
-            <td style="padding:7px 10px">${i.nome}</td>
+            <td style="padding:7px 10px">${esc(i.nome)}</td>
             <td style="padding:7px 10px;text-align:center">${i.categoria||'—'}</td>
             <td style="padding:7px 10px;text-align:center">${Number(i.estoque_atual||0).toLocaleString('pt-BR')}</td>
             <td style="padding:7px 10px;text-align:center">
@@ -10686,7 +10818,7 @@ async function renderProdutos(){
   const selFornecedor = document.getElementById('filter-fornecedor-produto');
   if(selFornecedor && selFornecedor.options.length<=1){
     selFornecedor.innerHTML = '<option value="">Todos os fornecedores</option>' +
-      FORNECEDORES_DB.slice().sort((a,b)=>(a.nome||'').localeCompare(b.nome||'')).map(f=>`<option value="${f.nome}">${f.nome}</option>`).join('');
+      FORNECEDORES_DB.slice().sort((a,b)=>(a.nome||'').localeCompare(b.nome||'')).map(f=>`<option value="${esc(f.nome)}">${esc(f.nome)}</option>`).join('');
   }
 
   const busca=(document.getElementById('search-produtos')?.value||'').toLowerCase();
@@ -10754,7 +10886,7 @@ async function renderProdutos(){
           if(cap < minCap){ minCap = cap; gargalho = { nome: ri.nome, codigo: ri.codigo, estoque: estoqueInsumo, qtdReceita: ri.qtd }; }
         }
         capacidadeProducao = minCap === Infinity ? 0 : minCap;
-        if(gargalho) gargalhoInfo = `Gargalo: ${gargalho.codigo} — ${gargalho.nome} (${gargalho.estoque} un em estoque, usa ${gargalho.qtdReceita}/un)`;
+        if(gargalho) gargalhoInfo = `Gargalo: ${gargalho.codigo} — ${esc(gargalho.nome)} (${gargalho.estoque} un em estoque, usa ${gargalho.qtdReceita}/un)`;
         else if(!itensReceitaSemEmbalagem.length) gargalhoInfo = 'Receita contém só embalagem/etiqueta — sem insumo de produção real cadastrado';
       }
     }
@@ -10791,7 +10923,7 @@ async function renderProdutos(){
     return `<tr ${onclickFn?`onclick="${onclickFn}" style="cursor:pointer"`:''}>
       <td>${foto}</td>
       <td style="font-size:12px;color:var(--muted)">${p.codigo}</td>
-      <td style="font-size:13px">${p.nome}${p.inativo?' <span class="badge badge-gray">Inativo</span>':''} ${tipoLabel} ${categoriaLabel}</td>
+      <td style="font-size:13px">${esc(p.nome)}${p.inativo?' <span class="badge badge-gray">Inativo</span>':''} ${tipoLabel} ${categoriaLabel}</td>
       <td><span class="badge badge-gray">${p.unidade}</span></td>
       <td><strong>${p._tipo==='vendavel'?fmtMoeda(p.preco_venda):'—'}</strong></td>
       <td style="color:var(--muted)">${p._tipo==='vendavel'?fmtMoeda(p.preco_minimo):'—'}</td>
@@ -10945,7 +11077,7 @@ function renderModalProduto(codigo){
         </div>
         <div class="form-row">
           <div class="form-group"><label>Fornecedor</label>
-            <select id="pd-fornecedor"><option value="">Selecione...</option>${FORNECEDORES_DB.map(f=>`<option value="${f.nome}" ${p.fornecedor===f.nome?'selected':''}>${f.nome}</option>`).join('')}</select>
+            <select id="pd-fornecedor"><option value="">Selecione...</option>${FORNECEDORES_DB.map(f=>`<option value="${esc(f.nome)}" ${p.fornecedor===f.nome?'selected':''}>${esc(f.nome)}</option>`).join('')}</select>
           </div>
           <div class="form-group"><label>Preço de Custo (R$)</label><input type="number" step="0.01" id="pd-preco-custo" value="${p.preco_custo||0}"></div>
         </div>
@@ -10963,7 +11095,7 @@ function renderModalProduto(codigo){
         ${foto}
         <div style="flex:1">
           <div style="font-size:12px;color:var(--muted)">${p.codigo} ${p.inativo?'<span class="badge badge-gray">Inativo</span>':''} ${tipoLabel}</div>
-          <div style="font-weight:700;font-size:16px;margin:2px 0 8px">${p.nome}</div>
+          <div style="font-weight:700;font-size:16px;margin:2px 0 8px">${esc(p.nome)}</div>
           <div style="display:flex;gap:18px;font-size:13px;flex-wrap:wrap">
             ${tipo==='vendavel' ? `
               <div><span style="color:var(--muted)">Venda:</span> <strong>${fmtMoeda(p.preco_venda)}</strong></div>
@@ -10974,7 +11106,7 @@ function renderModalProduto(codigo){
             `}
             <div><span style="color:var(--muted)">Estoque:</span> ${est}</div>
           </div>
-          ${p.localizacao ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">📍 ${p.localizacao}</div>` : ''}
+          ${p.localizacao ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">📍 ${esc(p.localizacao)}</div>` : ''}
         </div>
       </div>
       ${(() => {
@@ -11028,7 +11160,7 @@ function renderModalProduto(codigo){
               return `
               <tr style="border-bottom:1px solid var(--border)">
                 <td style="padding:6px"><strong>${item.codigo}</strong></td>
-                <td style="padding:6px">${item.nome}</td>
+                <td style="padding:6px">${esc(item.nome)}</td>
                 <td style="padding:6px;text-align:center">
                   ${isAdmin
                     ? `<input type="number" step="0.001" value="${item.qtd}" style="width:70px;padding:4px;border:1px solid var(--border);border-radius:4px;text-align:center" onchange="editarQtdComposicao('${codigo}',${idx},this.value)">`
@@ -11055,7 +11187,7 @@ function renderModalProduto(codigo){
       composicaoHtml = `
         <div style="border-top:1px solid var(--border);margin-top:16px;padding-top:16px">
           <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:10px">📦 Usado em ${usadoEm.length} produto(s)</div>
-          <div style="font-size:13px">${usadoEm.map(r=>`<div style="padding:6px 0;border-bottom:1px solid var(--border)"><strong>${r.produto_codigo}</strong> — ${r.produto_nome}</div>`).join('')}</div>
+          <div style="font-size:13px">${usadoEm.map(r=>`<div style="padding:6px 0;border-bottom:1px solid var(--border)"><strong>${r.produto_codigo}</strong> — ${esc(r.produto_nome)}</div>`).join('')}</div>
         </div>`;
     }
   }
@@ -11076,7 +11208,7 @@ function renderModalProduto(codigo){
           </tr></thead>
           <tbody>${listaFornecedores.map((f,idx)=>`
             <tr style="border-bottom:1px solid var(--border);${f.padrao?'background:#f0fdf4':''}">
-              <td style="padding:6px"><strong>${f.nome}</strong></td>
+              <td style="padding:6px"><strong>${esc(f.nome)}</strong></td>
               <td style="padding:6px;color:var(--muted)">${f.codigo_fornecedor||'—'}</td>
               <td style="padding:6px;text-align:center">
                 ${f.padrao
@@ -11121,7 +11253,7 @@ function renderListaSelecionarFornecedor(){
     <div onclick="selecionarFornecedorParaItem('${f.nome.replace(/'/g,"\\'")}')"
       style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px"
       onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">
-      ${f.nome}
+      ${esc(f.nome)}
     </div>`).join('') || '<div style="padding:14px;color:var(--muted);font-size:13px">Nenhum fornecedor encontrado</div>';
 }
 
@@ -11199,6 +11331,11 @@ async function clonarItem(codigoOrigem, tipo){
     if(PRODUTOS_DB.some(p=>p.codigo===codigoLimpo)){
       toast(`Já existe um produto cadastrado com o código "${codigoLimpo}"`,'error'); return;
     }
+    // O histórico de movimentos guarda só o código, sem o tipo: código repetido entre
+    // produto e insumo mistura as duas movimentações e a auditoria não separa depois.
+    if(INSUMOS_DB.some(i=>i.codigo===codigoLimpo)){
+      toast(`O código "${codigoLimpo}" já está em uso por um INSUMO. Use outro — código repetido entre produto e insumo embaralha o histórico de estoque.`,'error'); return;
+    }
     const clone = { ...original, codigo: codigoLimpo, quantidade: 0, fornecedores: original.fornecedores ? [...original.fornecedores] : [] };
     delete clone.gtin; // EAN não pode ser duplicado - deixa vazio para preencher depois
     await db.ref('produtos/'+codigoLimpo).set(clone);
@@ -11217,6 +11354,9 @@ async function clonarItem(codigoOrigem, tipo){
   } else {
     if(INSUMOS_DB.some(i=>i.codigo===codigoLimpo)){
       toast(`Já existe um insumo cadastrado com o código "${codigoLimpo}"`,'error'); return;
+    }
+    if(PRODUTOS_DB.some(p=>p.codigo===codigoLimpo)){
+      toast(`O código "${codigoLimpo}" já está em uso por um PRODUTO. Use outro — código repetido entre produto e insumo embaralha o histórico de estoque.`,'error'); return;
     }
     const key = 'ins_'+codigoLimpo;
     const clone = { ...original, codigo: codigoLimpo, key, estoque_atual: 0, fornecedores: original.fornecedores ? [...original.fornecedores] : [] };
@@ -11254,23 +11394,40 @@ async function salvarEdicaoProduto(codigoAntigo){
 
   const existente = PRODUTOS_DB.find(x=>x.codigo===codigoAntigo);
   const isNovo = !existente || codigoAntigo === '__NOVO__';
+  // O saldo NÃO vai no update do cadastro. O número do formulário foi lido quando o modal
+  // abriu: regravá-lo apagaria em silêncio toda venda, produção ou entrada feita no
+  // intervalo. Produto novo nasce com o saldo digitado; produto existente só muda o saldo
+  // se o valor foi deliberadamente alterado, e aí passa por balanço, com rastro.
   const dadosAtualizados = {
-    nome, unidade, preco_venda, preco_minimo, quantidade, estoque_minimo, gtin, localizacao, categoria, etiqueta_unica_por_lote,
-    ...(isNovo ? { ts_cadastro: Date.now() } : {})
+    nome, unidade, preco_venda, preco_minimo, estoque_minimo, gtin, localizacao, categoria, etiqueta_unica_por_lote,
+    ...(isNovo ? { ts_cadastro: Date.now(), quantidade } : {})
   };
 
   if(novoCodigo !== codigoAntigo){
     // Bloqueia se já existir outro produto com esse código
     const conflito = PRODUTOS_DB.find(x=>x.codigo===novoCodigo && x.codigo!==codigoAntigo);
     if(conflito){ toast(`Já existe um produto cadastrado com o código "${novoCodigo}" (${conflito.nome})`,'error'); return; }
+    const conflitoInsumo = INSUMOS_DB.find(x=>x.codigo===novoCodigo);
+    if(conflitoInsumo){ toast(`O código "${novoCodigo}" já está em uso pelo INSUMO "${conflitoInsumo.nome}". Use outro — código repetido entre produto e insumo embaralha o histórico de estoque.`,'error'); return; }
 
     if(!confirm(`Alterar o código de "${codigoAntigo}" para "${novoCodigo}"?\n\nIsso vai atualizar automaticamente todas as referências (composição, garantias). Pedidos e movimentações já registrados manterão o código antigo no histórico.`)) return;
 
     // Cria o produto com o novo código, copiando todos os dados, e remove o antigo
     const snapAntigo = await db.ref('produtos/'+codigoAntigo).once('value');
+    // O saldo copiado é o do SERVIDOR, não o do formulário
     const dadosCompletos = { ...(snapAntigo.val()||{}), ...dadosAtualizados, codigo: novoCodigo };
+    const saldoServidor = Number(snapAntigo.val()?.quantidade||0);
+    dadosCompletos.quantidade = saldoServidor;
     await db.ref('produtos/'+novoCodigo).set(dadosCompletos);
     await db.ref('produtos/'+codigoAntigo).remove();
+
+    // Se o usuário também mexeu no campo de estoque, aplica como balanço no código novo
+    if(quantidade !== saldoServidor){
+      await balancearEstoque('produto', novoCodigo, { codigo:novoCodigo, nome, valor:quantidade,
+        omitirSeZero:true,
+        motivoFn:(de,para)=>`Balanço: ${de} → ${para} — ajuste manual pelo cadastro do produto` });
+      dadosCompletos.quantidade = quantidade;
+    }
 
     // Atualiza receitas onde esse código aparece como componente
     const snapReceitas = await db.ref('receitas').once('value');
@@ -11305,6 +11462,13 @@ async function salvarEdicaoProduto(codigoAntigo){
   await db.ref('produtos/'+codigoAntigo).update(dadosAtualizados);
   const p = PRODUTOS_DB.find(x=>x.codigo===codigoAntigo);
   if(p) Object.assign(p, dadosAtualizados);
+
+  // Saldo só é tocado se o usuário digitou um valor diferente do que estava em tela
+  if(!isNovo && p && quantidade !== Number(p.quantidade||0)){
+    await balancearEstoque('produto', codigoAntigo, { codigo:codigoAntigo, nome, valor:quantidade,
+      omitirSeZero:true,
+      motivoFn:(de,para)=>`Balanço: ${de} → ${para} — ajuste manual pelo cadastro do produto` });
+  }
 
   produtoDetalheModo = 'ver';
   renderModalProduto(codigoAntigo);
@@ -11414,7 +11578,7 @@ async function toggleInativoProduto(codigo){
   const p = PRODUTOS_DB.find(x=>x.codigo===codigo);
   if(!p) return;
   const novoStatus = !p.inativo;
-  if(novoStatus){ const ok = await confirmCustom(`Inativar "${p.nome}"? Ele deixará de aparecer nas buscas de novos pedidos.`, 'Inativar'); if(!ok) return; }
+  if(novoStatus){ const ok = await confirmCustom(`Inativar "${esc(p.nome)}"? Ele deixará de aparecer nas buscas de novos pedidos.`, 'Inativar'); if(!ok) return; }
   await db.ref('produtos/'+codigo+'/inativo').set(novoStatus);
   p.inativo = novoStatus;
   renderModalProduto(codigo);
@@ -11427,7 +11591,7 @@ async function toggleInativoInsumo(codigo){
   const i = INSUMOS_DB.find(x=>x.codigo===codigo);
   if(!i) return;
   const novoStatus = !i.inativo;
-  if(novoStatus){ const ok = await confirmCustom(`Inativar o insumo "${i.nome}"? Ele deixará de aparecer nas buscas de OP, composição e lançamento de compra.`, 'Inativar'); if(!ok) return; }
+  if(novoStatus){ const ok = await confirmCustom(`Inativar o insumo "${esc(i.nome)}"? Ele deixará de aparecer nas buscas de OP, composição e lançamento de compra.`, 'Inativar'); if(!ok) return; }
   const key = i.key || ('ins_'+codigo);
   await db.ref('insumos/'+key+'/inativo').set(novoStatus);
   i.inativo = novoStatus;
@@ -11533,7 +11697,7 @@ async function renderVendedores(){
       : '<span class="badge" style="background:#dbeafe;color:#1565c0">Vendedor</span>';
     return `
     <tr onclick="editarVendedor('${v.id}')" style="cursor:pointer">
-      <td><strong>${v.nome}</strong> ${badgeTipo}</td>
+      <td><strong>${esc(v.nome)}</strong> ${badgeTipo}</td>
       <td style="color:var(--muted)">${v.usuario}</td>
       <td>${v.telefone||''}</td>
       <td><span class="badge ${v.ativo!==false?'badge-green':'badge-red'}">${v.ativo!==false?'Ativo':'Inativo'}</span></td>
@@ -11652,7 +11816,7 @@ async function popularSelectVendedoresVinculo(){
   const usuarios = snap.val() || {};
   const lista = Object.values(usuarios).filter(u=>u.ativo!==false).sort((a,b)=>a.nome.localeCompare(b.nome));
   sel.innerHTML = '<option value="">Selecione o vendedor...</option>' +
-    lista.map(u=>`<option value="${u.id}">${u.nome}</option>`).join('');
+    lista.map(u=>`<option value="${u.id}">${esc(u.nome)}</option>`).join('');
 }
 
 async function vincularClientesPorVendedor(){
@@ -12144,7 +12308,7 @@ async function gerenciarMapeamentosW3(){
     const nomeW3 = typeof v === 'object' ? (v.nome||chave) : chave.replace(/_/g,' ');
     const codigoAtual = typeof v === 'object' ? v.codigo : v;
     const prodAtual = PRODUTOS_DB.find(p=>p.codigo===codigoAtual);
-    const nomeProdAtual = prodAtual ? `${codigoAtual} — ${prodAtual.nome}` : `⚠️ ${codigoAtual} (não encontrado no cadastro)`;
+    const nomeProdAtual = prodAtual ? `${codigoAtual} — ${esc(prodAtual.nome)}` : `⚠️ ${codigoAtual} (não encontrado no cadastro)`;
     const chaveEsc = chave.replace(/'/g,"\\'");
     const nomeEsc = nomeW3.replace(/'/g,"\\'").replace(/"/g,'&quot;');
     html += `<tr style="border-bottom:1px solid var(--border);${!prodAtual?'background:#fff5f5':''}">
@@ -12223,7 +12387,7 @@ async function abrirVinculacaoW3(){
   const opcoesProdutos = PRODUTOS_DB
     .filter(p=>p.codigo && p.nome && p.codigo!=='reservado')
     .sort((a,b)=>(a.nome||'').localeCompare(b.nome||''))
-    .map(p=>`<option value="${p.codigo}">${p.codigo} — ${p.nome}</option>`)
+    .map(p=>`<option value="${p.codigo}">${p.codigo} — ${esc(p.nome)}</option>`)
     .join('');
 
   resultEl.innerHTML = `
@@ -12310,7 +12474,7 @@ async function corrigirCodigosPedidos(silencioso=false){
           return { ...item, codigo: match.codigo, nome: match.nome, sem_cadastro: false };
         } else {
           itensSemMatch++;
-          avisos.push(`Pedido #${p.numero||pedidoId}: "${item.nome}" — sem correspondência no cadastro`);
+          avisos.push(`Pedido #${p.numero||pedidoId}: "${esc(item.nome)}" — sem correspondência no cadastro`);
           return { ...item, codigo: '', sem_cadastro: true };
         }
       });
@@ -12399,7 +12563,7 @@ async function recalcularTodasReservas(){
     if(divergencias.length){
       html += `<br><br><strong>Correções feitas:</strong>` + divergencias.map(d=>`
         <div style="margin-top:4px;font-size:12px;padding:4px 8px;background:var(--bg);border-radius:6px">
-          <strong>${d.codigo}</strong> ${d.nome} — era <span style="color:#dc2626">${d.era}</span> → corrigido para <span style="color:#16a34a">${d.ficou}</span>
+          <strong>${d.codigo}</strong> ${esc(d.nome)} — era <span style="color:#dc2626">${d.era}</span> → corrigido para <span style="color:#16a34a">${d.ficou}</span>
         </div>`).join('');
     } else {
       html += `<br><span style="color:var(--muted);font-size:12px">Todas as reservas já estavam corretas.</span>`;
@@ -12762,7 +12926,7 @@ async function imprimirCapaPedidoCompra(id){
   const c = snap.val(); if(!c) return;
   const win = window.open('', '_blank');
   win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
-  <title>Pedido de Compra ${c.numero_origem||id} — ${c.fornecedor}</title>
+  <title>Pedido de Compra ${c.numero_origem||id} — ${esc(c.fornecedor)}</title>
   <style>
     @page{size:A4;margin:15mm}
     body{font-family:Arial,sans-serif;font-size:12px;color:#111}
@@ -12779,7 +12943,7 @@ async function imprimirCapaPedidoCompra(id){
   <h1>Pedido de Compra — ${c.numero_origem||id}</h1>
   <div class="sub">${c.data?new Date(c.data+'T00:00').toLocaleDateString('pt-BR'):'—'} · ${c.status||'—'} · Criado por: ${c.criado_por||'—'}</div>
   <div class="fornecedor">
-    <strong>Fornecedor:</strong> ${c.fornecedor}<br>
+    <strong>Fornecedor:</strong> ${esc(c.fornecedor)}<br>
     ${c.nf?`<span style="color:#666">NF: ${c.nf}</span>`:''}
     ${c.condicao_pagamento?`<br><span style="color:#666">Condição: ${c.condicao_pagamento}</span>`:''}
   </div>
@@ -12787,7 +12951,7 @@ async function imprimirCapaPedidoCompra(id){
     <thead><tr><th>Cód. Forn.</th><th>Código</th><th>Produto</th><th>Qtd</th><th>Preço Unit.</th><th>IPI%</th><th>ST (R$)</th><th>Total Item</th></tr></thead>
     <tbody>
       ${(c.itens||[]).map(i=>`<tr>
-        <td>${i.codigo_fornecedor||'—'}</td><td>${i.codigo||'—'}</td><td>${i.nome}</td>
+        <td>${i.codigo_fornecedor||'—'}</td><td>${i.codigo||'—'}</td><td>${esc(i.nome)}</td>
         <td>${i.qtd}</td><td>${fmtMoeda(i.preco_unit)}</td>
         <td>${i.ipi_pct||0}%</td><td>${fmtMoeda(i.valorSt||0)}</td>
         <td><strong>${fmtMoeda(i.custoTotalItem||0)}</strong></td>
@@ -12798,7 +12962,7 @@ async function imprimirCapaPedidoCompra(id){
     </tbody>
   </table>
   ${c.obs?`<div class="obs"><strong>⚠️ Observações:</strong><br>${c.obs}</div>`:''}
-  <div class="footer">Sistema Crow · Pedido de Compra ${c.numero_origem||id} · ${c.fornecedor} · Gerado em ${new Date().toLocaleString('pt-BR')}</div>
+  <div class="footer">Sistema Crow · Pedido de Compra ${c.numero_origem||id} · ${esc(c.fornecedor)} · Gerado em ${new Date().toLocaleString('pt-BR')}</div>
   <script>window.onload=()=>setTimeout(()=>window.print(),300);<\/script>
   </body></html>`);
   win.document.close();
@@ -13586,7 +13750,7 @@ function renderTabelaSugestao(){
       html += `<tr style="border-bottom:1px solid var(--border)">
         <td style="padding:10px 12px;text-align:center"><input type="checkbox" class="rel-sugestao-check" data-id="${p.tipo}|${p.codigo}" checked></td>
         <td style="padding:10px 12px"><strong>${p.codigo}</strong></td>
-        <td style="padding:10px 12px">${p.nome}</td>
+        <td style="padding:10px 12px">${esc(p.nome)}</td>
         <td style="padding:10px 12px;text-align:center"><span class="badge badge-gray" style="font-size:10px">${p.tipo}</span></td>
         <td style="padding:10px 12px;text-align:center">${p.semConsumo ? '<span style="color:#9ca3af" title="Sem consumo no último ano — sugestão baseada só no estoque mínimo">0</span>' : fmt(p.cmd)}</td>
         <td style="padding:10px 12px;text-align:center">${p.semLeadTime ? '<span style="color:#b45309" title="Fornecedor sem prazo de entrega cadastrado">—</span>' : p.leadTime}</td>
@@ -13618,7 +13782,7 @@ async function populaFornecedoresRelEM(){
   if(!sel) return;
   const atual = sel.value;
   sel.innerHTML = '<option value="">Todos os fornecedores</option>' +
-    FORNECEDORES_DB.map(f=>`<option value="${f.nome}" ${f.nome===atual?'selected':''}>${f.nome}</option>`).join('');
+    FORNECEDORES_DB.map(f=>`<option value="${esc(f.nome)}" ${f.nome===atual?'selected':''}>${esc(f.nome)}</option>`).join('');
 }
 
 async function relEstoqueAbaixoMinimo(el){
@@ -13695,9 +13859,9 @@ async function relEstoqueAbaixoMinimo(el){
             const cor = pct === 0 ? '#dc2626' : pct < 50 ? '#d97706' : '#ca8a04';
             return `<tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
               <td style="padding:9px 12px;font-weight:700">${i.codigo}</td>
-              <td style="padding:9px 12px">${i.nome}</td>
+              <td style="padding:9px 12px">${esc(i.nome)}</td>
               <td style="padding:9px 12px;text-align:center"><span class="badge badge-gray">${i.tipo}</span></td>
-              <td style="padding:9px 12px;color:var(--muted)">${i.fornecedor}</td>
+              <td style="padding:9px 12px;color:var(--muted)">${esc(i.fornecedor)}</td>
               <td style="padding:9px 12px;text-align:center;font-weight:700;color:${cor}">${i.estoque.toLocaleString('pt-BR')}</td>
               <td style="padding:9px 12px;text-align:center">${i.minimo.toLocaleString('pt-BR')}</td>
               <td style="padding:9px 12px;text-align:center;font-weight:700;color:#dc2626">${i.diferenca.toLocaleString('pt-BR')}</td>
@@ -13827,7 +13991,7 @@ async function calcularComissionamento(){
       <tbody>
         ${linhas.map((l,idx)=>`
           <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
-            <td style="padding:7px 10px;font-weight:700">${l.nome}</td>
+            <td style="padding:7px 10px;font-weight:700">${esc(l.nome)}</td>
             <td style="padding:7px 10px;text-align:center">${l.qtdPedidos}</td>
             <td style="padding:7px 10px;text-align:right">${fmtMoeda(l.totalFaturado)}</td>
             <td style="padding:7px 10px;text-align:center">${l.comissaoPct ? l.comissaoPct+'%' : '<span style="color:#dc2626">sem % cadastrada</span>'}</td>
@@ -14054,8 +14218,8 @@ async function calcularMRP(){
         ${linhasFiltradas.map((l,idx)=>`
           <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}${l.urgente?';background:#fef2f2':''}">
             <td style="padding:6px 9px;font-weight:700">${l.codigo}</td>
-            <td style="padding:6px 9px">${l.nome}</td>
-            <td style="padding:6px 9px">${l.fornecedor}</td>
+            <td style="padding:6px 9px">${esc(l.nome)}</td>
+            <td style="padding:6px 9px">${esc(l.fornecedor)}</td>
             <td style="padding:6px 9px;text-align:center">${l.cmd.toFixed(2)}</td>
             <td style="padding:6px 9px;text-align:center">${l.estoqueAtual.toLocaleString('pt-BR')}</td>
             <td style="padding:6px 9px;text-align:center">${l.emTransito.toLocaleString('pt-BR')}</td>
@@ -14169,7 +14333,7 @@ async function relDiagnosticoConsumoInsumos(el){
         ${linhas.map((l,idx)=>`
           <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
             <td style="padding:9px 12px;font-weight:700">${l.codigo}</td>
-            <td style="padding:9px 12px">${l.nome}</td>
+            <td style="padding:9px 12px">${esc(l.nome)}</td>
             <td style="padding:9px 12px;text-align:center;font-weight:700;color:${l.estoqueAtual<0?'#dc2626':'inherit'}">${l.estoqueAtual.toLocaleString('pt-BR')}</td>
             <td style="padding:9px 12px;text-align:center">${l.teorico.toLocaleString('pt-BR')}</td>
             <td style="padding:9px 12px;text-align:center">${l.registrado.toLocaleString('pt-BR')}</td>
@@ -14567,9 +14731,9 @@ async function calcularRecalcEstoqueMinimo(){
     html += `<tr style="border-bottom:1px solid var(--border);${corLinha}">
       <td style="padding:9px 11px;text-align:center"><input type="checkbox" class="rec-check" data-idx="${idx}" ${marcar?'checked':''} onchange="atualizarContadorRecalc()"></td>
       <td style="padding:9px 11px"><strong>${l.codigo}</strong></td>
-      <td style="padding:9px 11px">${l.nome}</td>
+      <td style="padding:9px 11px">${esc(l.nome)}</td>
       <td style="padding:9px 11px;text-align:center"><span class="badge badge-gray" style="font-size:10px">${l.tipo}</span></td>
-      <td style="padding:9px 11px;color:var(--muted)">${l.fornecedor}</td>
+      <td style="padding:9px 11px;color:var(--muted)">${esc(l.fornecedor)}</td>
       <td style="padding:9px 11px;text-align:center">${l.semConsumo?'<span style="color:#b45309" title="Sem consumo em 365 dias">0</span>':fmt(l.cmd)}</td>
       <td style="padding:9px 11px;text-align:center">${fmt(l.cmax)}</td>
       <td style="padding:9px 11px;text-align:center">${l.semLeadTime?'<span style="color:#b45309" title="Fornecedor sem prazo cadastrado">—</span>':l.lt}</td>
@@ -14964,7 +15128,7 @@ async function relAuditoriaEstoque(el){
     html += `<tr style="border-bottom:1px solid var(--border)">
       <td style="padding:10px 12px;text-align:center"><input type="checkbox" class="aud-check" data-idx="${idx}" checked onchange="atualizarContadorAuditoria()"></td>
       <td style="padding:10px 12px"><strong>${l.codigo}</strong></td>
-      <td style="padding:10px 12px">${l.nome}</td>
+      <td style="padding:10px 12px">${esc(l.nome)}</td>
       <td style="padding:10px 12px;text-align:center"><span class="badge badge-gray" style="font-size:10px">${l.tipo}</span></td>
       <td style="padding:10px 12px;text-align:center;color:${l.saldo<0?'#dc2626':'inherit'};font-weight:700">${fmt(l.saldo)}</td>
       <td style="padding:10px 12px;text-align:center;font-weight:700;color:#16a34a">${fmt(l.esperado)}</td>
@@ -15096,7 +15260,7 @@ async function inicializarRelatorios(){
   const snap = await db.ref('usuarios').once('value');
   const usuarios = Object.values(snap.val()||{});
   sel.innerHTML = '<option value="">Todos</option>' +
-    usuarios.filter(u=>u.ativo!==false).map(u=>`<option value="${u.nome}">${u.nome}</option>`).join('');
+    usuarios.filter(u=>u.ativo!==false).map(u=>`<option value="${esc(u.nome)}">${esc(u.nome)}</option>`).join('');
   // Definir período padrão: mês atual
   const hoje = new Date();
   const ini = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().split('T')[0];
@@ -15164,7 +15328,7 @@ async function atualizarStatusBackup(){
     const metaSnap = await db.ref('backups_meta/ultimo').once('value');
     const ultimo = metaSnap.val();
     statusEl.textContent = ultimo ? `📅 Último backup automático: ${new Date(ultimo+'T00:00').toLocaleDateString('pt-BR')}` : 'Nenhum backup automático ainda — será criado no próximo acesso.';
-  } catch(e){}
+  } catch(e){ console.warn('[CROW] falha silenciosa ignorada:', e); }
 }
 
 
@@ -15561,7 +15725,7 @@ async function importarPedidosCompraCSV(){
         }
 
         if(itensSemMatchDetalhe.length>0){
-          avisos.push(`Pedido ${pCsv.numero_origem} (${pCsv.fornecedor}): ${itensSemMatchDetalhe.join('; ')}`);
+          avisos.push(`Pedido ${pCsv.numero_origem} (${esc(pCsv.fornecedor)}): ${itensSemMatchDetalhe.join('; ')}`);
         }
 
         // Calcula os valores derivados (IPI, ST, rateio de frete) usando a mesma lógica do cadastro manual
@@ -15744,7 +15908,7 @@ function importarCadastroCompletoProdutos(){
       html += `<br><span style="color:var(--muted);font-size:12px">Produtos já cadastrados que não estavam nesta planilha não foram alterados.</span>`;
       if(possiveisDuplicados.length){
         html += `<br><br><strong style="color:#d97706">⚠️ ${possiveisDuplicados.length} item(ns) NÃO importado(s) — código novo, mas já existe outro produto com o mesmo nome:</strong>`;
-        html += possiveisDuplicados.map(d=>`<div style="margin-top:4px;font-size:12px">Código <strong>${d.codigoNovo}</strong> "${d.nome}" — já existe como código <strong>${d.codigoExistente}</strong></div>`).join('');
+        html += possiveisDuplicados.map(d=>`<div style="margin-top:4px;font-size:12px">Código <strong>${d.codigoNovo}</strong> "${esc(d.nome)}" — já existe como código <strong>${d.codigoExistente}</strong></div>`).join('');
         html += `<div style="margin-top:6px;font-size:12px;color:var(--muted)">Confira manualmente: pode ser o mesmo produto com código trocado/duplicado no Bling, ou dois produtos diferentes que coincidem no nome. Ajuste e reimporte se necessário.</div>`;
       }
       if(avisosFornecedor.length) html += `<br><span style="color:#d97706">⚠️ Fornecedor(es) da planilha não encontrado(s) no cadastro de Fornecedores (cadastre-os lá primeiro para vincular): ${avisosFornecedor.join(', ')}</span>`;
@@ -16061,7 +16225,7 @@ function preVisualizarImportCategoria(){
             ${itens.map((it,idx)=>`
               <tr style="border-bottom:1px solid var(--border);${it.statusMudou?'background:#fff7ed':(idx%2===1?'background:#fafafa':'')}">
                 <td style="padding:5px 8px;font-weight:700">${it.codigo}</td>
-                <td style="padding:5px 8px">${it.nome}</td>
+                <td style="padding:5px 8px">${esc(it.nome)}</td>
                 <td style="padding:5px 8px;text-align:center">${it.estoque}</td>
                 <td style="padding:5px 8px;text-align:center">${it.inativo?'<span class="badge badge-gray">Inativo</span>':'<span class="badge" style="background:#dcfce7;color:#16a34a">Ativo</span>'}${it.statusMudou?' <span style="color:#d97706;font-weight:700">⚠ mudou</span>':''}</td>
                 <td style="padding:5px 8px;text-align:center">${it.existe?'<span style="color:#d97706">Atualizar</span>':'<span style="color:#16a34a;font-weight:700">Criar</span>'}</td>
@@ -16237,7 +16401,7 @@ function preVisualizarRemoverVendedor(){
         </div>
         ${naoEncontrados.length ? `
         <div style="margin-bottom:12px;padding:12px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#991b1b;max-height:150px;overflow-y:auto">
-          ${naoEncontrados.map(n=>`⚠️ ${n.nome}`).join('<br>')}
+          ${naoEncontrados.map(n=>`⚠️ ${esc(n.nome)}`).join('<br>')}
         </div>` : ''}
         ${validos.length ? `
         <div style="max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
@@ -16251,7 +16415,7 @@ function preVisualizarRemoverVendedor(){
             ${validos.map((it,idx)=>`
               <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
                 <td style="padding:5px 10px;font-weight:700">${it.codigo}</td>
-                <td style="padding:5px 10px">${it.nome}</td>
+                <td style="padding:5px 10px">${esc(it.nome)}</td>
                 <td style="padding:5px 10px;color:#dc2626">${it.vendedorAtual}</td>
               </tr>`).join('')}
           </tbody>
@@ -16365,7 +16529,7 @@ function preVisualizarBalancoImportado(){
         </div>
         ${problemas.length ? `
         <div style="margin-bottom:12px;padding:12px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#991b1b">
-          ${problemas.map(p=>`⚠️ <strong>${p.codigo}</strong> — ${p.motivo}`).join('<br>')}
+          ${problemas.map(p=>`⚠️ <strong>${p.codigo}</strong> — ${esc(p.motivo)}`).join('<br>')}
         </div>` : ''}
         ${validos.length ? `
         <div style="overflow-x:auto">
@@ -16381,7 +16545,7 @@ function preVisualizarBalancoImportado(){
             ${validos.map((it,idx)=>`
               <tr style="border-bottom:1px solid var(--border);${idx%2===1?'background:#fafafa':''}">
                 <td style="padding:7px 10px;font-weight:700">${it.codigo}</td>
-                <td style="padding:7px 10px">${it.nome}</td>
+                <td style="padding:7px 10px">${esc(it.nome)}</td>
                 <td style="padding:7px 10px;text-align:center">${it.estoqueAtual.toLocaleString('pt-BR')}</td>
                 <td style="padding:7px 10px;text-align:center;font-weight:700">${it.contagem.toLocaleString('pt-BR')}</td>
                 <td style="padding:7px 10px;text-align:center;font-weight:700;color:${it.diff>0?'#16a34a':'#dc2626'}">${it.diff>0?'+':''}${it.diff.toLocaleString('pt-BR')}</td>
@@ -16610,7 +16774,7 @@ async function renderAdminLista(colecao, elId){
   el.innerHTML = lista.length ? lista.map(([k,d]) => `
     <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)">
       <span style="font-size:18px">${d.tipo==='pdf'?'📄':d.tipo==='video'?'🎬':d.tipo==='link'?'🔗':'🖼️'}</span>
-      <span style="flex:1;font-size:13px">${d.nome}</span>
+      <span style="flex:1;font-size:13px">${esc(d.nome)}</span>
       <button class="btn btn-sm" style="background:#fef2f2;color:#dc2626;border:none;font-size:12px" onclick="removerArquivo('${colecao}','${k}','${d.storagePath||''}')">Remover</button>
     </div>`).join('') : '<div style="color:var(--muted);font-size:13px">Nenhum arquivo.</div>';
 }
@@ -16691,6 +16855,45 @@ async function adminUploadGenerico(inputId, nomeId, colecao, resultId, listaId, 
   if(colecao === 'arquivos_promocoes') renderPromocoes();
   if(colecao === 'arquivos_catalogo') renderCatalogo();
   if(colecao === 'arquivos_tabela') renderTabelaProd();
+}
+
+// Os botões "+ Adicionar Arquivo" das abas Promoções e Catálogo chamavam funções que
+// nunca existiram — selecionar o arquivo não fazia nada além de um erro no console.
+// Reaproveitam o mesmo uploadParaStorage e o mesmo formato de registro do painel admin.
+async function uploadArquivoColecao(files, colecao, pasta, inputId){
+  const lista = [...(files||[])];
+  if(!lista.length) return;
+  let enviados = 0;
+  for(const file of lista){
+    try {
+      const nomeFinal = file.name.replace(/\.[^.]+$/,'');
+      const { url, path } = await uploadParaStorage(file, pasta, nomeFinal);
+      const key = db.ref(colecao).push().key;
+      await db.ref(colecao + '/' + key).set({
+        nome: nomeFinal, tipo: tipoDoArquivo(file), url, storagePath: path,
+        ts: Date.now(), size: file.size
+      });
+      enviados++;
+    } catch(e){
+      console.error('[CROW] falha no upload:', e);
+      toast(`Erro ao enviar "${file.name}": ${e.message}`, 'error');
+    }
+  }
+  const input = document.getElementById(inputId);
+  if(input) input.value = '';
+  if(enviados) toast(`✓ ${enviados} arquivo(s) enviado(s)`,'success');
+  if(colecao === 'arquivos_promocoes') renderPromocoes();
+  if(colecao === 'arquivos_catalogo') renderCatalogo();
+}
+
+async function uploadArquivoPromo(files){
+  if(!temPermissaoEditar('promocoes')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  await uploadArquivoColecao(files, 'arquivos_promocoes', 'promocoes', 'promo-file-input');
+}
+
+async function uploadArquivoCatalogo(files){
+  if(!temPermissaoEditar('catalogo')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  await uploadArquivoColecao(files, 'arquivos_catalogo', 'catalogo', 'catalogo-file-input');
 }
 
 function adminUploadPromo(){
@@ -16787,7 +16990,7 @@ function renderCardArquivo(d, k, colecao, podeRemover){
   const icone = d.tipo === 'pdf' ? '📄' : d.tipo === 'video' ? '🎬' : '🖼️';
   const dataStr = new Date(d.ts).toLocaleDateString('pt-BR');
   const preview = d.tipo === 'imagem'
-    ? `<img src="${d.url}" style="width:100%;max-height:220px;object-fit:cover;display:block;cursor:pointer" onclick="abrirArquivoModal('${d.url}','${d.tipo}','${d.nome}')" alt="${d.nome}">`
+    ? `<img src="${d.url}" style="width:100%;max-height:220px;object-fit:cover;display:block;cursor:pointer" onclick="abrirArquivoModal('${d.url}','${d.tipo}','${esc(d.nome)}')" alt="${esc(d.nome)}">`
     : d.tipo === 'video'
     ? `<video src="${d.url}" style="width:100%;max-height:180px;object-fit:cover" controls></video>`
     : d.tipo === 'link'
@@ -16795,22 +16998,22 @@ function renderCardArquivo(d, k, colecao, podeRemover){
         <span style="font-size:44px">🔗</span>
         <span style="color:#fff;font-size:13px;font-weight:600">Abrir link</span>
        </a>`
-    : `<div style="height:120px;background:linear-gradient(135deg,#1a1a2e,#c8102e);display:flex;align-items:center;justify-content:center;font-size:56px;cursor:pointer" onclick="abrirArquivoModal('${d.url}','${d.tipo}','${d.nome}')">📄</div>`;
+    : `<div style="height:120px;background:linear-gradient(135deg,#1a1a2e,#c8102e);display:flex;align-items:center;justify-content:center;font-size:56px;cursor:pointer" onclick="abrirArquivoModal('${d.url}','${d.tipo}','${esc(d.nome)}')">📄</div>`;
 
   // Botões: PDF tem visualizar (Google Docs) + baixar separados; outros têm só abrir
   const botoesAcao = d.tipo === 'pdf'
-    ? `<button class="btn btn-primary btn-sm" onclick="abrirArquivoModal('${d.url}','${d.tipo}','${d.nome}')">👁️ Visualizar</button>
+    ? `<button class="btn btn-primary btn-sm" onclick="abrirArquivoModal('${d.url}','${d.tipo}','${esc(d.nome)}')">👁️ Visualizar</button>
        <a href="${d.url}" target="_blank" rel="noopener" class="btn btn-outline btn-sm">⬇️ Baixar</a>`
     : d.tipo === 'link'
-    ? `<button class="btn btn-primary btn-sm" onclick="abrirArquivoModal('${d.url}','link','${d.nome}')">👁️ Visualizar</button>
+    ? `<button class="btn btn-primary btn-sm" onclick="abrirArquivoModal('${d.url}','link','${esc(d.nome)}')">👁️ Visualizar</button>
        <a href="${d.urlOriginal||d.url}" target="_blank" rel="noopener" class="btn btn-outline btn-sm">↗️ Abrir no Drive</a>`
-    : `<button class="btn btn-primary btn-sm" onclick="abrirArquivoModal('${d.url}','${d.tipo}','${d.nome}')">👁️ Visualizar</button>
+    : `<button class="btn btn-primary btn-sm" onclick="abrirArquivoModal('${d.url}','${d.tipo}','${esc(d.nome)}')">👁️ Visualizar</button>
        <a href="${d.url}" target="_blank" rel="noopener" class="btn btn-outline btn-sm">⬇️ Baixar</a>`;
 
   return `<div class="arquivo-card">
     ${preview}
     <div style="padding:14px 16px">
-      <div style="font-weight:700;font-size:14px;margin-bottom:4px">${icone} ${d.nome}</div>
+      <div style="font-weight:700;font-size:14px;margin-bottom:4px">${icone} ${esc(d.nome)}</div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${dataStr}${d.size ? ' · ' + (d.size > 1048576 ? (d.size/1048576).toFixed(1)+' MB' : Math.round(d.size/1024)+' KB') : ''}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         ${botoesAcao}
@@ -16861,7 +17064,7 @@ async function renderTabelaProd(){
   if(!wrap) return;
   if(lista.length){
     const [k, d] = lista[0];
-    wrap.innerHTML = `<button class="btn btn-secondary btn-sm" onclick="abrirArquivoModal('${d.url}','${d.tipo}','${d.nome}')">💰 Ver Tabela de Preços</button>`;
+    wrap.innerHTML = `<button class="btn btn-secondary btn-sm" onclick="abrirArquivoModal('${d.url}','${d.tipo}','${esc(d.nome)}')">💰 Ver Tabela de Preços</button>`;
   } else {
     wrap.innerHTML = '';
   }
@@ -16922,7 +17125,7 @@ function montarLinhaItemHTML(i, idx){
   const zebra = idx%2===1 ? 'background:#f5f5f5' : 'background:#fff';
   return `<tr style="${zebra}">
     <td style="padding:3px 6px;border:1px solid #ccc;text-align:center">${fotoImg(i.codigo, 34)}</td>
-    <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc">${i.nome}</td>
+    <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc">${esc(i.nome)}</td>
     <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:center">${i.codigo}</td>
     <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:center">${i.unidade||'UN'}</td>
     <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:center">${i.qtd}</td>
@@ -16939,7 +17142,7 @@ function montarLinhaItemWhatsAppHTML(i, idx){
   const sub = i.qtd * i.preco * (1-(i.desconto_item||0)/100);
   const zebra = idx%2===1 ? 'background:#f5f5f5' : 'background:#fff';
   return `<tr style="${zebra}">
-    <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc">${i.nome}</td>
+    <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc">${esc(i.nome)}</td>
     <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:center">${i.qtd}</td>
     <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:right">${Number(i.preco).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
     <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:center">${i.desconto_item||0}%</td>
@@ -16987,7 +17190,7 @@ function montarCabecalhoSlipHTML(p, subtitulo, totalDoc){
     <table style="width:100%;border-collapse:collapse;margin-bottom:10px">
       <tr>
         <td style="width:60%;vertical-align:top;border:1px solid #ccc;padding:6px 8px;font-size:11px">
-          <strong>${p.cliente_nome}</strong><br>
+          <strong>${esc(p.cliente_nome)}</strong><br>
           ${endHtml}
           ${p.cliente_cpf?'<br>CNPJ/CPF: '+p.cliente_cpf:''}
         </td>
