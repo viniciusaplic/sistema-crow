@@ -13039,7 +13039,7 @@ async function gerarRelatorio(){
     case 'clientes-inativos': await relClientesInativos(dataIni, dataFim, vendedorFiltro, el); break;
     case 'vendas-produto': relVendasProduto(pedidos, el); break;
     case 'compras-fornecedor': await relComprasFornecedor(dataIni, dataFim, el); break;
-    case 'estoque-posicao': relEstoquePosicao(el); break;
+    case 'estoque-posicao': await relEstoquePosicao(el); break;
     case 'vendas-cidade': relVendasCidade(pedidos, el); break;
     case 'sugestao-compra': await relSugestaoCompra(el); break;
     case 'estoque-minimo': relEstoqueAbaixoMinimo(el); break;
@@ -13286,21 +13286,80 @@ async function relComprasFornecedor(dataIni, dataFim, el){
 }
 
 // ── Posição de Estoque ──
-function relEstoquePosicao(el){
-  if(!PRODUTOS_DB.length){ el.innerHTML='<div style="color:#dc2626;padding:20px">Produtos não carregados</div>'; return; }
-  const lista = PRODUTOS_DB.filter(p=>!p.inativo).map(p=>({
-    codigo:p.codigo, nome:p.nome||'', estoque:Number(p.quantidade||0),
-    reservado:Number(p.reservado||0), minimo:Number(p.estoque_minimo||0),
-    disponivel:Number(p.quantidade||0)-Number(p.reservado||0)
-  })).sort((a,b)=>a.disponivel-b.disponivel);
+async function relEstoquePosicao(el){
+  if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
+  if(!INSUMOS_DB.length)  await carregarInsumosFirebase();
+  if(!PRODUTOS_DB.length && !INSUMOS_DB.length){
+    el.innerHTML='<div style="color:#dc2626;padding:20px">Produtos e insumos não carregados</div>'; return;
+  }
+
+  // Insumo não tem reserva (reserva existe só para pedido de venda) e o estoque mínimo
+  // dele não manda mais em nada desde que a compra passou a vir da explosão da receita.
+  // Por isso o status do insumo olha só para saldo zerado ou negativo.
+  const lista = [
+    ...PRODUTOS_DB.filter(p=>!p.inativo).map(p=>({
+      tipo:'Vendável', codigo:p.codigo, nome:p.nome||'', estoque:Number(p.quantidade||0),
+      reservado:Number(p.reservado||0), minimo:Number(p.estoque_minimo||0),
+      disponivel:Number(p.quantidade||0)-Number(p.reservado||0)
+    })),
+    ...INSUMOS_DB.filter(i=>!i.inativo).map(i=>({
+      tipo:'Insumo', codigo:i.codigo, nome:i.nome||'', estoque:Number(i.estoque_atual||0),
+      reservado:0, minimo:Number(i.estoque_minimo||0),
+      disponivel:Number(i.estoque_atual||0)
+    }))
+  ].sort((a,b)=>a.disponivel-b.disponivel);
+
+  ESTOQUE_POSICAO_LISTA = lista;
+  renderEstoquePosicao(el);
+}
+
+let ESTOQUE_POSICAO_LISTA = [];
+
+function renderEstoquePosicao(el){
+  const alvo = el || document.getElementById('rel-conteudo');
+  if(!alvo) return;
+  const filtro = document.getElementById('pos-filtro-tipo')?.value || '';
+  const lista = ESTOQUE_POSICAO_LISTA.filter(p => !filtro || p.tipo === filtro);
   relatorioCache = { tipo:'estoque-posicao', lista };
-  const criticos = lista.filter(p=>p.disponivel<=p.minimo&&p.minimo>0).length;
-  el.innerHTML = `<div style="font-size:13px;margin-bottom:12px"><span style="color:#dc2626;font-weight:700">⚠️ ${criticos} produto(s) abaixo do estoque mínimo</span></div>`+tabelaRel(
-    ['Código','Produto',{label:'Estoque Físico',align:'center'},{label:'Reservado',align:'center'},{label:'Disponível',align:'center'},{label:'Mínimo',align:'center'},{label:'Status',align:'center'}],
-    lista.map(p=>[p.codigo,p.nome,p.estoque,p.reservado,
-      `<span style="color:${p.disponivel<=0?'#dc2626':p.disponivel<=p.minimo?'#d97706':'#16a34a'};font-weight:700">${p.disponivel}</span>`,
-      p.minimo,
-      p.disponivel<=0?'<span class="badge" style="background:#fef2f2;color:#dc2626">Zerado</span>':p.disponivel<=p.minimo&&p.minimo>0?'<span class="badge" style="background:#fef3c7;color:#92400e">Crítico</span>':'<span class="badge badge-green">OK</span>'
+
+  const totVend = ESTOQUE_POSICAO_LISTA.filter(p=>p.tipo==='Vendável').length;
+  const totIns  = ESTOQUE_POSICAO_LISTA.filter(p=>p.tipo==='Insumo').length;
+  const criticos  = lista.filter(p=>p.tipo==='Vendável' && p.disponivel<=p.minimo && p.minimo>0).length;
+  const zerados   = lista.filter(p=>p.disponivel===0).length;
+  const negativos = lista.filter(p=>p.disponivel<0).length;
+
+  const statusDe = p => {
+    if(p.disponivel < 0) return '<span class="badge" style="background:#fee2e2;color:#991b1b">Negativo</span>';
+    if(p.disponivel === 0) return '<span class="badge" style="background:#fef2f2;color:#dc2626">Zerado</span>';
+    if(p.tipo === 'Vendável' && p.minimo > 0 && p.disponivel <= p.minimo)
+      return '<span class="badge" style="background:#fef3c7;color:#92400e">Crítico</span>';
+    return '<span class="badge badge-green">OK</span>';
+  };
+
+  alvo.innerHTML = `
+    <div style="display:flex;align-items:flex-end;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+      <div class="filtro-group" style="margin:0">
+        <label>Tipo de item</label>
+        <select id="pos-filtro-tipo" onchange="renderEstoquePosicao()">
+          <option value="" ${filtro===''?'selected':''}>Todos (${ESTOQUE_POSICAO_LISTA.length})</option>
+          <option value="Vendável" ${filtro==='Vendável'?'selected':''}>Só vendáveis (${totVend})</option>
+          <option value="Insumo" ${filtro==='Insumo'?'selected':''}>Só insumos (${totIns})</option>
+        </select>
+      </div>
+    </div>
+    <div style="font-size:13px;margin-bottom:12px;line-height:1.7">
+      ${negativos ? `<span style="color:#991b1b;font-weight:700">🔻 ${negativos} item(ns) com saldo NEGATIVO</span> — rode a Auditoria de Saldo × Movimentos.<br>` : ''}
+      <span style="color:#dc2626;font-weight:700">⚠️ ${criticos} vendável(is) abaixo do estoque mínimo</span>
+      <span style="color:var(--muted)"> · ${zerados} zerado(s) · ${lista.length} item(ns) listado(s)</span>
+    </div>` + tabelaRel(
+    ['Código','Produto/Insumo',{label:'Tipo',align:'center'},{label:'Estoque Físico',align:'center'},{label:'Reservado',align:'center'},{label:'Disponível',align:'center'},{label:'Mínimo',align:'center'},{label:'Status',align:'center'}],
+    lista.map(p=>[p.codigo, esc(p.nome),
+      `<span class="badge badge-gray" style="font-size:10px">${p.tipo}</span>`,
+      p.estoque,
+      p.tipo==='Insumo' ? '<span style="color:var(--muted)">—</span>' : p.reservado,
+      `<span style="color:${p.disponivel<0?'#991b1b':p.disponivel<=0?'#dc2626':(p.tipo==='Vendável'&&p.minimo>0&&p.disponivel<=p.minimo)?'#d97706':'#16a34a'};font-weight:700">${p.disponivel}</span>`,
+      p.tipo==='Insumo' ? `<span style="color:#9ca3af" title="Insumos não usam estoque mínimo no cálculo de compra">${p.minimo||'—'}</span>` : p.minimo,
+      statusDe(p)
     ])
   );
 }
@@ -15238,7 +15297,7 @@ function exportarRelatorioExcel(){
     case 'clientes-inativos': dados = lista.map(g=>({'Cliente':g.nome,'Vendedor':g.vendedor_nome,'Última Compra':g.ultima||'Nunca'})); break;
     case 'vendas-produto': dados = lista.map(g=>({'Código':g.cod,'Produto':g.nome,'Qtd':g.qtd,'Total':g.total})); break;
     case 'compras-fornecedor': dados = lista.map(g=>({'Fornecedor':g.nome,'Pedidos':g.qtd,'Total':g.total})); break;
-    case 'estoque-posicao': dados = lista.map(g=>({'Código':g.codigo,'Produto':g.nome,'Estoque':g.estoque,'Reservado':g.reservado,'Disponível':g.disponivel,'Mínimo':g.minimo})); break;
+    case 'estoque-posicao': dados = lista.map(g=>({'Tipo':g.tipo||'','Código':g.codigo,'Produto/Insumo':g.nome,'Estoque':g.estoque,'Reservado':g.tipo==='Insumo'?'':g.reservado,'Disponível':g.disponivel,'Mínimo':g.minimo})); break;
     case 'auditoria-estoque': dados = lista.map(g=>({'Tipo':g.tipo,'Código':g.codigo,'Produto/Insumo':g.nome,'Saldo Atual':g.saldo,'Saldo Esperado':g.esperado,'Diferença':g.dif,'Movimentos após o balanço':g.aplicados,'Último balanço':g.desdeTs?new Date(g.desdeTs).toLocaleDateString('pt-BR'):''})); break;
     case 'sugestao-compra': dados = lista.map(g=>({'Tipo':g.tipo||'—','Código':g.codigo,'Produto/Insumo':g.nome,'Fornecedor':g.fornecedor,'CMD':Number(g.cmd.toFixed(3)),'Lead Time (dias)':g.leadTime,'Disponível':g.disponivel,'Em Trânsito':g.emTransito,'Estoque Mínimo':g.es,'Nec. Produção':g.origem==='receita'?Number(g.necessidade.toFixed(2)):'','Ponto de Pedido':g.pontoPedido===null?'':Number(g.pontoPedido.toFixed(2)),'Cobertura (dias)':isFinite(g.cobertura)?Math.floor(g.cobertura):'','Sugestão de Compra':g.sugestao})); break;
     case 'estoque-minimo': return exportarRelatorioExcelEstoqueMinimo(lista);
