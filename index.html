@@ -346,7 +346,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:10px;opacity:.55;margin:0 8px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 06/08/2026 16:51\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">06/08/2026 16:51</span>
+            onclick="alert('Versão desta build: 06/08/2026 17:43\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">06/08/2026 17:43</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -1788,7 +1788,9 @@ tbody td{padding:11px 16px;font-size:14px}
     <button class="modal-close" onclick="fecharModal('modal-meta-mes')">×</button>
     <div class="modal-title">🎯 Meta do Mês</div>
     <input type="hidden" id="meta-mes-chave">
-    <div class="form-row single"><div class="form-group"><label>Meta do Mês (R$) *</label><input type="number" step="0.01" id="meta-mes-valor" placeholder="ex: 320000"></div></div>
+    <div class="form-row single"><div class="form-group"><label>Meta do Mês (R$) *</label>
+      <input type="text" inputmode="decimal" id="meta-mes-valor" placeholder="ex: 320.000,00" oninput="ecoMetaMes()" autocomplete="off">
+      <div id="meta-mes-eco" style="font-size:12px;color:var(--muted);margin-top:4px"></div></div></div>
     <div class="form-row">
       <div class="form-group"><label>Dias Úteis do Mês *</label><input type="number" id="meta-mes-dias-uteis" placeholder="ex: 23"></div>
       <div class="form-group"><label>Dias Trabalhados até hoje *</label><input type="number" id="meta-mes-dias-trabalhados" placeholder="ex: 15"></div>
@@ -2580,6 +2582,25 @@ function parseBR(v){
   } catch{ return 0; }
 }
 
+// Parser de VALOR MONETÁRIO digitado no padrão brasileiro. Difere do parseBR num ponto:
+// quando há apenas pontos e o último grupo tem exatamente 3 dígitos, o ponto é separador
+// de MILHAR, não decimal — "320.000" são trezentos e vinte mil, não trezentos e vinte.
+// Centavos em português sempre vêm com vírgula, então não há ambiguidade real.
+function parseMoedaBR(v){
+  try{
+    let s = String(v ?? '').trim().replace(/[R$\s]/gi,'');
+    if(!s) return 0;
+    if(s.includes(',')){
+      // Vírgula presente: ela é o decimal e todo ponto é milhar
+      s = s.replace(/\./g,'').replace(',','.');
+    } else if(/^-?\d{1,3}(\.\d{3})+$/.test(s)){
+      // Só pontos, todos separando grupos de 3 dígitos: milhar
+      s = s.replace(/\./g,'');
+    }
+    return parseFloat(s) || 0;
+  } catch { return 0; }
+}
+
 // Parser específico para QUANTIDADES INTEIRAS vindas de CSV (ex: relatório de estoque do Bling).
 // Diferente de parseBR: aqui um ponto sozinho é SEMPRE separador de milhar (nunca decimal),
 // porque quantidade de peça é sempre número inteiro. Sem isso, "1.304" (mil e trezentos e quatro)
@@ -3228,15 +3249,31 @@ function garantirChartJs(){
 
 function abrirModalMetaMes(chave, meta, diasUteis, diasTrabalhados){
   document.getElementById('meta-mes-chave').value = chave;
-  document.getElementById('meta-mes-valor').value = meta || '';
+  document.getElementById('meta-mes-valor').value = meta ? Number(meta).toLocaleString('pt-BR',{minimumFractionDigits:2, maximumFractionDigits:2}) : '';
+  ecoMetaMes();
   document.getElementById('meta-mes-dias-uteis').value = diasUteis || '';
   document.getElementById('meta-mes-dias-trabalhados').value = diasTrabalhados || '';
   abrirModal('modal-meta-mes');
 }
 
+// Mostra em tempo real quanto o sistema entendeu do que foi digitado. Sem esse retorno,
+// um erro de separador só aparecia depois de salvo, no painel.
+function ecoMetaMes(){
+  const el = document.getElementById('meta-mes-eco');
+  if(!el) return;
+  const bruto = document.getElementById('meta-mes-valor').value.trim();
+  if(!bruto){ el.textContent = ''; return; }
+  const v = parseMoedaBR(bruto);
+  el.innerHTML = v > 0
+    ? `Será gravado: <strong style="color:var(--primary)">${fmtMoeda(v)}</strong>`
+    : `<span style="color:#dc2626">Valor não reconhecido</span>`;
+}
+
 async function salvarMetaMes(){
   const chave = document.getElementById('meta-mes-chave').value;
-  const meta = Number(document.getElementById('meta-mes-valor').value) || 0;
+  // parseBR entende 320.000,00 e 320000 — o type="number" antigo usava o padrão inglês
+  // e lia "320.000" como 320, gravando trezentos e vinte reais no lugar da meta.
+  const meta = parseMoedaBR(document.getElementById('meta-mes-valor').value);
   const dias_uteis = Number(document.getElementById('meta-mes-dias-uteis').value) || 0;
   const dias_trabalhados = Number(document.getElementById('meta-mes-dias-trabalhados').value) || 0;
   if(!chave){ toast('Erro: mês não identificado','error'); return; }
