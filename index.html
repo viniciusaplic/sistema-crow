@@ -359,7 +359,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 06/08/2026 19:39\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 06/08/2026 19:39</span>
+            onclick="alert('Versão desta build: 07/08/2026 15:29\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 07/08/2026 15:29</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -3683,10 +3683,15 @@ async function renderPedidos(){
       if(!numStr.includes(fNumero) && !w3Str.includes(fNumero)) return false;
     }
     if(fFaturado){
-      // Quando a pessoa filtra por Faturamento (sim/não), a restrição padrão de
-      // "Situação = ativos" (que esconde Concluído) não deve se aplicar — senão os
-      // pedidos faturados (status Concluído) somem da lista mesmo com o filtro certo.
-      if(fStatus && fStatus!=='ativos' && p.status!==fStatus) return false;
+      // Filtrando por Faturamento, a restrição de "Situação = ativos" precisa afrouxar para
+      // deixar o Concluído aparecer — senão o pedido faturado some mesmo com o filtro certo.
+      // Mas afrouxar por completo, como era antes, fazia entrar Orçamento e Cancelado na
+      // lista: nenhum dos dois é pedido de venda, e não faz sentido perguntar se faturaram.
+      if(fStatus === 'ativos'){
+        if(!STATUS_PEDIDO_REAL.includes(p.status)) return false;
+      } else if(fStatus && p.status !== fStatus){
+        return false;
+      }
     } else {
       if(fStatus==='ativos'){ if(p.status!=='AA' && p.status!=='AP' && p.status!=='EX') return false; }
       else if(fStatus && p.status!==fStatus) return false;
@@ -4591,6 +4596,7 @@ async function exportarPedidosW3(){
     const fCliente = (document.getElementById('f-cliente').value||'').toLowerCase();
     const fProduto = (document.getElementById('f-produto').value||'').toLowerCase();
     const fStatus  = document.getElementById('f-status').value;
+    const fFaturadoExp = document.getElementById('f-faturado')?.value || '';
     const fVendedor = (document.getElementById('f-vendedor')?.value || '').toLowerCase().trim();
 
     try {
@@ -4600,8 +4606,19 @@ async function exportarPedidosW3(){
         const p = todos[k];
         if(!vejaTudoDoModulo('pedidos') && p.vendedor_id!==usuarioLogado.id) continue;
         if(fVendedor && !(p.vendedor_nome||'').toLowerCase().includes(fVendedor)) continue;
+        // Trava de segurança: Orçamento e Cancelado NUNCA vão para o W3, qualquer que seja
+        // o filtro escolhido na tela. Digitar no W3 um pedido cancelado ou um orçamento que
+        // o cliente nem aprovou gera separação, nota e entrega indevidas.
+        if(!STATUS_PEDIDO_REAL.includes(p.status)) continue;
+
         if(fStatus==='ativos'){ if(p.status!=='AA' && p.status!=='AP' && p.status!=='EX') continue; }
         else if(fStatus && p.status!==fStatus) continue;
+
+        // A exportação passa a respeitar o filtro de Faturamento que está na tela — antes
+        // ela o ignorava, e podia reexportar para o W3 pedido que já tinha sido faturado.
+        if(fFaturadoExp==='sim' && !p.faturado) continue;
+        if(fFaturadoExp==='nao' && p.faturado) continue;
+
         if(fCliente && !p.cliente_nome.toLowerCase().includes(fCliente)) continue;
         if(fProduto){
           const tem = (p.itens||[]).some(i=>
@@ -13062,6 +13079,10 @@ async function imprimirCapaPedidoCompra(id){
 // ══════════════════════════════════════════════
 let relatorioAtual = 'vendas-periodo';
 let relatorioGrafico = null;
+// Status que representam PEDIDO DE VENDA de verdade. Orçamento ainda não virou pedido e
+// Cancelado deixou de ser: nenhum dos dois entra em filtro de faturamento nem vai para o W3.
+const STATUS_PEDIDO_REAL = ['AA','AP','EX','CC'];
+
 let relatorioCache = null; // dados do último relatório gerado (para exportar Excel)
 
 function mostrarRelatorio(tipo, btnEl){
