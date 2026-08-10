@@ -359,7 +359,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 07/08/2026 15:29\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 07/08/2026 15:29</span>
+            onclick="alert('Versão desta build: 10/08/2026 13:12\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 10/08/2026 13:12</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -3518,8 +3518,18 @@ function primeiroDiaMesAtual(){
   return primeiroDia.toISOString().split('T')[0];
 }
 
+// O padrão da tela de Pedidos é o dia 1º do MÊS ANTERIOR, não do mês atual. Motivo
+// prático: pedidos em Aguard. Aprovação, Aprovado e Em Separação atravessam a virada do
+// mês, e com o padrão no mês atual eles sumiam da lista todo dia 1º — obrigando a mexer
+// na data manualmente. Pior: limpar o campo faz o Firebase baixar o histórico INTEIRO.
+function primeiroDiaMesAnterior(){
+  const hoje = new Date();
+  const primeiroDia = new Date(hoje.getFullYear(), hoje.getMonth()-1, 1);
+  return primeiroDia.toISOString().split('T')[0];
+}
+
 function limparFiltrosPedidos(){
-  document.getElementById('f-data-ini').value=primeiroDiaMesAtual();
+  document.getElementById('f-data-ini').value=primeiroDiaMesAnterior();
   document.getElementById('f-data-fim').value='';
   document.getElementById('f-numero').value='';
   document.getElementById('f-cliente').value='';
