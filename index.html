@@ -359,7 +359,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 10/08/2026 13:12\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 10/08/2026 13:12</span>
+            onclick="alert('Versão desta build: 10/08/2026 13:22\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 10/08/2026 13:22</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -15457,27 +15457,27 @@ async function inicializarRelatorios(){
   }
 }
 
+// ══════════════════════════════════════════════
+// BACKUP AUTOMÁTICO — DESATIVADO
+//
+// A rotina antiga guardava uma cópia do banco INTEIRO dentro do próprio banco, todo dia,
+// e fazia isso a cada login de administrador. Três problemas graves, todos confirmados:
+//
+// 1. Lia a RAIZ do banco (db.ref().once) — baixava tudo, inclusive as cópias de backup
+//    anteriores. Com 14 dias guardados, cada login baixava vários GB. Foi a origem dos
+//    24,5 GB/mês num banco de 213 MB.
+// 2. Gravava tudo num único set(). O Firebase recusa escrita acima de 16 MB, então o
+//    backup FALHAVA — dava "Write too large" e nenhuma cópia era realmente salva.
+// 3. Como falhava antes de gravar 'backups_meta/ultimo', a data de sucesso nunca era
+//    registrada. Resultado: tentava de novo a CADA login, para sempre, queimando cota
+//    e travando a tela do admin. Só o admin era afetado; por isso produção funcionava.
+//
+// Guardar backup dentro do próprio banco também dobra o armazenamento e não protege
+// contra o risco real (perder o projeto). O backup manual, que baixa um arquivo para o
+// computador, faz o serviço de verdade — e continua disponível no painel Admin.
+// ══════════════════════════════════════════════
 async function verificarBackupAutomatico(){
-  if(!usuarioLogado?.admin) return; // só dispara para administrador, evita corrida entre vários logins
-  try {
-    const hoje = new Date().toISOString().split('T')[0];
-    const metaSnap = await db.ref('backups_meta/ultimo').once('value');
-    if(metaSnap.val() === hoje) return; // já tem backup de hoje
-
-    const snap = await db.ref().once('value');
-    const tudo = snap.val() || {};
-    delete tudo.backups; delete tudo.backups_meta; // não duplica backups dentro do backup
-
-    await db.ref('backups/'+hoje).set(tudo);
-    await db.ref('backups_meta/ultimo').set(hoje);
-
-    // Mantém só os últimos 14 dias de backup automático
-    const listaSnap = await db.ref('backups').once('value');
-    const datas = Object.keys(listaSnap.val()||{}).sort();
-    if(datas.length>14){
-      for(const d of datas.slice(0, datas.length-14)) await db.ref('backups/'+d).remove();
-    }
-  } catch(e){ console.warn('Backup automático falhou:', e.message); }
+  return; // desativado de propósito — ver explicação acima
 }
 
 async function baixarBackupCompleto(){
@@ -15485,9 +15485,19 @@ async function baixarBackupCompleto(){
   const statusEl = document.getElementById('backup-status');
   toast('⏳ Gerando backup, aguarde...','success');
   try {
-    const snap = await db.ref().once('value');
-    const dados = snap.val() || {};
-    delete dados.backups; delete dados.backups_meta;
+    // Lê nó a nó em vez da raiz. Lendo a raiz, as cópias antigas em 'backups' vinham
+    // junto no download e só eram descartadas DEPOIS de já terem consumido a banda —
+    // eram centenas de MB baixados à toa a cada backup.
+    const NOS_BACKUP = ['produtos','insumos','clientes','pedidos','pedidos_compra',
+      'movimentos_estoque','ordens_producao','receitas','fornecedores','usuarios',
+      'contador_pedidos','contador_pedidos_compra','contador_op','condicoes_pagamento',
+      'metas','garantias','arquivos_promocoes','arquivos_catalogo','arquivos_tabela'];
+    const dados = {};
+    for(const no of NOS_BACKUP){
+      const snapNo = await db.ref(no).once('value');
+      const v = snapNo.val();
+      if(v !== null && v !== undefined) dados[no] = v;
+    }
     const blob = new Blob([JSON.stringify(dados, null, 2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -15507,7 +15517,11 @@ async function atualizarStatusBackup(){
   try {
     const metaSnap = await db.ref('backups_meta/ultimo').once('value');
     const ultimo = metaSnap.val();
-    statusEl.textContent = ultimo ? `📅 Último backup automático: ${new Date(ultimo+'T00:00').toLocaleDateString('pt-BR')}` : 'Nenhum backup automático ainda — será criado no próximo acesso.';
+    statusEl.innerHTML = `<span style="color:#b45309">⚠️ O backup automático está desativado.</span> ` +
+      `Ele copiava o banco inteiro para dentro do próprio banco a cada login e falhava por excesso de tamanho, ` +
+      `consumindo cota sem gerar cópia utilizável. ` +
+      `Use <strong>Baixar Backup Completo Agora</strong> e guarde o arquivo fora do sistema.` +
+      (ultimo ? `<br><span style="color:var(--muted);font-size:12px">Último registro do modo antigo: ${new Date(ultimo+'T00:00').toLocaleDateString('pt-BR')}</span>` : '');
   } catch(e){ console.warn('[CROW] falha silenciosa ignorada:', e); }
 }
 
