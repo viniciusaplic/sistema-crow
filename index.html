@@ -1072,6 +1072,29 @@ tbody td{padding:11px 16px;font-size:14px}
           <div id="admin-promo-lista" style="margin-top:14px;font-size:13px"></div>
         </div>
         <div class="table-wrap" style="padding:24px">
+          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">🏷️ Campanha de Preços (Jornal)</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:16px">Preço promocional liberado só quando o pedido atinge o valor mínimo <strong>e</strong> o item atinge a quantidade mínima dele. Aplicado automaticamente no pedido e no orçamento.</div>
+          <div class="form-row">
+            <div class="form-group"><label>Nome da campanha</label><input type="text" id="camp-nome" placeholder="ex: Jornal Agosto 2026" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:8px;box-sizing:border-box"></div>
+            <div class="form-group"><label>Pedido mínimo (R$)</label><input type="number" step="0.01" id="camp-minimo" placeholder="1500,00" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:8px;box-sizing:border-box"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Início da vigência</label><input type="date" id="camp-inicio" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:8px;box-sizing:border-box"></div>
+            <div class="form-group"><label>Fim da vigência</label><input type="date" id="camp-fim" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:8px;box-sizing:border-box"></div>
+          </div>
+          <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:6px 0 8px">📋 Itens da campanha — uma linha por item</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Formato: <code>código;preço promocional;quantidade mínima</code> — dá para colar direto de uma planilha.<br>Exemplo: <code>1042;18,90;12</code></div>
+          <textarea id="camp-itens" rows="7" placeholder="1042;18,90;12&#10;1055;24,50;6&#10;2031;9,90;24" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:8px;box-sizing:border-box;font-family:monospace;resize:vertical"></textarea>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="adminSalvarCampanha()">💾 Salvar campanha</button>
+            <button class="btn btn-outline btn-sm" onclick="limparFormCampanha()">Limpar formulário</button>
+          </div>
+          <div id="admin-campanha-result" style="margin-top:10px;font-size:13px"></div>
+          <div style="border-top:1px solid var(--border);margin:16px 0"></div>
+          <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Campanhas cadastradas</div>
+          <div id="admin-campanhas-lista" style="font-size:13px"></div>
+        </div>
+        <div class="table-wrap" style="padding:24px">
           <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">📚 Catálogo de Produtos</div>
           <div style="font-size:13px;color:var(--muted);margin-bottom:16px">Cole o link do catálogo (Google Drive, Dropbox, WhatsApp Web, etc.). O vendedor verá na aba Catálogo.</div>
           <input type="text" id="admin-catalogo-nome" placeholder="Nome (ex: Catálogo 2026)" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:8px">
@@ -1443,6 +1466,7 @@ tbody td{padding:11px 16px;font-size:14px}
         </div>
         <div style="font-size:13px;color:var(--muted);padding-top:20px">Descontos gerais (% e/ou R$) aplicados sobre o total após os descontos por item.</div>
       </div>
+      <div id="campanha-status" style="margin:10px 0"></div>
       <div class="totais-box" id="totais-box">
         <div class="totais-item"><span>Itens</span><strong id="tot-itens">0</strong></div>
         <div class="totais-item"><span>Subtotal</span><strong id="tot-subtotal">R$ 0,00</strong></div>
@@ -2846,6 +2870,7 @@ async function iniciarApp(){
   carregarFotoMapa();
   carregarClientesFirebase();
   await carregarProdutosFirebase();
+  carregarCampanhasFirebase();
   renderPainel(); // re-renderiza com dados atualizados do Firebase
 }
 
@@ -2929,6 +2954,7 @@ function showTab(tab, el){
   if(tab==='relatorios'){ inicializarRelatorios(); }
   if(tab==='importar'){
     renderAdminLista('arquivos_promocoes','admin-promo-lista'); renderAdminLista('arquivos_catalogo','admin-catalogo-lista'); renderAdminLista('arquivos_tabela','admin-tabela-lista');
+    carregarCampanhasFirebase().then(renderAdminCampanhas);
     popularSelectVendedoresVinculo();
     atualizarStatusBackup();
     if(!condicoesCarregadas) carregarCondicoesPagamento(); else renderConfigCondicoes();
@@ -4508,6 +4534,7 @@ async function editarPedido(id){
   document.getElementById('step-cliente-ped').style.display='none';
   document.getElementById('step-itens-ped').style.display='';
   document.getElementById('desc-geral').value = p.desconto_geral||0;
+  pedidoAtual.campanha_congelada = campanhaCongeladaPara(p);
   document.getElementById('desc-geral-valor').value = p.desconto_valor||0;
   renderItens();
   await atualizarCondicoes();
@@ -4530,6 +4557,11 @@ async function clonarPedido(id){
   // Clona itens removendo qualquer marcação de separação/bipagem da OP anterior
   let itensClonados = JSON.parse(JSON.stringify(p.itens||[])).map(i=>{
     delete i.separado; delete i.qtd_bipada; delete i.bipado;
+    // Marcas de campanha do pedido antigo não valem no clone — volta ao preço de
+    // tabela e deixa a campanha vigente (se houver) ser reavaliada do zero.
+    if(i.promo_ativa && i.preco_pre_promo != null) i.preco = Number(i.preco_pre_promo);
+    delete i.promo_ativa; delete i.promo_preco; delete i.preco_pre_promo;
+    delete i.promo_campanha; delete i.promo_qtd_minima; delete i.promo_override;
     return i;
   });
 
@@ -4574,6 +4606,7 @@ async function clonarPedido(id){
   document.getElementById('step-cliente-ped').style.display='none';
   document.getElementById('step-itens-ped').style.display='';
   document.getElementById('desc-geral').value = p.desconto_geral||0;
+  pedidoAtual.campanha_congelada = campanhaCongeladaPara(p);
   document.getElementById('desc-geral-valor').value = p.desconto_valor||0;
   renderItens();
   await atualizarCondicoes();
@@ -5090,6 +5123,323 @@ async function carregarHistoricoPrecosCliente(clienteCodigo){
   HISTORICO_PRECOS_CACHE[clienteCodigo] = historico;
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// CAMPANHAS PROMOCIONAIS (Jornal de Ofertas)
+// O preço promocional depende de DUAS condições ao mesmo tempo:
+//   1) o pedido inteiro precisa atingir o pedido mínimo da campanha
+//   2) cada item precisa atingir a quantidade mínima dele
+// Avaliação em passo único (sem laço de realimentação): primeiro separa os
+// itens que já bateram a quantidade mínima, depois calcula o subtotal JÁ com
+// os preços promocionais desses itens e só então testa contra o pedido mínimo.
+// Assim o cliente fecha o valor mínimo pagando o preço do jornal — se o teste
+// fosse feito pelo preço de tabela, ao aplicar a promoção o pedido cairia
+// abaixo do mínimo anunciado.
+// ══════════════════════════════════════════════════════════════════════
+let CAMPANHAS_DB = [];
+let _emRenderItens = false;
+
+async function carregarCampanhasFirebase(){
+  try {
+    const snap = await db.ref('campanhas').once('value');
+    const dados = snap.val() || {};
+    CAMPANHAS_DB = Object.keys(dados).map(k => ({ ...dados[k], id: k }));
+  } catch(e){ console.warn('Erro Firebase campanhas:', e.message); }
+}
+
+function hojeISO(){
+  const d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+
+// Campanha ativa e dentro da vigência. Havendo mais de uma, vale a que começou por último.
+function campanhaVigente(){
+  const hoje = hojeISO();
+  const validas = (CAMPANHAS_DB||[]).filter(c =>
+    c && c.ativa !== false &&
+    (!c.data_inicio || c.data_inicio <= hoje) &&
+    (!c.data_fim    || c.data_fim    >= hoje) &&
+    Array.isArray(c.itens) && c.itens.length
+  );
+  if(!validas.length) return null;
+  validas.sort((a,b)=> String(b.data_inicio||'').localeCompare(String(a.data_inicio||'')));
+  return validas[0];
+}
+
+// Pedido gravado fora da vigência da campanha atual não é recalculado: os preços
+// que foram gravados ficam congelados. Sem isso, reabrir um pedido antigo mudaria
+// o valor dele por causa de uma campanha que nem existia na época.
+function campanhaCongeladaPara(p){
+  const cv = campanhaVigente();
+  if(!cv) return true;
+  const dataPed = String(p && p.data || '').slice(0,10);
+  if(!dataPed) return true;
+  return !((!cv.data_inicio || dataPed >= cv.data_inicio) && (!cv.data_fim || dataPed <= cv.data_fim));
+}
+
+// Piso de preço do item. Normalmente é o mínimo do cadastro. Com preço de campanha
+// aplicado, o piso é o menor entre os dois: se o preço promocional está ACIMA do
+// mínimo do cadastro, o desconto geral ainda pode descer até o mínimo; se o
+// promocional já é o mais baixo, ele vira o piso e não desce mais.
+function pisoItem(item){
+  const pm = Number(item && item.preco_minimo) || 0;
+  if(pm <= 0) return 0;
+  if(item && item.promo_ativa && Number(item.promo_preco) > 0) return Math.min(pm, Number(item.promo_preco));
+  return pm;
+}
+
+function itemDaCampanha(camp, codigo){
+  return ((camp && camp.itens) || []).find(x => String(x.codigo) === String(codigo)) || null;
+}
+
+// Aplica ou remove os preços de campanha no pedido em edição.
+// Retorna true se mudou alguma coisa (aí a tela precisa ser redesenhada).
+function aplicarCampanhaPedido(){
+  if(typeof pedidoAtual !== 'object' || !pedidoAtual) return false;
+  const itens = pedidoAtual.itens || [];
+  const camp = pedidoAtual.campanha_congelada ? null : campanhaVigente();
+  let mudou = false;
+
+  const restaurar = (it) => {
+    if(!it.promo_ativa) return false;
+    if(it.preco_pre_promo != null) it.preco = Number(it.preco_pre_promo);
+    it.promo_ativa = false;
+    delete it.promo_preco; delete it.preco_pre_promo;
+    delete it.promo_campanha; delete it.promo_qtd_minima;
+    return true;
+  };
+
+  if(!camp){
+    for(const it of itens){ if(restaurar(it)) mudou = true; }
+    if(!pedidoAtual.campanha_congelada){ pedidoAtual.campanha_id = null; pedidoAtual.campanha_nome = null; }
+    pedidoAtual._campanha_ctx = null;
+    return mudou;
+  }
+
+  // 1) quem já bateu a quantidade mínima do item
+  const candidatos = new Map();
+  const faltando = new Map();
+  for(const it of itens){
+    const ci = itemDaCampanha(camp, it.codigo);
+    if(!ci) continue;
+    const pp = Number(ci.preco) || 0;
+    if(!(pp > 0)) continue;
+    const qmin = Number(ci.qtd_minima) || 0;
+    const qtd  = Number(it.qtd) || 0;
+    if(qtd < qmin) faltando.set(it.codigo, qmin - qtd);
+    else if(!it.promo_override) candidatos.set(it.codigo, pp);
+  }
+
+  // 2) subtotal do pedido já com os preços promocionais dos candidatos
+  let subPromo = 0;
+  for(const it of itens){
+    const base = candidatos.has(it.codigo)
+      ? candidatos.get(it.codigo)
+      : ((it.promo_ativa && it.preco_pre_promo != null) ? Number(it.preco_pre_promo) : (Number(it.preco)||0));
+    subPromo += (Number(it.qtd)||0) * base * (1 - (Number(it.desconto_item)||0)/100);
+  }
+
+  // 3) só agora testa contra o pedido mínimo
+  const minimoPedido = Number(camp.pedido_minimo) || 0;
+  const liberado = candidatos.size > 0 && subPromo >= minimoPedido - 0.001;
+
+  for(const it of itens){
+    const alvo = (liberado && candidatos.has(it.codigo)) ? candidatos.get(it.codigo) : null;
+    if(alvo != null){
+      if(!it.promo_ativa){ it.preco_pre_promo = Number(it.preco)||0; it.promo_ativa = true; mudou = true; }
+      if(Math.abs((Number(it.preco)||0) - alvo) > 0.0001){ it.preco = alvo; mudou = true; }
+      it.promo_preco = alvo;
+      it.promo_campanha = camp.nome || '';
+      const ciq = itemDaCampanha(camp, it.codigo);
+      it.promo_qtd_minima = Number(ciq && ciq.qtd_minima) || 0;
+    } else if(restaurar(it)) mudou = true;
+  }
+
+  pedidoAtual.campanha_id   = liberado ? camp.id : null;
+  pedidoAtual.campanha_nome = liberado ? (camp.nome||'') : null;
+  pedidoAtual._campanha_ctx = { nome: camp.nome||'', minimo: minimoPedido, sub: subPromo, liberado, candidatos: candidatos.size, faltando };
+  return mudou;
+}
+
+// Selo mostrado na linha do item dentro do pedido
+function seloCampanhaItem(item){
+  const ctx = pedidoAtual && pedidoAtual._campanha_ctx;
+  const base = 'display:inline-block;border-radius:4px;padding:1px 5px;font-size:10px;font-weight:700;margin-left:5px;white-space:nowrap';
+  if(item && item.promo_ativa)
+    return `<span style="${base};background:#dcfce7;color:#166534">🏷️ ${esc((ctx&&ctx.nome)||item.promo_campanha||'campanha')}</span>`;
+  if(item && item.promo_override)
+    return `<span style="${base};background:#e5e7eb;color:#4b5563">preço manual</span>`;
+  const falta = ctx && ctx.faltando ? ctx.faltando.get(item.codigo) : null;
+  if(falta > 0)
+    return `<span style="${base};background:#fef3c7;color:#92400e">faltam ${falta} un. p/ o preço do jornal</span>`;
+  return '';
+}
+
+function renderCampanhaStatus(){
+  const el = document.getElementById('campanha-status');
+  if(!el) return;
+  const ctx = pedidoAtual && pedidoAtual._campanha_ctx;
+  if(!ctx){ el.innerHTML = ''; return; }
+  const temItemDaCampanha = ctx.candidatos > 0 || (ctx.faltando && ctx.faltando.size > 0);
+  if(!temItemDaCampanha){ el.innerHTML = ''; return; }
+  if(ctx.liberado){
+    el.innerHTML = `<div style="background:#dcfce7;border:1px solid #16a34a;color:#166534;border-radius:8px;padding:9px 12px;font-size:13px">🏷️ <strong>${esc(ctx.nome)}</strong> aplicada — ${ctx.candidatos} item(ns) com preço promocional.</div>`;
+  } else {
+    const falta = Math.max(0, ctx.minimo - ctx.sub);
+    const detalhe = ctx.candidatos > 0
+      ? `Faltam <strong>${fmtMoeda(falta)}</strong> para liberar os preços da campanha.`
+      : `Nenhum item atingiu ainda a quantidade mínima da campanha.`;
+    el.innerHTML = `<div style="background:#fef3c7;border:1px solid #f59e0b;color:#92400e;border-radius:8px;padding:9px 12px;font-size:13px">🏷️ <strong>${esc(ctx.nome)}</strong> — pedido mínimo de ${fmtMoeda(ctx.minimo)}. ${detalhe}</div>`;
+  }
+}
+
+// ── Admin: cadastro de campanhas ──
+let campanhaEditandoId = null;
+
+// Aceita 18,90 / 1.234,56 / 18.90
+function numBR(txt){
+  const t = String(txt||'').trim();
+  if(!t) return NaN;
+  return t.includes(',') ? parseFloat(t.replace(/\./g,'').replace(',','.')) : parseFloat(t);
+}
+
+function parseItensCampanha(txt){
+  const linhas = String(txt||'').split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  const itens = [], erros = [];
+  const vistos = new Set();
+  for(const l of linhas){
+    const partes = l.split(/[;\t]/).map(x=>x.trim());
+    if(partes.length < 3){ erros.push(`${l} — faltam campos (use código;preço;quantidade mínima)`); continue; }
+    const codigo = partes[0];
+    const preco  = numBR(partes[1]);
+    const qmin   = parseInt(String(partes[2]).replace(/\D/g,''), 10);
+    if(!codigo){ erros.push(`${l} — código vazio`); continue; }
+    if(!(preco > 0)){ erros.push(`${l} — preço inválido`); continue; }
+    if(!(qmin > 0)){ erros.push(`${l} — quantidade mínima inválida`); continue; }
+    if(vistos.has(codigo)){ erros.push(`${l} — código repetido na lista`); continue; }
+    vistos.add(codigo);
+    itens.push({ codigo, preco: Math.round(preco*100)/100, qtd_minima: qmin });
+  }
+  return { itens, erros };
+}
+
+function limparFormCampanha(){
+  campanhaEditandoId = null;
+  ['camp-nome','camp-minimo','camp-inicio','camp-fim','camp-itens'].forEach(id=>{
+    const el = document.getElementById(id); if(el) el.value = '';
+  });
+  const r = document.getElementById('admin-campanha-result'); if(r) r.innerHTML = '';
+}
+
+async function adminSalvarCampanha(){
+  if(!usuarioLogado?.admin){ toast('Acesso restrito','error'); return; }
+  const el = document.getElementById('admin-campanha-result');
+  const erro = (m)=>{ el.innerHTML = `<span style="color:#dc2626">${esc(m)}</span>`; };
+
+  const nome = document.getElementById('camp-nome').value.trim();
+  const ini  = document.getElementById('camp-inicio').value;
+  const fim  = document.getElementById('camp-fim').value;
+  const minimo = numBR(document.getElementById('camp-minimo').value);
+
+  if(!nome) return erro('Informe o nome da campanha.');
+  if(!ini || !fim) return erro('Informe o início e o fim da vigência.');
+  if(fim < ini) return erro('A data final não pode ser anterior à inicial.');
+  if(!(minimo > 0)) return erro('Informe o pedido mínimo da campanha.');
+
+  const r = parseItensCampanha(document.getElementById('camp-itens').value);
+  if(r.erros.length) return erro('Corrija estas linhas:\n• ' + r.erros.join('\n• '));
+  if(!r.itens.length) return erro('Adicione pelo menos um item à campanha.');
+
+  if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
+  const desconhecidos = r.itens
+    .filter(i => !PRODUTOS_DB.some(p => String(p.codigo) === String(i.codigo)))
+    .map(i => i.codigo);
+  if(desconhecidos.length) return erro('Código(s) não encontrado(s) no cadastro de produtos: ' + desconhecidos.join(', '));
+
+  // Avisa se já existe outra campanha ativa cruzando o mesmo período —
+  // quando duas se sobrepõem, vale a que começou por último.
+  const conflito = (CAMPANHAS_DB||[]).find(c => c.id !== campanhaEditandoId && c.ativa !== false &&
+    String(c.data_inicio||'') <= fim && String(c.data_fim||'') >= ini);
+  if(conflito && !confirm(`Já existe a campanha "${conflito.nome}" ativa nesse período.\n\nQuando duas se sobrepõem, vale a que começou por último. Salvar assim mesmo?`)) return;
+
+  const id = campanhaEditandoId || db.ref('campanhas').push().key;
+  try {
+    await db.ref('campanhas/'+id).set({
+      id, nome, data_inicio: ini, data_fim: fim,
+      pedido_minimo: Math.round(minimo*100)/100,
+      ativa: true, itens: r.itens,
+      atualizado_em: new Date().toISOString(),
+      atualizado_por: usuarioLogado?.nome || ''
+    });
+    await carregarCampanhasFirebase();
+    limparFormCampanha();
+    renderAdminCampanhas();
+    el.innerHTML = `<span style="color:#16a34a">✓ Campanha salva com ${r.itens.length} item(ns).</span>`;
+  } catch(e){ erro('Erro ao salvar: ' + e.message); }
+}
+
+function adminEditarCampanha(id){
+  const c = (CAMPANHAS_DB||[]).find(x=>x.id===id); if(!c) return;
+  campanhaEditandoId = id;
+  document.getElementById('camp-nome').value   = c.nome || '';
+  document.getElementById('camp-minimo').value = Number(c.pedido_minimo)||0;
+  document.getElementById('camp-inicio').value = c.data_inicio || '';
+  document.getElementById('camp-fim').value    = c.data_fim || '';
+  document.getElementById('camp-itens').value  = (c.itens||[])
+    .map(i=>`${i.codigo};${String(Number(i.preco).toFixed(2)).replace('.',',')};${i.qtd_minima}`).join('\n');
+  document.getElementById('admin-campanha-result').innerHTML =
+    `<span style="color:var(--muted)">Editando "${esc(c.nome||'')}" — salvar substitui a campanha.</span>`;
+  document.getElementById('camp-nome').scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+async function adminToggleCampanha(id){
+  if(!usuarioLogado?.admin){ toast('Acesso restrito','error'); return; }
+  const c = (CAMPANHAS_DB||[]).find(x=>x.id===id); if(!c) return;
+  const novo = (c.ativa === false);
+  if(!confirm(`${novo?'Ativar':'Desativar'} a campanha "${c.nome}"?\n\nDesativada, os pedidos novos voltam a usar o preço de tabela. Pedidos já gravados não mudam.`)) return;
+  try {
+    await db.ref('campanhas/'+id+'/ativa').set(novo);
+    await carregarCampanhasFirebase();
+    renderAdminCampanhas();
+    toast(novo?'Campanha ativada':'Campanha desativada','success');
+  } catch(e){ toast('Erro: '+e.message,'error'); }
+}
+
+async function adminExcluirCampanha(id){
+  if(!usuarioLogado?.admin){ toast('Acesso restrito','error'); return; }
+  const c = (CAMPANHAS_DB||[]).find(x=>x.id===id); if(!c) return;
+  if(!confirm(`Excluir a campanha "${c.nome}"?\n\nOs pedidos já gravados com ela não são alterados. Se a ideia é só encerrar, prefira Desativar.`)) return;
+  try {
+    await db.ref('campanhas/'+id).remove();
+    await carregarCampanhasFirebase();
+    renderAdminCampanhas();
+    toast('Campanha excluída','success');
+  } catch(e){ toast('Erro: '+e.message,'error'); }
+}
+
+function renderAdminCampanhas(){
+  const el = document.getElementById('admin-campanhas-lista');
+  if(!el) return;
+  if(!(CAMPANHAS_DB||[]).length){ el.innerHTML = '<div style="color:var(--muted)">Nenhuma campanha cadastrada.</div>'; return; }
+  const hoje = hojeISO();
+  el.innerHTML = CAMPANHAS_DB.slice()
+    .sort((a,b)=>String(b.data_inicio||'').localeCompare(String(a.data_inicio||'')))
+    .map(c=>{
+      const vigente = c.ativa !== false && (!c.data_inicio || c.data_inicio<=hoje) && (!c.data_fim || c.data_fim>=hoje);
+      const situacao = c.ativa === false
+        ? '<span style="color:var(--muted)">● desativada</span>'
+        : (vigente ? '<span style="color:#16a34a">● vigente</span>' : '<span style="color:var(--muted)">● fora da vigência</span>');
+      return `<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px">
+        <div style="font-weight:700">${esc(c.nome||'(sem nome)')} ${situacao}</div>
+        <div style="color:var(--muted);font-size:12px;margin-top:2px">${esc(c.data_inicio||'?')} a ${esc(c.data_fim||'?')} · pedido mínimo ${fmtMoeda(Number(c.pedido_minimo)||0)} · ${(c.itens||[]).length} item(ns)</div>
+        <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="adminEditarCampanha('${c.id}')">✏️ Editar</button>
+          <button class="btn btn-outline btn-sm" onclick="adminToggleCampanha('${c.id}')">${c.ativa===false?'▶️ Ativar':'⏸️ Desativar'}</button>
+          <button class="btn btn-outline btn-sm" style="color:#dc2626;border-color:#dc2626" onclick="adminExcluirCampanha('${c.id}')">🗑️ Excluir</button>
+        </div>
+      </div>`;
+    }).join('');
+}
+
 let itemEmEstagio = null;
 
 function adicionarItem(cod){
@@ -5240,17 +5590,23 @@ function cancelarItemEstagio(){
 }
 
 function renderItens(){
+  _emRenderItens = true;
+  aplicarCampanhaPedido();
   const lista = document.getElementById('itens-lista');
   if(!pedidoAtual.itens.length){
     lista.innerHTML='<div style="padding:16px;text-align:center;color:var(--muted);font-size:13px">Nenhum item adicionado</div>';
+    _emRenderItens = false;
+    renderCampanhaStatus();
     atualizarTotais(); return;
   }
   lista.innerHTML = pedidoAtual.itens.map((item,idx)=>{
     const foto = fotoImg(item.codigo, 50, 'border-radius:6px;cursor:pointer;flex-shrink:0');
+    const piso = pisoItem(item);
+    const selo = seloCampanhaItem(item);
     return `<div class="item-row">
-      <span style="display:flex;align-items:center;gap:8px">${foto}<span><strong style="color:var(--accent)">${item.codigo}</strong> — ${item.nome.length>30?item.nome.substring(0,30)+'…':item.nome}</span></span>
+      <span style="display:flex;align-items:center;gap:8px">${foto}<span><strong style="color:var(--accent)">${item.codigo}</strong> — ${item.nome.length>30?item.nome.substring(0,30)+'…':item.nome}${selo}</span></span>
       <input type="number" min="1" value="${item.qtd}" onchange="atualizarQtd(${idx},this.value)">
-      <input type="number" ${usuarioLogado?.admin?'':`min="${item.preco_minimo}"`} step="0.01" value="${item.preco.toFixed(2)}" onchange="atualizarPreco(${idx},this.value)" title="${usuarioLogado?.admin?'Admin: sem restrição de preço mínimo':'Mín: R$ '+item.preco_minimo.toFixed(2)}">
+      <input type="number" ${usuarioLogado?.admin?'':`min="${piso}"`} step="0.01" value="${item.preco.toFixed(2)}" onchange="atualizarPreco(${idx},this.value)" title="${usuarioLogado?.admin?'Admin: sem restrição de preço mínimo':'Mín: R$ '+piso.toFixed(2)}">
       <span style="display:flex;gap:3px;align-items:center;min-width:0">
         <input type="number" min="0" step="0.01" value="${Math.round(((item.desc_modo==='R$')?(item.desc_valor!=null?item.desc_valor:(item.preco*(item.desconto_item||0)/100)):(item.desconto_item||0))*100)/100}" onchange="atualizarDescItem(${idx},this.value)" placeholder="0" style="min-width:0;width:100%" title="Desconto por ${item.desc_modo==='R$'?'valor (R$/unid)':'percentual (%)'}">
         <button type="button" onclick="toggleModoDescItem(${idx})" title="Alternar % / R$" style="flex:0 0 auto;padding:2px 5px;font-size:11px;font-weight:700;border:1px solid var(--border);border-radius:5px;background:var(--card);cursor:pointer;color:var(--accent);line-height:1.4">${item.desc_modo==='R$'?'R$':'%'}</button>
@@ -5259,6 +5615,8 @@ function renderItens(){
       <button class="btn-del" onclick="removerItem(${idx})">×</button>
     </div>`;
   }).join('');
+  _emRenderItens = false;
+  renderCampanhaStatus();
   atualizarTotais();
 }
 
@@ -5291,9 +5649,14 @@ function atualizarDescItem(idx, val){
   const cadastroAtual = PRODUTOS_DB.find(x=>x.codigo===item.codigo);
   const precoMinimoAtual = cadastroAtual ? Number(cadastroAtual.preco_minimo)||0 : Number(item.preco_minimo)||0;
 
-  if(!usuarioLogado?.admin && precoMinimoAtual > 0){
+  // Item com preço de campanha aplicado: o piso passa a ser o menor entre o mínimo
+  // do cadastro e o preço promocional (ver pisoItem).
+  const pisoDescEfetivo = (item.promo_ativa && Number(item.promo_preco) > 0)
+    ? Math.min(precoMinimoAtual, Number(item.promo_preco))
+    : precoMinimoAtual;
+  if(!usuarioLogado?.admin && pisoDescEfetivo > 0){
     const precoComDesconto = Math.round(item.preco * (1 - desconto/100) * 100) / 100;
-    const minimoArredondado = Math.round(precoMinimoAtual * 100) / 100;
+    const minimoArredondado = Math.round(pisoDescEfetivo * 100) / 100;
     if(precoComDesconto < minimoArredondado){
       if(modo === 'R$'){
         const rsMax = Math.max(0, Math.round((item.preco - minimoArredondado) * 100) / 100);
@@ -5329,10 +5692,19 @@ function removerItem(idx){ pedidoAtual.itens.splice(idx,1); renderItens(); calcu
 function atualizarPreco(idx,val){
   const v=parseFloat(val)||0;
   const item=pedidoAtual.itens[idx];
-  if(v<item.preco_minimo && !usuarioLogado?.admin){
-    alert(`Preço mínimo: ${fmtMoeda(item.preco_minimo)}`);
+  const pisoPreco = pisoItem(item);
+  if(v<pisoPreco && !usuarioLogado?.admin){
+    alert(`Preço mínimo: ${fmtMoeda(pisoPreco)}`);
     renderItens();
     return;
+  }
+  // Preço digitado à mão em item de campanha: a campanha para de mandar nesse item,
+  // senão o recálculo automático sobrescreveria o valor que acabou de ser digitado.
+  if(item.promo_ativa && Math.abs(v - (Number(item.promo_preco)||0)) > 0.001){
+    item.promo_override = true;
+    item.promo_ativa = false;
+    delete item.promo_preco; delete item.preco_pre_promo;
+    delete item.promo_campanha; delete item.promo_qtd_minima;
   }
   item.preco=v; renderItens(); calcularParcelas();
 }
@@ -5361,17 +5733,22 @@ function validarPedidoPrecosMinimos(){
   const sub = calcSubtotal();
   const mult = sub > 0 ? ((1 - dg/100) - dv/sub) : (1 - dg/100);
   for(const item of pedidoAtual.itens){
-    if(!(item.preco_minimo > 0)) continue;
+    const piso = pisoItem(item);
+    if(!(piso > 0)) continue;
     const precoComDescItem = item.preco * (1-(item.desconto_item||0)/100);
     const precoFinal = precoComDescItem * mult;
-    if(precoFinal < item.preco_minimo - 0.001){ // pequena tolerância pra arredondamento
-      return { item, precoFinal };
+    if(precoFinal < piso - 0.001){ // pequena tolerância pra arredondamento
+      return { item, precoFinal, piso };
     }
   }
   return null;
 }
 
 function atualizarTotais(){
+  // Recalcula a campanha antes de tudo. Se ela mudou algum preço e não estamos já
+  // dentro de um renderItens, redesenha a lista pra refletir o preço novo nos campos.
+  if(aplicarCampanhaPedido() && !_emRenderItens){ renderItens(); return; }
+  renderCampanhaStatus();
   // Trava de preço mínimo: se os descontos gerais (% e/ou R$) derrubarem qualquer item
   // abaixo do preço mínimo dele, limita automaticamente o campo que acabou de ser mexido.
   if(!usuarioLogado?.admin){
@@ -5383,10 +5760,11 @@ function atualizarTotais(){
     if((dg > 0 || dv > 0) && subG > 0){
       let multMin = 0, itemCritico = null;
       for(const it of pedidoAtual.itens){
-        if(!(it.preco_minimo > 0)) continue;
+        const pisoIt = pisoItem(it);
+        if(!(pisoIt > 0)) continue;
         const pcd = it.preco * (1-(it.desconto_item||0)/100);
         if(pcd <= 0) continue;
-        const m = it.preco_minimo / pcd;
+        const m = pisoIt / pcd;
         if(m > multMin){ multMin = m; itemCritico = it; }
       }
       const multEfetivo = (1 - dg/100) - dv/subG;
@@ -5394,11 +5772,11 @@ function atualizarTotais(){
         if(ultimoCampoDesc === 'valor'){
           const dvMax = Math.max(0, subG*((1 - dg/100) - multMin));
           dvEl.value = dvMax.toFixed(2);
-          alert(`Desconto em R$ máximo permitido: ${fmtMoeda(dvMax)}\n\n"${itemCritico.nome}" ficaria abaixo do preço mínimo de ${fmtMoeda(itemCritico.preco_minimo)}.`);
+          alert(`Desconto em R$ máximo permitido: ${fmtMoeda(dvMax)}\n\n"${itemCritico.nome}" ficaria abaixo do preço mínimo de ${fmtMoeda(pisoItem(itemCritico))}.`);
         } else {
           const dgMax = Math.max(0, (1 - multMin - dv/subG) * 100);
           dgEl.value = dgMax.toFixed(1);
-          alert(`Desconto geral máximo permitido: ${dgMax.toFixed(1)}%\n\n"${itemCritico.nome}" ficaria abaixo do preço mínimo de ${fmtMoeda(itemCritico.preco_minimo)}.`);
+          alert(`Desconto geral máximo permitido: ${dgMax.toFixed(1)}%\n\n"${itemCritico.nome}" ficaria abaixo do preço mínimo de ${fmtMoeda(pisoItem(itemCritico))}.`);
         }
       }
     }
@@ -5512,7 +5890,7 @@ async function confirmarPedido(){
 
   const violacao = validarPedidoPrecosMinimos();
   if(violacao){
-    alert(`🚫 Não é possível salvar: "${violacao.item.nome}" ficaria em ${fmtMoeda(violacao.precoFinal)}, abaixo do preço mínimo de ${fmtMoeda(violacao.item.preco_minimo)}.\n\nAjuste o preço/desconto ou fale com o admin.`);
+    alert(`🚫 Não é possível salvar: "${violacao.item.nome}" ficaria em ${fmtMoeda(violacao.precoFinal)}, abaixo do preço mínimo de ${fmtMoeda(violacao.piso != null ? violacao.piso : violacao.item.preco_minimo)}.\n\nAjuste o preço/desconto ou fale com o admin.`);
     return;
   }
 
@@ -5682,6 +6060,8 @@ async function confirmarPedido(){
       vendedor_nome: vendedorNomeFinal,
       digitado_por_id: usuarioLogado.id, digitado_por_nome: usuarioLogado.nome,
       itens:pedidoAtual.itens, forma, condicao,
+      campanha_id: pedidoAtual.campanha_id || null,
+      campanha_nome: pedidoAtual.campanha_nome || null,
       obs:document.getElementById('pedido-obs').value,
       subtotal:sub, desconto_geral:dg, desconto_valor:dv, desconto_total:sub-total, total,
       credito_aplicado: pedidoAtual.credito_aplicado || 0,
@@ -5768,7 +6148,7 @@ async function salvarComoOrcamento(){
 
   const violacao = validarPedidoPrecosMinimos();
   if(violacao){
-    alert(`🚫 Não é possível salvar: "${violacao.item.nome}" ficaria em ${fmtMoeda(violacao.precoFinal)}, abaixo do preço mínimo de ${fmtMoeda(violacao.item.preco_minimo)}.\n\nAjuste o preço/desconto ou fale com o admin.`);
+    alert(`🚫 Não é possível salvar: "${violacao.item.nome}" ficaria em ${fmtMoeda(violacao.precoFinal)}, abaixo do preço mínimo de ${fmtMoeda(violacao.piso != null ? violacao.piso : violacao.item.preco_minimo)}.\n\nAjuste o preço/desconto ou fale com o admin.`);
     return;
   }
 
@@ -5837,6 +6217,8 @@ async function salvarComoOrcamento(){
       digitado_por_id: dadosOriginais.digitado_por_id || usuarioLogado.id,
       digitado_por_nome: dadosOriginais.digitado_por_nome || usuarioLogado.nome,
       itens:pedidoAtual.itens, forma, condicao,
+      campanha_id: pedidoAtual.campanha_id || null,
+      campanha_nome: pedidoAtual.campanha_nome || null,
       obs:document.getElementById('pedido-obs').value,
       subtotal:sub, desconto_geral:dg, desconto_valor:dv, desconto_total:sub-total, total,
       credito_aplicado: pedidoAtual.credito_aplicado || 0,
@@ -15491,7 +15873,7 @@ async function baixarBackupCompleto(){
     const NOS_BACKUP = ['produtos','insumos','clientes','pedidos','pedidos_compra',
       'movimentos_estoque','ordens_producao','receitas','fornecedores','usuarios',
       'contador_pedidos','contador_pedidos_compra','contador_op','condicoes_pagamento',
-      'metas','garantias','arquivos_promocoes','arquivos_catalogo','arquivos_tabela'];
+      'metas','garantias','arquivos_promocoes','arquivos_catalogo','arquivos_tabela','campanhas'];
     const dados = {};
     for(const no of NOS_BACKUP){
       const snapNo = await db.ref(no).once('value');
