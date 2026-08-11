@@ -5257,29 +5257,27 @@ function aplicarCampanhaPedido(){
     if(proxima) faltando.set(it.codigo, { falta: proxima.qtd_minima - qtd, preco: proxima.preco });
   }
 
-  // 2) subtotal do pedido já com os preços promocionais dos candidatos
+  // 2) valor do pedido para efeito do mínimo: preços VIGENTES, ou seja, os de tabela,
+  // sem a campanha aplicada. Conta o pedido inteiro, itens da campanha ou não.
+  // (Se a conta fosse feita com os preços promocionais, o próprio desconto derrubaria
+  // o pedido abaixo do mínimo e a campanha nunca liberaria — era o que acontecia antes.)
+  let subTabela = 0;
+  for(const it of itens){
+    const base = (it.promo_ativa && it.preco_pre_promo != null) ? Number(it.preco_pre_promo) : (Number(it.preco)||0);
+    subTabela += (Number(it.qtd)||0) * base * (1 - (Number(it.desconto_item)||0)/100);
+  }
 
   // 3) desconta os descontos gerais e só então testa contra o pedido mínimo.
-  // Mesmo à vista o cliente precisa fechar o mínimo: o valor conferido é o que ele
-  // realmente vai pagar pela mercadoria. O crédito do cliente NÃO entra na conta —
+  // Mesmo à vista o cliente precisa fechar o mínimo. O crédito do cliente NÃO entra —
   // ele é forma de pagamento (saldo que o cliente já tem), não desconto no preço.
   const dgEl_c = document.getElementById('desc-geral');
   const dvEl_c = document.getElementById('desc-geral-valor');
   const dgCamp = Math.max(0, parseFloat(dgEl_c && dgEl_c.value) || 0);
   const dvCamp = Math.max(0, parseFloat(dvEl_c && dvEl_c.value) || 0);
-  // Itens de preço fechado não recebem o desconto geral, então entram inteiros na conta
-  let fixaPromo = 0, descPromo = 0;
-  for(const it of itens){
-    const cand = candidatos.get(it.codigo);
-    const base = cand ? cand.preco
-      : ((it.promo_ativa && it.preco_pre_promo != null) ? Number(it.preco_pre_promo) : (Number(it.preco)||0));
-    const v = (Number(it.qtd)||0) * base * (1 - (Number(it.desconto_item)||0)/100);
-    if(cand && cand.sem_desconto) fixaPromo += v; else descPromo += v;
-  }
-  const totalPromo = fixaPromo + Math.max(0, descPromo * (1 - dgCamp/100) - dvCamp);
+  const totalTabela = Math.max(0, subTabela * (1 - dgCamp/100) - dvCamp);
 
   const minimoPedido = Number(camp.pedido_minimo) || 0;
-  const liberado = candidatos.size > 0 && totalPromo >= minimoPedido - 0.001;
+  const liberado = candidatos.size > 0 && totalTabela >= minimoPedido - 0.001;
 
   for(const it of itens){
     const faixa = (liberado && candidatos.has(it.codigo)) ? candidatos.get(it.codigo) : null;
@@ -5295,11 +5293,10 @@ function aplicarCampanhaPedido(){
 
   pedidoAtual.campanha_id   = liberado ? camp.id : null;
   pedidoAtual.campanha_nome = liberado ? (camp.nome||'') : null;
-  pedidoAtual._campanha_ctx = { nome: camp.nome||'', minimo: minimoPedido, sub: totalPromo, bruto: fixaPromo + descPromo, desconto: (fixaPromo + descPromo) - totalPromo, liberado, candidatos: candidatos.size, fechados: [...candidatos.values()].filter(f=>f.sem_desconto).length, faltando };
+  pedidoAtual._campanha_ctx = { nome: camp.nome||'', minimo: minimoPedido, sub: totalTabela, bruto: subTabela, desconto: subTabela - totalTabela, liberado, candidatos: candidatos.size, fechados: [...candidatos.values()].filter(f=>f.sem_desconto).length, faltando };
   return mudou;
 }
 
-// Selo mostrado na linha do item dentro do pedido
 // Selo mostrado na linha do item dentro do pedido. Um item pode ter dois:
 // o preço de campanha que já ganhou e o convite para a próxima faixa.
 function seloCampanhaItem(item){
