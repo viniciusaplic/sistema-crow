@@ -708,6 +708,7 @@ tbody td{padding:11px 16px;font-size:14px}
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('mrp',this)">📈 MRP — Necessidade de Compra</button>
           <button class="btn btn-outline btn-sm rel-btn admin-only" onclick="mostrarRelatorio('comissionamento',this)">💰 Comissionamento</button>
           <button class="btn btn-outline btn-sm rel-btn admin-only" onclick="mostrarRelatorio('recalc-estoque-minimo',this)">🎯 Recalcular Estoque Mínimo</button>
+          <button class="btn btn-outline btn-sm rel-btn admin-only" onclick="mostrarRelatorio('baixas-duplicadas',this)">👥 Baixas Duplicadas</button>
           <button class="btn btn-outline btn-sm rel-btn admin-only" onclick="mostrarRelatorio('auditoria-estoque',this)">🔍 Auditoria de Saldo × Movimentos</button>
         </div>
 
@@ -8920,7 +8921,9 @@ function renderHistoricoFiltrado(){
       style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border)"
       ${origemExiste?`onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''"`:''}> 
       <div>
-        <div style="font-size:13px;font-weight:600;color:${cor}">${icon} ${label} de ${m.qtd}</div>
+        <div style="font-size:13px;font-weight:600;color:${cor}">${icon} ${label} de ${m.qtd}${
+          (m.saldo_antes!=null && m.saldo_apos!=null) ? `<span style="font-weight:400;color:var(--muted);font-size:12px"> · saldo ${m.saldo_antes} → ${m.saldo_apos}</span>` : ''
+        }${m.pendente ? '<span style="font-weight:400;color:#b45309;font-size:12px"> · PENDENTE</span>' : ''}${m.falhou ? '<span style="font-weight:400;color:#dc2626;font-size:12px"> · FALHOU</span>' : ''}</div>
         <div style="font-size:12px;color:var(--muted)">${m.motivo||''}</div>
         <div style="font-size:11px;color:var(--muted)">${new Date(m.ts).toLocaleString('pt-BR')} · ${m.usuario||''}</div>
       </div>
@@ -10775,8 +10778,45 @@ async function finalizarPedidoBipado(){
   try {
     const p = pedidoSeparacaoAtual;
 
+    // ── Trava de baixa única ──────────────────────────────────────────────
+    // A baixa de um pedido só pode acontecer UMA vez. Sem isso, qualquer
+    // disparo em duplicidade (duas abas com o mesmo pedido aberto, dois
+    // leitores, evento repetido, reinício de bipagem de pedido já concluído)
+    // tira o dobro do estoque. A marca é gravada com transaction() no próprio
+    // pedido: se duas execuções correrem juntas, só a primeira recebe a chave
+    // livre e as demais abortam sem tocar no saldo.
+    const statusSnap = await db.ref('pedidos/'+p.id+'/status').once('value');
+    if(statusSnap.val() === 'CC'){
+      toast(`Pedido #${p.numero} já está concluído — nenhuma baixa foi refeita`,'error');
+      fecharModal('modal-separacao');
+      await renderSeparacao();
+      return;
+    }
+
+    let jaBaixado = false;
+    await db.ref('pedidos/'+p.id+'/baixa_estoque_ts').transaction(atual => {
+      if(atual){ jaBaixado = true; return atual; }
+      return Date.now();
+    });
+    if(jaBaixado){
+      toast(`Pedido #${p.numero} já teve baixa de estoque — nada foi alterado`,'error');
+      fecharModal('modal-separacao');
+      await renderSeparacao();
+      return;
+    }
+
+    // Consolida por código antes de baixar: se o mesmo produto aparecer em mais
+    // de uma linha do pedido, sai um movimento só, com a soma das quantidades.
+    const porCodigo = {};
+    for(const item of (p.itens||[])){
+      if(!item.codigo) continue;
+      if(!porCodigo[item.codigo]) porCodigo[item.codigo] = { codigo:item.codigo, nome:item.nome||'', qtd:0 };
+      porCodigo[item.codigo].qtd += Number(item.qtd)||0;
+    }
+    const itensBaixa = Object.values(porCodigo);
+
     // Dar baixa no estoque de cada item do pedido
-    for(const item of p.itens){
+    for(const item of itensBaixa){
       const prodSnap = await db.ref('produtos/'+item.codigo).once('value');
       if(prodSnap.exists()){
         await movimentarEstoque('produto', item.codigo, { codigo:item.codigo, nome:item.nome, delta:-item.qtd,
@@ -10785,7 +10825,7 @@ async function finalizarPedidoBipado(){
     }
 
     // Libera a reserva, já que a baixa física definitiva acabou de ser feita
-    await liberarReservaEstoquePedido(p.itens);
+    await liberarReservaEstoquePedido(itensBaixa);
 
     // Finalizar pedido
     await db.ref('pedidos/'+p.id).update({
@@ -13742,7 +13782,7 @@ function mostrarRelatorio(tipo, btnEl){
     tipo === 'estoque-minimo' ? 'flex' : 'none';
   // Diagnóstico de Consumo não usa período/vendedor/agrupamento — esconde só esses campos,
   // mantendo visíveis os botões Gerar/Excel que ficam no mesmo container
-  const escondePeriodoVendedorAgrupar = ['diagnostico-consumo','mrp','comissionamento','sugestao-compra','recalc-estoque-minimo','auditoria-estoque'].includes(tipo);
+  const escondePeriodoVendedorAgrupar = ['diagnostico-consumo','mrp','comissionamento','sugestao-compra','recalc-estoque-minimo','auditoria-estoque','baixas-duplicadas'].includes(tipo);
   document.querySelector('#rel-filtros .filtro-group:nth-child(1)').style.display = escondePeriodoVendedorAgrupar ? 'none' : '';
   document.querySelector('#rel-filtros .filtro-group:nth-child(2)').style.display = escondePeriodoVendedorAgrupar ? 'none' : '';
 
@@ -13768,6 +13808,7 @@ async function gerarRelatorio(){
   // carregá-la aqui seria uma leitura pesada e inútil no Firebase.
   if(tipo === 'sugestao-compra'){ await relSugestaoCompra(el); return; }
   if(tipo === 'recalc-estoque-minimo'){ await relRecalcEstoqueMinimo(el); return; }
+  if(tipo === 'baixas-duplicadas'){ await relBaixasDuplicadas(el); return; }
   if(tipo === 'auditoria-estoque'){ await relAuditoriaEstoque(el); return; }
 
   el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:40px">⏳ Carregando...</div>';
@@ -15678,6 +15719,114 @@ async function desfazerRecalcEstoqueMinimo(){
 let AUDITORIA_LISTA = [];
 const RX_BALANCO = /^Balan[çc]o:\s*(-?\d+(?:[.,]\d+)?)\s*(?:→|->)\s*(-?\d+(?:[.,]\d+)?)/;
 
+// ── Baixas Duplicadas por Pedido ──
+// A Auditoria de Saldo × Movimentos NÃO enxerga este caso: quando a baixa roda duas
+// vezes, o movimento extra também fica gravado, então saldo e histórico batem entre si
+// — os dois errados pelo mesmo valor. Aqui a checagem é outra: a baixa de bipagem de um
+// pedido deve existir UMA vez por produto. Duas ou mais é baixa repetida.
+// Ajustes de edição e estornos de cancelamento têm motivo próprio e ficam de fora.
+let BAIXAS_DUP_LISTA = [];
+const RX_BAIXA_PEDIDO = /^Pedido #\d+\s+—/;
+
+async function relBaixasDuplicadas(el){
+  el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">Analisando movimentos...</div>';
+  const snap = await db.ref('movimentos_estoque').once('value');
+  const movs = snap.val() || {};
+
+  const grupos = {};
+  for(const [key, m] of Object.entries(movs)){
+    if(!m || m.tipo !== 'saida' || m.origem_tipo !== 'pedido' || !m.origem_id) continue;
+    if(!RX_BAIXA_PEDIDO.test(String(m.motivo||''))) continue; // só a baixa da bipagem
+    if(m.corrigido) continue;                                  // já acertado antes
+    const g = m.origem_id + '|' + m.codigo;
+    (grupos[g] = grupos[g] || []).push({ ...m, key });
+  }
+
+  BAIXAS_DUP_LISTA = Object.values(grupos)
+    .filter(lista => lista.length > 1)
+    .map(lista => {
+      lista.sort((a,b)=>(a.ts||0)-(b.ts||0));
+      const extras = lista.slice(1);
+      return {
+        origem_id: lista[0].origem_id,
+        codigo: lista[0].codigo,
+        nome: lista[0].nome || '',
+        motivo: lista[0].motivo || '',
+        vezes: lista.length,
+        qtd_unitaria: Number(lista[0].qtd)||0,
+        excedente: extras.reduce((sm,m)=>sm+(Number(m.qtd)||0), 0),
+        ts: lista[0].ts,
+        usuario: lista[0].usuario || '',
+        keysExtras: extras.map(m=>m.key)
+      };
+    })
+    .sort((a,b)=>(b.ts||0)-(a.ts||0));
+
+  if(!BAIXAS_DUP_LISTA.length){
+    el.innerHTML = '<div style="padding:24px;background:#dcfce7;border-radius:10px;color:#166534;text-align:center">✅ Nenhuma baixa duplicada encontrada.</div>';
+    relatorioCache = null;
+    return;
+  }
+
+  const totalExced = BAIXAS_DUP_LISTA.reduce((sm,g)=>sm+g.excedente,0);
+  el.innerHTML = `
+    <div style="padding:14px;background:#fef3c7;border:1px solid #f59e0b;border-radius:10px;color:#92400e;margin-bottom:14px;font-size:13.5px">
+      ⚠️ <strong>${BAIXAS_DUP_LISTA.length}</strong> baixa(s) repetida(s) — faltam <strong>${totalExced}</strong> unidade(s) no estoque no total.<br>
+      A correção lança uma entrada de ajuste para cada linha, devolvendo o excedente. O histórico fica registrado, nada é apagado.
+    </div>
+    <div style="margin-bottom:12px">
+      <button class="btn btn-primary btn-sm" onclick="corrigirBaixasDuplicadas()">✅ Corrigir todas (${BAIXAS_DUP_LISTA.length})</button>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+      <tr style="background:var(--border)">
+        <th style="padding:7px;text-align:left">Código</th><th style="padding:7px;text-align:left">Produto</th>
+        <th style="padding:7px;text-align:left">Origem</th><th style="padding:7px;text-align:center">Vezes</th>
+        <th style="padding:7px;text-align:right">Baixa</th><th style="padding:7px;text-align:right">A devolver</th>
+        <th style="padding:7px;text-align:left">Quando</th>
+      </tr>
+      ${BAIXAS_DUP_LISTA.map(g=>`
+        <tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:7px"><strong>${esc(g.codigo)}</strong></td>
+          <td style="padding:7px">${esc(String(g.nome).substring(0,32))}</td>
+          <td style="padding:7px">${esc(String(g.motivo).substring(0,40))}</td>
+          <td style="padding:7px;text-align:center;color:#dc2626;font-weight:700">${g.vezes}×</td>
+          <td style="padding:7px;text-align:right">${g.qtd_unitaria}</td>
+          <td style="padding:7px;text-align:right;font-weight:700">+${g.excedente}</td>
+          <td style="padding:7px">${g.ts?new Date(g.ts).toLocaleString('pt-BR'):'—'}${g.usuario?' · '+esc(g.usuario):''}</td>
+        </tr>`).join('')}
+    </table>`;
+  relatorioCache = { tipo:'baixas-duplicadas', lista: BAIXAS_DUP_LISTA };
+}
+
+async function corrigirBaixasDuplicadas(){
+  if(!usuarioLogado || !usuarioLogado.admin){ toast('Ação restrita a administradores','error'); return; }
+  if(!BAIXAS_DUP_LISTA.length) return;
+  const total = BAIXAS_DUP_LISTA.reduce((sm,g)=>sm+g.excedente,0);
+  if(!confirm(`Devolver ${total} unidade(s) ao estoque, em ${BAIXAS_DUP_LISTA.length} lançamento(s) de ajuste?\n\nCada movimento duplicado fica marcado como corrigido e não aparece mais neste relatório. Nada é apagado do histórico.`)) return;
+
+  let ok = 0, erros = 0;
+  for(const g of BAIXAS_DUP_LISTA){
+    try {
+      const prodSnap = await db.ref('produtos/'+g.codigo).once('value');
+      if(!prodSnap.exists()){ erros++; continue; }
+      await movimentarEstoque('produto', g.codigo, {
+        codigo: g.codigo, nome: g.nome, delta: g.excedente,
+        motivo: `Correção de baixa duplicada — ${g.motivo}`,
+        origemTipo: 'pedido', origemId: g.origem_id
+      });
+      // marca os movimentos excedentes para não reaparecerem na próxima análise
+      for(const k of g.keysExtras){
+        await db.ref('movimentos_estoque/'+k+'/corrigido').set(Date.now());
+      }
+      ok++;
+    } catch(e){ console.error(e); erros++; }
+  }
+  await carregarProdutosFirebase();
+  toast(`✓ ${ok} correção(ões) aplicada(s)${erros?` · ${erros} com erro`:''}`, erros?'error':'success');
+  const el = document.getElementById('relatorio-conteudo') || document.querySelector('#rel-conteudo');
+  if(el) await relBaixasDuplicadas(el);
+}
+
 async function relAuditoriaEstoque(el){
   el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px">⏳ Lendo movimentos e conferindo saldo item a item...</div>';
 
@@ -16053,6 +16202,7 @@ function exportarRelatorioExcel(){
     case 'vendas-produto': dados = lista.map(g=>({'Código':g.cod,'Produto':g.nome,'Qtd':g.qtd,'Total':g.total})); break;
     case 'compras-fornecedor': dados = lista.map(g=>({'Fornecedor':g.nome,'Pedidos':g.qtd,'Total':g.total})); break;
     case 'estoque-posicao': dados = lista.map(g=>({'Tipo':g.tipo||'','Código':g.codigo,'Produto/Insumo':g.nome,'Estoque':g.estoque,'Reservado':g.tipo==='Insumo'?'':g.reservado,'Disponível':g.disponivel,'Mínimo':g.minimo})); break;
+    case 'baixas-duplicadas': dados = lista.map(g=>({'Código':g.codigo,'Produto':g.nome,'Origem':g.motivo,'Vezes':g.vezes,'Qtd da baixa':g.qtd_unitaria,'A devolver':g.excedente,'Quando':g.ts?new Date(g.ts).toLocaleString('pt-BR'):'','Usuário':g.usuario})); break;
     case 'auditoria-estoque': dados = lista.map(g=>({'Tipo':g.tipo,'Código':g.codigo,'Produto/Insumo':g.nome,'Saldo Atual':g.saldo,'Saldo Esperado':g.esperado,'Diferença':g.dif,'Movimentos após o balanço':g.aplicados,'Último balanço':g.desdeTs?new Date(g.desdeTs).toLocaleDateString('pt-BR'):''})); break;
     case 'sugestao-compra': dados = lista.map(g=>({'Tipo':g.tipo||'—','Código':g.codigo,'Produto/Insumo':g.nome,'Fornecedor':g.fornecedor,'CMD':Number(g.cmd.toFixed(3)),'Lead Time (dias)':g.leadTime,'Disponível':g.disponivel,'Em Trânsito':g.emTransito,'Estoque Mínimo':g.es,'Nec. Produção':g.origem==='receita'?Number(g.necessidade.toFixed(2)):'','Ponto de Pedido':g.pontoPedido===null?'':Number(g.pontoPedido.toFixed(2)),'Cobertura (dias)':isFinite(g.cobertura)?Math.floor(g.cobertura):'','Sugestão de Compra':g.sugestao})); break;
     case 'estoque-minimo': return exportarRelatorioExcelEstoqueMinimo(lista);
