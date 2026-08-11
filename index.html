@@ -5813,7 +5813,7 @@ function renderItens(){
       <input type="number" min="1" value="${item.qtd}" onchange="atualizarQtd(${idx},this.value)">
       <input type="number" ${usuarioLogado?.admin?'':`min="${piso}"`} step="0.01" value="${item.preco.toFixed(2)}" onchange="atualizarPreco(${idx},this.value)" title="${usuarioLogado?.admin?'Admin: sem restrição de preço mínimo':'Mín: R$ '+piso.toFixed(2)}">
       <span style="display:flex;gap:3px;align-items:center;min-width:0">
-        <input type="number" min="0" step="0.01" value="${Math.round(((item.desc_modo==='R$')?(item.desc_valor!=null?item.desc_valor:(item.preco*(item.desconto_item||0)/100)):(item.desconto_item||0))*100)/100}" onchange="atualizarDescItem(${idx},this.value)" placeholder="0" style="min-width:0;width:100%" title="Desconto por ${item.desc_modo==='R$'?'valor (R$/unid)':'percentual (%)'}">
+        <input type="number" min="0" step="0.01" value="${Math.round(((item.desc_modo==='R$')?(item.desc_valor!=null?item.desc_valor:(item.preco*(item.desconto_item||0)/100)):(item.desconto_item||0))*100)/100}" onchange="atualizarDescItem(${idx},this.value)" placeholder="0" ${(itemPrecoFechado(item)&&!usuarioLogado?.admin)?'readonly style="min-width:0;width:100%;background:#f1f5f9;color:var(--muted);cursor:not-allowed"':'style="min-width:0;width:100%"'} title="${(itemPrecoFechado(item)&&!usuarioLogado?.admin)?'Preço fechado na campanha — não aceita desconto':'Desconto por '+(item.desc_modo==='R$'?'valor (R$/unid)':'percentual (%)')}">
         <button type="button" onclick="toggleModoDescItem(${idx})" title="Alternar % / R$" style="flex:0 0 auto;padding:2px 5px;font-size:11px;font-weight:700;border:1px solid var(--border);border-radius:5px;background:var(--card);cursor:pointer;color:var(--accent);line-height:1.4">${item.desc_modo==='R$'?'R$':'%'}</button>
       </span>
       <span><strong>${fmtMoeda(item.qtd*item.preco*(1-(item.desconto_item||0)/100))}</strong></span>
@@ -5856,9 +5856,21 @@ function atualizarDescItem(idx, val){
 
   // Item com preço de campanha aplicado: o piso passa a ser o menor entre o mínimo
   // do cadastro e o preço promocional (ver pisoItem).
-  const pisoDescEfetivo = (item.promo_ativa && Number(item.promo_preco) > 0)
-    ? Math.min(precoMinimoAtual, Number(item.promo_preco))
-    : precoMinimoAtual;
+  // Sincroniza com o mínimo vigente do cadastro e usa o MESMO piso do resto do
+  // sistema (pisoItem), que já trata item de campanha e item de preço fechado.
+  item.preco_minimo = precoMinimoAtual;
+  const pisoDescEfetivo = pisoItem(item);
+
+  // Preço fechado não aceita desconto nenhum — avisa direto em vez de deixar
+  // o vendedor digitar e só ser barrado na hora de salvar.
+  if(!usuarioLogado?.admin && itemPrecoFechado(item) && desconto > 0){
+    alert(`"${item.nome}" está com preço fechado na campanha ${item.promo_campanha||''} — o preço de ${fmtMoeda(item.preco)} é final e não aceita desconto, nem à vista.`);
+    item.desconto_item = 0;
+    item.desc_valor = 0;
+    renderItens();
+    return;
+  }
+
   if(!usuarioLogado?.admin && pisoDescEfetivo > 0){
     const precoComDesconto = Math.round(item.preco * (1 - desconto/100) * 100) / 100;
     const minimoArredondado = Math.round(pisoDescEfetivo * 100) / 100;
