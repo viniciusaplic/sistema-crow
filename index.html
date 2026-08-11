@@ -1083,8 +1083,8 @@ tbody td{padding:11px 16px;font-size:14px}
             <div class="form-group"><label>Fim da vigência</label><input type="date" id="camp-fim" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:8px;box-sizing:border-box"></div>
           </div>
           <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:6px 0 8px">📋 Itens da campanha — uma linha por item</div>
-          <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Formato: <code>código;preço promocional;quantidade mínima</code> — dá para colar direto de uma planilha.<br>Exemplo: <code>1042;18,90;12</code></div>
-          <textarea id="camp-itens" rows="7" placeholder="1042;18,90;12&#10;1055;24,50;6&#10;2031;9,90;24" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:8px;box-sizing:border-box;font-family:monospace;resize:vertical"></textarea>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Formato: <code>código;preço promocional;quantidade mínima</code> — dá para colar direto de uma planilha.<br>Para faixas de quantidade, repita o código numa linha por faixa. Vale sempre a maior faixa atingida.<br>Exemplo: <code>1042;10,00;6</code> e <code>1042;8,50;12</code></div>
+          <textarea id="camp-itens" rows="7" placeholder="1042;10,00;6&#10;1042;8,50;12&#10;1055;24,50;6" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:8px;box-sizing:border-box;font-family:monospace;resize:vertical"></textarea>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-primary btn-sm" onclick="adminSalvarCampanha()">💾 Salvar campanha</button>
             <button class="btn btn-outline btn-sm" onclick="limparFormCampanha()">Limpar formulário</button>
@@ -5187,10 +5187,18 @@ function pisoItem(item){
   return pm;
 }
 
-function itemDaCampanha(camp, codigo){
-  return ((camp && camp.itens) || []).find(x => String(x.codigo) === String(codigo)) || null;
+// Faixas de quantidade do item, da menor para a maior.
+// Um mesmo código pode ter várias linhas na campanha: 6 un. a R$ 10,00 e
+// 12 un. a R$ 8,50, por exemplo. Vale sempre a maior faixa já atingida.
+function faixasCampanha(camp, codigo){
+  return ((camp && camp.itens) || [])
+    .filter(x => String(x.codigo) === String(codigo) && Number(x.preco) > 0)
+    .map(x => ({ preco: Number(x.preco), qtd_minima: Number(x.qtd_minima) || 0 }))
+    .sort((a,b) => a.qtd_minima - b.qtd_minima);
 }
 
+// Aplica ou remove os preços de campanha no pedido em edição.
+// Retorna true se mudou alguma coisa (aí a tela precisa ser redesenhada).
 // Aplica ou remove os preços de campanha no pedido em edição.
 // Retorna true se mudou alguma coisa (aí a tela precisa ser redesenhada).
 function aplicarCampanhaPedido(){
@@ -5215,25 +5223,25 @@ function aplicarCampanhaPedido(){
     return mudou;
   }
 
-  // 1) quem já bateu a quantidade mínima do item
+  // 1) para cada item, a maior faixa já atingida e a próxima faixa a alcançar
   const candidatos = new Map();
   const faltando = new Map();
   for(const it of itens){
-    const ci = itemDaCampanha(camp, it.codigo);
-    if(!ci) continue;
-    const pp = Number(ci.preco) || 0;
-    if(!(pp > 0)) continue;
-    const qmin = Number(ci.qtd_minima) || 0;
-    const qtd  = Number(it.qtd) || 0;
-    if(qtd < qmin) faltando.set(it.codigo, qmin - qtd);
-    else if(!it.promo_override) candidatos.set(it.codigo, pp);
+    const faixas = faixasCampanha(camp, it.codigo);
+    if(!faixas.length) continue;
+    const qtd = Number(it.qtd) || 0;
+    const atingidas = faixas.filter(f => qtd >= f.qtd_minima);
+    const aplicavel = atingidas.length ? atingidas[atingidas.length-1] : null;
+    const proxima = faixas.find(f => qtd < f.qtd_minima) || null;
+    if(aplicavel && !it.promo_override) candidatos.set(it.codigo, aplicavel);
+    if(proxima) faltando.set(it.codigo, { falta: proxima.qtd_minima - qtd, preco: proxima.preco });
   }
 
   // 2) subtotal do pedido já com os preços promocionais dos candidatos
   let subPromo = 0;
   for(const it of itens){
     const base = candidatos.has(it.codigo)
-      ? candidatos.get(it.codigo)
+      ? candidatos.get(it.codigo).preco
       : ((it.promo_ativa && it.preco_pre_promo != null) ? Number(it.preco_pre_promo) : (Number(it.preco)||0));
     subPromo += (Number(it.qtd)||0) * base * (1 - (Number(it.desconto_item)||0)/100);
   }
@@ -5243,14 +5251,13 @@ function aplicarCampanhaPedido(){
   const liberado = candidatos.size > 0 && subPromo >= minimoPedido - 0.001;
 
   for(const it of itens){
-    const alvo = (liberado && candidatos.has(it.codigo)) ? candidatos.get(it.codigo) : null;
-    if(alvo != null){
+    const faixa = (liberado && candidatos.has(it.codigo)) ? candidatos.get(it.codigo) : null;
+    if(faixa){
       if(!it.promo_ativa){ it.preco_pre_promo = Number(it.preco)||0; it.promo_ativa = true; mudou = true; }
-      if(Math.abs((Number(it.preco)||0) - alvo) > 0.0001){ it.preco = alvo; mudou = true; }
-      it.promo_preco = alvo;
+      if(Math.abs((Number(it.preco)||0) - faixa.preco) > 0.0001){ it.preco = faixa.preco; mudou = true; }
+      it.promo_preco = faixa.preco;
       it.promo_campanha = camp.nome || '';
-      const ciq = itemDaCampanha(camp, it.codigo);
-      it.promo_qtd_minima = Number(ciq && ciq.qtd_minima) || 0;
+      it.promo_qtd_minima = faixa.qtd_minima;
     } else if(restaurar(it)) mudou = true;
   }
 
@@ -5261,17 +5268,22 @@ function aplicarCampanhaPedido(){
 }
 
 // Selo mostrado na linha do item dentro do pedido
+// Selo mostrado na linha do item dentro do pedido. Um item pode ter dois:
+// o preço de campanha que já ganhou e o convite para a próxima faixa.
 function seloCampanhaItem(item){
   const ctx = pedidoAtual && pedidoAtual._campanha_ctx;
   const base = 'display:inline-block;border-radius:4px;padding:1px 5px;font-size:10px;font-weight:700;margin-left:5px;white-space:nowrap';
-  if(item && item.promo_ativa)
-    return `<span style="${base};background:#dcfce7;color:#166534">🏷️ ${esc((ctx&&ctx.nome)||item.promo_campanha||'campanha')}</span>`;
-  if(item && item.promo_override)
-    return `<span style="${base};background:#e5e7eb;color:#4b5563">preço manual</span>`;
-  const falta = ctx && ctx.faltando ? ctx.faltando.get(item.codigo) : null;
-  if(falta > 0)
-    return `<span style="${base};background:#fef3c7;color:#92400e">faltam ${falta} un. p/ o preço do jornal</span>`;
-  return '';
+  let html = '';
+  if(item && item.promo_ativa){
+    const faixa = Number(item.promo_qtd_minima) > 0 ? ` ${item.promo_qtd_minima}+` : '';
+    html += `<span style="${base};background:#dcfce7;color:#166534">🏷️ ${esc((ctx&&ctx.nome)||item.promo_campanha||'campanha')}${faixa}</span>`;
+  } else if(item && item.promo_override){
+    html += `<span style="${base};background:#e5e7eb;color:#4b5563">preço manual</span>`;
+  }
+  const prox = ctx && ctx.faltando ? ctx.faltando.get(item.codigo) : null;
+  if(prox && prox.falta > 0 && !(item && item.promo_override))
+    html += `<span style="${base};background:#fef3c7;color:#92400e">+${prox.falta} un. → ${fmtMoeda(prox.preco)}</span>`;
+  return html;
 }
 
 function renderCampanhaStatus(){
@@ -5315,9 +5327,23 @@ function parseItensCampanha(txt){
     if(!codigo){ erros.push(`${l} — código vazio`); continue; }
     if(!(preco > 0)){ erros.push(`${l} — preço inválido`); continue; }
     if(!(qmin > 0)){ erros.push(`${l} — quantidade mínima inválida`); continue; }
-    if(vistos.has(codigo)){ erros.push(`${l} — código repetido na lista`); continue; }
-    vistos.add(codigo);
+    // O mesmo código pode aparecer em várias faixas de quantidade, mas não pode
+    // ter duas linhas com a MESMA quantidade mínima (aí não dá pra saber qual vale).
+    const chave = codigo + '|' + qmin;
+    if(vistos.has(chave)){ erros.push(`${l} — já existe outra linha do código ${codigo} com quantidade mínima ${qmin}`); continue; }
+    vistos.add(chave);
     itens.push({ codigo, preco: Math.round(preco*100)/100, qtd_minima: qmin });
+  }
+  // Faixa maior tem que ter preço menor — se estiver ao contrário é quase certo erro de digitação
+  const porCodigo = {};
+  for(const i of itens){ (porCodigo[i.codigo] = porCodigo[i.codigo] || []).push(i); }
+  for(const cod of Object.keys(porCodigo)){
+    const f = porCodigo[cod].slice().sort((a,b)=>a.qtd_minima-b.qtd_minima);
+    for(let k=1;k<f.length;k++){
+      if(f[k].preco >= f[k-1].preco){
+        erros.push(`código ${cod} — ${f[k].qtd_minima} un. a ${f[k].preco.toFixed(2)} não é mais barato que ${f[k-1].qtd_minima} un. a ${f[k-1].preco.toFixed(2)}`);
+      }
+    }
   }
   return { itens, erros };
 }
@@ -5373,7 +5399,7 @@ async function adminSalvarCampanha(){
     await carregarCampanhasFirebase();
     limparFormCampanha();
     renderAdminCampanhas();
-    el.innerHTML = `<span style="color:#16a34a">✓ Campanha salva com ${r.itens.length} item(ns).</span>`;
+    el.innerHTML = `<span style="color:#16a34a">✓ Campanha salva: ${new Set(r.itens.map(i=>i.codigo)).size} item(ns) em ${r.itens.length} faixa(s) de quantidade.</span>`;
   } catch(e){ erro('Erro ao salvar: ' + e.message); }
 }
 
@@ -5430,7 +5456,7 @@ function renderAdminCampanhas(){
         : (vigente ? '<span style="color:#16a34a">● vigente</span>' : '<span style="color:var(--muted)">● fora da vigência</span>');
       return `<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px">
         <div style="font-weight:700">${esc(c.nome||'(sem nome)')} ${situacao}</div>
-        <div style="color:var(--muted);font-size:12px;margin-top:2px">${esc(c.data_inicio||'?')} a ${esc(c.data_fim||'?')} · pedido mínimo ${fmtMoeda(Number(c.pedido_minimo)||0)} · ${(c.itens||[]).length} item(ns)</div>
+        <div style="color:var(--muted);font-size:12px;margin-top:2px">${esc(c.data_inicio||'?')} a ${esc(c.data_fim||'?')} · pedido mínimo ${fmtMoeda(Number(c.pedido_minimo)||0)} · ${new Set((c.itens||[]).map(i=>i.codigo)).size} item(ns) em ${(c.itens||[]).length} faixa(s)</div>
         <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
           <button class="btn btn-outline btn-sm" onclick="adminEditarCampanha('${c.id}')">✏️ Editar</button>
           <button class="btn btn-outline btn-sm" onclick="adminToggleCampanha('${c.id}')">${c.ativa===false?'▶️ Ativar':'⏸️ Desativar'}</button>
