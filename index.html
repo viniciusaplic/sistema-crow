@@ -4574,7 +4574,7 @@ async function clonarPedido(id){
     // tabela e deixa a campanha vigente (se houver) ser reavaliada do zero.
     if(i.promo_ativa && i.preco_pre_promo != null) i.preco = Number(i.preco_pre_promo);
     delete i.promo_ativa; delete i.promo_preco; delete i.preco_pre_promo;
-    delete i.promo_campanha; delete i.promo_qtd_minima; delete i.promo_override;
+    delete i.promo_campanha; delete i.promo_qtd_minima; delete i.promo_override; delete i.promo_sem_desconto;
     return i;
   });
 
@@ -5195,6 +5195,9 @@ function campanhaCongeladaPara(p){
 // mínimo do cadastro, o desconto geral ainda pode descer até o mínimo; se o
 // promocional já é o mais baixo, ele vira o piso e não desce mais.
 function pisoItem(item){
+  // Preço fechado: o promocional é o piso, não desce nem por desconto de item
+  if(item && item.promo_ativa && item.promo_sem_desconto && Number(item.promo_preco) > 0)
+    return Number(item.promo_preco);
   const pm = Number(item && item.preco_minimo) || 0;
   if(pm <= 0) return 0;
   if(item && item.promo_ativa && Number(item.promo_preco) > 0) return Math.min(pm, Number(item.promo_preco));
@@ -5204,10 +5207,13 @@ function pisoItem(item){
 // Faixas de quantidade do item, da menor para a maior.
 // Um mesmo código pode ter várias linhas na campanha: 6 un. a R$ 10,00 e
 // 12 un. a R$ 8,50, por exemplo. Vale sempre a maior faixa já atingida.
+// Faixas de quantidade do item, da menor para a maior.
+// Um mesmo código pode ter várias linhas na campanha: 6 un. a R$ 10,00 e
+// 12 un. a R$ 8,50, por exemplo. Vale sempre a maior faixa já atingida.
 function faixasCampanha(camp, codigo){
   return ((camp && camp.itens) || [])
     .filter(x => String(x.codigo) === String(codigo) && Number(x.preco) > 0)
-    .map(x => ({ preco: Number(x.preco), qtd_minima: Number(x.qtd_minima) || 0 }))
+    .map(x => ({ preco: Number(x.preco), qtd_minima: Number(x.qtd_minima) || 0, sem_desconto: !!x.sem_desconto }))
     .sort((a,b) => a.qtd_minima - b.qtd_minima);
 }
 
@@ -5226,7 +5232,7 @@ function aplicarCampanhaPedido(){
     if(it.preco_pre_promo != null) it.preco = Number(it.preco_pre_promo);
     it.promo_ativa = false;
     delete it.promo_preco; delete it.preco_pre_promo;
-    delete it.promo_campanha; delete it.promo_qtd_minima;
+    delete it.promo_campanha; delete it.promo_qtd_minima; delete it.promo_sem_desconto;
     return true;
   };
 
@@ -5252,13 +5258,6 @@ function aplicarCampanhaPedido(){
   }
 
   // 2) subtotal do pedido já com os preços promocionais dos candidatos
-  let subPromo = 0;
-  for(const it of itens){
-    const base = candidatos.has(it.codigo)
-      ? candidatos.get(it.codigo).preco
-      : ((it.promo_ativa && it.preco_pre_promo != null) ? Number(it.preco_pre_promo) : (Number(it.preco)||0));
-    subPromo += (Number(it.qtd)||0) * base * (1 - (Number(it.desconto_item)||0)/100);
-  }
 
   // 3) desconta os descontos gerais e só então testa contra o pedido mínimo.
   // Mesmo à vista o cliente precisa fechar o mínimo: o valor conferido é o que ele
@@ -5268,7 +5267,16 @@ function aplicarCampanhaPedido(){
   const dvEl_c = document.getElementById('desc-geral-valor');
   const dgCamp = Math.max(0, parseFloat(dgEl_c && dgEl_c.value) || 0);
   const dvCamp = Math.max(0, parseFloat(dvEl_c && dvEl_c.value) || 0);
-  const totalPromo = Math.max(0, subPromo * (1 - dgCamp/100) - dvCamp);
+  // Itens de preço fechado não recebem o desconto geral, então entram inteiros na conta
+  let fixaPromo = 0, descPromo = 0;
+  for(const it of itens){
+    const cand = candidatos.get(it.codigo);
+    const base = cand ? cand.preco
+      : ((it.promo_ativa && it.preco_pre_promo != null) ? Number(it.preco_pre_promo) : (Number(it.preco)||0));
+    const v = (Number(it.qtd)||0) * base * (1 - (Number(it.desconto_item)||0)/100);
+    if(cand && cand.sem_desconto) fixaPromo += v; else descPromo += v;
+  }
+  const totalPromo = fixaPromo + Math.max(0, descPromo * (1 - dgCamp/100) - dvCamp);
 
   const minimoPedido = Number(camp.pedido_minimo) || 0;
   const liberado = candidatos.size > 0 && totalPromo >= minimoPedido - 0.001;
@@ -5281,12 +5289,13 @@ function aplicarCampanhaPedido(){
       it.promo_preco = faixa.preco;
       it.promo_campanha = camp.nome || '';
       it.promo_qtd_minima = faixa.qtd_minima;
+      it.promo_sem_desconto = !!faixa.sem_desconto;
     } else if(restaurar(it)) mudou = true;
   }
 
   pedidoAtual.campanha_id   = liberado ? camp.id : null;
   pedidoAtual.campanha_nome = liberado ? (camp.nome||'') : null;
-  pedidoAtual._campanha_ctx = { nome: camp.nome||'', minimo: minimoPedido, sub: totalPromo, bruto: subPromo, desconto: subPromo - totalPromo, liberado, candidatos: candidatos.size, faltando };
+  pedidoAtual._campanha_ctx = { nome: camp.nome||'', minimo: minimoPedido, sub: totalPromo, bruto: fixaPromo + descPromo, desconto: (fixaPromo + descPromo) - totalPromo, liberado, candidatos: candidatos.size, fechados: [...candidatos.values()].filter(f=>f.sem_desconto).length, faltando };
   return mudou;
 }
 
@@ -5300,6 +5309,8 @@ function seloCampanhaItem(item){
   if(item && item.promo_ativa){
     const faixa = Number(item.promo_qtd_minima) > 0 ? ` ${item.promo_qtd_minima}+` : '';
     html += `<span style="${base};background:#dcfce7;color:#166534">🏷️ ${esc((ctx&&ctx.nome)||item.promo_campanha||'campanha')}${faixa}</span>`;
+    if(item.promo_sem_desconto)
+      html += `<span style="${base};background:#dbeafe;color:#1e40af">preço fechado</span>`;
   } else if(item && item.promo_override){
     html += `<span style="${base};background:#e5e7eb;color:#4b5563">preço manual</span>`;
   }
@@ -5317,7 +5328,8 @@ function renderCampanhaStatus(){
   const temItemDaCampanha = ctx.candidatos > 0 || (ctx.faltando && ctx.faltando.size > 0);
   if(!temItemDaCampanha){ el.innerHTML = ''; return; }
   if(ctx.liberado){
-    el.innerHTML = `<div style="background:#dcfce7;border:1px solid #16a34a;color:#166534;border-radius:8px;padding:9px 12px;font-size:13px">🏷️ <strong>${esc(ctx.nome)}</strong> aplicada — ${ctx.candidatos} item(ns) com preço promocional.</div>`;
+    const fech = ctx.fechados > 0 ? ` ${ctx.fechados} deles com preço fechado (fora do desconto geral).` : '';
+    el.innerHTML = `<div style="background:#dcfce7;border:1px solid #16a34a;color:#166534;border-radius:8px;padding:9px 12px;font-size:13px">🏷️ <strong>${esc(ctx.nome)}</strong> aplicada — ${ctx.candidatos} item(ns) com preço promocional.${fech}</div>`;
   } else {
     const falta = Math.max(0, ctx.minimo - ctx.sub);
     let detalhe = ctx.candidatos > 0
@@ -5436,7 +5448,7 @@ function adminEditarCampanha(id){
   document.getElementById('camp-inicio').value = c.data_inicio || '';
   document.getElementById('camp-fim').value    = c.data_fim || '';
   document.getElementById('camp-itens').value  = (c.itens||[])
-    .map(i=>`${i.codigo};${String(Number(i.preco).toFixed(2)).replace('.',',')};${i.qtd_minima}`).join('\n');
+    .map(i=>`${i.codigo};${String(Number(i.preco).toFixed(2)).replace('.',',')};${i.qtd_minima}${i.sem_desconto?';F':''}`).join('\n');
   document.getElementById('admin-campanha-result').innerHTML =
     `<span style="color:var(--muted)">Editando "${esc(c.nome||'')}" — salvar substitui a campanha.</span>`;
   document.getElementById('camp-nome').scrollIntoView({behavior:'smooth', block:'center'});
@@ -5900,7 +5912,7 @@ function atualizarPreco(idx,val){
     item.promo_override = true;
     item.promo_ativa = false;
     delete item.promo_preco; delete item.preco_pre_promo;
-    delete item.promo_campanha; delete item.promo_qtd_minima;
+    delete item.promo_campanha; delete item.promo_qtd_minima; delete item.promo_sem_desconto;
   }
   item.preco=v; renderItens(); calcularParcelas();
 }
@@ -5910,12 +5922,33 @@ function getDescValor(){ return Math.max(0, parseFloat(document.getElementById('
 function calcSubtotal(){
   return pedidoAtual.itens.reduce((s,i)=>s+i.qtd*i.preco*(1-(i.desconto_item||0)/100),0);
 }
-function calcTotal(){
-  const sub = calcSubtotal();
+// Item de campanha marcado como "preço fechado": o preço promocional é final,
+// não aceita desconto geral nem desconto por item.
+function itemPrecoFechado(it){
+  return !!(it && it.promo_ativa && it.promo_sem_desconto);
+}
+
+// Separa o pedido em duas bases: a parte que aceita desconto geral e a parte
+// de preço fechado. Sem itens fechados, "fixa" é zero e a conta fica idêntica
+// à de sempre.
+function calcBasesDesconto(){
+  let fixa = 0, desc = 0;
+  for(const i of (pedidoAtual?.itens || [])){
+    const v = (Number(i.qtd)||0) * (Number(i.preco)||0) * (1-(Number(i.desconto_item)||0)/100);
+    if(itemPrecoFechado(i)) fixa += v; else desc += v;
+  }
+  return { fixa, desc, sub: fixa + desc };
+}
+
+function calcTotalSemCredito(){
+  const b = calcBasesDesconto();
   const dg = parseFloat(document.getElementById('desc-geral')?.value)||0;
   const dv = getDescValor();
-  const totalComDesconto = Math.max(0, sub * (1 - dg/100) - dv);
-  return Math.max(0, totalComDesconto - (pedidoAtual.credito_aplicado||0));
+  return b.fixa + Math.max(0, b.desc * (1 - dg/100) - dv);
+}
+
+function calcTotal(){
+  return Math.max(0, calcTotalSemCredito() - (pedidoAtual.credito_aplicado||0));
 }
 
 // Última trava antes de salvar — confere TODOS os itens do pedido (já com desconto de
@@ -5926,13 +5959,14 @@ function validarPedidoPrecosMinimos(){
   if(usuarioLogado?.admin) return null; // admin pode vender abaixo do mínimo
   const dg = parseFloat(document.getElementById('desc-geral')?.value) || 0;
   const dv = getDescValor();
-  const sub = calcSubtotal();
-  const mult = sub > 0 ? ((1 - dg/100) - dv/sub) : (1 - dg/100);
+  const b = calcBasesDesconto();
+  const mult = b.desc > 0 ? ((1 - dg/100) - dv/b.desc) : (1 - dg/100);
   for(const item of pedidoAtual.itens){
     const piso = pisoItem(item);
     if(!(piso > 0)) continue;
     const precoComDescItem = item.preco * (1-(item.desconto_item||0)/100);
-    const precoFinal = precoComDescItem * mult;
+    // Item de preço fechado fica fora do desconto geral, então o preço dele não muda
+    const precoFinal = itemPrecoFechado(item) ? precoComDescItem : precoComDescItem * mult;
     if(precoFinal < piso - 0.001){ // pequena tolerância pra arredondamento
       return { item, precoFinal, piso };
     }
@@ -5956,10 +5990,11 @@ function atualizarTotais(){
     const dvEl = document.getElementById('desc-geral-valor');
     const dg = parseFloat(dgEl.value)||0;
     const dv = Math.max(0, parseFloat(dvEl?.value)||0);
-    const subG = calcSubtotal();
+    const subG = calcBasesDesconto().desc;
     if((dg > 0 || dv > 0) && subG > 0){
       let multMin = 0, itemCritico = null;
       for(const it of pedidoAtual.itens){
+        if(itemPrecoFechado(it)) continue; // fora do desconto geral, não limita nada
         const pisoIt = pisoItem(it);
         if(!(pisoIt > 0)) continue;
         const pcd = it.preco * (1-(it.desconto_item||0)/100);
@@ -6113,7 +6148,7 @@ async function confirmarPedido(){
   if(pedidoAtual.credito_aplicado > 0){
     const dgAtual = parseFloat(document.getElementById('desc-geral')?.value)||0;
     const dvAtual = getDescValor();
-    const totalSemCredito = Math.max(0, calcSubtotal() * (1 - dgAtual/100) - dvAtual);
+    const totalSemCredito = calcTotalSemCredito();
     if(pedidoAtual.credito_aplicado > totalSemCredito){
       pedidoAtual.credito_aplicado = Math.max(0, totalSemCredito);
       toast(`⚠️ Crédito aplicado ajustado para ${fmtMoeda(pedidoAtual.credito_aplicado)} — não pode passar do valor do pedido`,'error');
@@ -6160,7 +6195,7 @@ async function confirmarPedido(){
   const sub = calcSubtotal();
   const dg = parseFloat(document.getElementById('desc-geral').value)||0;
   const dv = Math.max(0, parseFloat(document.getElementById('desc-geral-valor').value)||0);
-  const total = Math.max(0, Math.max(0, sub*(1-dg/100) - dv) - (pedidoAtual.credito_aplicado||0));
+  const total = calcTotal();
   const dias = condicao==='AVISTA'?[0]:condicao.split('/').map(Number);
   if(dias.length>1 && total/dias.length < 300){
     const ok = await confirmCustom('Parcela abaixo de R$ 300,00. Confirmar mesmo assim?', 'Confirmar');
@@ -6364,7 +6399,7 @@ async function salvarComoOrcamento(){
   if(pedidoAtual.credito_aplicado > 0){
     const dgAtualOrc = parseFloat(document.getElementById('desc-geral')?.value)||0;
     const dvAtualOrc = getDescValor();
-    const totalSemCreditoOrc = Math.max(0, calcSubtotal() * (1 - dgAtualOrc/100) - dvAtualOrc);
+    const totalSemCreditoOrc = calcTotalSemCredito();
     if(pedidoAtual.credito_aplicado > totalSemCreditoOrc){
       pedidoAtual.credito_aplicado = Math.max(0, totalSemCreditoOrc);
       toast(`⚠️ Crédito aplicado ajustado para ${fmtMoeda(pedidoAtual.credito_aplicado)} — não pode passar do valor do orçamento`,'error');
@@ -6375,7 +6410,7 @@ async function salvarComoOrcamento(){
 
   const sub=calcSubtotal(); const dg=parseFloat(document.getElementById('desc-geral').value)||0;
   const dv=Math.max(0, parseFloat(document.getElementById('desc-geral-valor').value)||0);
-  const total=Math.max(0, Math.max(0, sub*(1-dg/100) - dv) - (pedidoAtual.credito_aplicado||0)); const c=pedidoAtual.cliente;
+  const total=calcTotal(); const c=pedidoAtual.cliente;
   try {
     // Editando um orçamento já existente: atualiza o mesmo registro em vez de criar um novo
     const editandoExistente = pedidoAtual.editando && pedidoAtual.id;
