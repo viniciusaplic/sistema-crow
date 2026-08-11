@@ -1093,6 +1093,19 @@ tbody td{padding:11px 16px;font-size:14px}
           <div style="border-top:1px solid var(--border);margin:16px 0"></div>
           <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Campanhas cadastradas</div>
           <div id="admin-campanhas-lista" style="font-size:13px"></div>
+          <div style="border-top:1px solid var(--border);margin:16px 0"></div>
+          <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">⚙️ Ajustar preço mínimo dos itens da campanha</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Baixa o preço mínimo do cadastro dos itens da campanha para que o desconto à vista ainda caiba dentro da trava. Usa sempre a <strong>menor</strong> faixa de preço de cada item como base.</div>
+          <div class="form-row">
+            <div class="form-group"><label>Campanha</label><select id="camp-min-sel" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:8px;box-sizing:border-box"></select></div>
+            <div class="form-group"><label>Folga para desconto (%)</label><input type="number" step="0.1" id="camp-min-margem" value="3" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:8px;box-sizing:border-box"></div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-outline btn-sm" onclick="preverMinimosCampanha()">🔍 Prever</button>
+            <button class="btn btn-primary btn-sm" onclick="aplicarMinimosCampanha()">💾 Aplicar</button>
+            <button class="btn btn-outline btn-sm" onclick="desfazerMinimosCampanha()">↺ Desfazer último ajuste</button>
+          </div>
+          <div id="camp-min-resultado" style="margin-top:12px;font-size:13px;max-height:320px;overflow-y:auto"></div>
         </div>
         <div class="table-wrap" style="padding:24px">
           <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">📚 Catálogo de Produtos</div>
@@ -5137,6 +5150,7 @@ async function carregarHistoricoPrecosCliente(clienteCodigo){
 // ══════════════════════════════════════════════════════════════════════
 let CAMPANHAS_DB = [];
 let _emRenderItens = false;
+let _campanhaPasses = 0;
 
 async function carregarCampanhasFirebase(){
   try {
@@ -5246,9 +5260,18 @@ function aplicarCampanhaPedido(){
     subPromo += (Number(it.qtd)||0) * base * (1 - (Number(it.desconto_item)||0)/100);
   }
 
-  // 3) só agora testa contra o pedido mínimo
+  // 3) desconta os descontos gerais e só então testa contra o pedido mínimo.
+  // Mesmo à vista o cliente precisa fechar o mínimo: o valor conferido é o que ele
+  // realmente vai pagar pela mercadoria. O crédito do cliente NÃO entra na conta —
+  // ele é forma de pagamento (saldo que o cliente já tem), não desconto no preço.
+  const dgEl_c = document.getElementById('desc-geral');
+  const dvEl_c = document.getElementById('desc-geral-valor');
+  const dgCamp = Math.max(0, parseFloat(dgEl_c && dgEl_c.value) || 0);
+  const dvCamp = Math.max(0, parseFloat(dvEl_c && dvEl_c.value) || 0);
+  const totalPromo = Math.max(0, subPromo * (1 - dgCamp/100) - dvCamp);
+
   const minimoPedido = Number(camp.pedido_minimo) || 0;
-  const liberado = candidatos.size > 0 && subPromo >= minimoPedido - 0.001;
+  const liberado = candidatos.size > 0 && totalPromo >= minimoPedido - 0.001;
 
   for(const it of itens){
     const faixa = (liberado && candidatos.has(it.codigo)) ? candidatos.get(it.codigo) : null;
@@ -5263,7 +5286,7 @@ function aplicarCampanhaPedido(){
 
   pedidoAtual.campanha_id   = liberado ? camp.id : null;
   pedidoAtual.campanha_nome = liberado ? (camp.nome||'') : null;
-  pedidoAtual._campanha_ctx = { nome: camp.nome||'', minimo: minimoPedido, sub: subPromo, liberado, candidatos: candidatos.size, faltando };
+  pedidoAtual._campanha_ctx = { nome: camp.nome||'', minimo: minimoPedido, sub: totalPromo, bruto: subPromo, desconto: subPromo - totalPromo, liberado, candidatos: candidatos.size, faltando };
   return mudou;
 }
 
@@ -5297,9 +5320,11 @@ function renderCampanhaStatus(){
     el.innerHTML = `<div style="background:#dcfce7;border:1px solid #16a34a;color:#166534;border-radius:8px;padding:9px 12px;font-size:13px">🏷️ <strong>${esc(ctx.nome)}</strong> aplicada — ${ctx.candidatos} item(ns) com preço promocional.</div>`;
   } else {
     const falta = Math.max(0, ctx.minimo - ctx.sub);
-    const detalhe = ctx.candidatos > 0
+    let detalhe = ctx.candidatos > 0
       ? `Faltam <strong>${fmtMoeda(falta)}</strong> para liberar os preços da campanha.`
       : `Nenhum item atingiu ainda a quantidade mínima da campanha.`;
+    if(ctx.candidatos > 0 && ctx.desconto > 0.009)
+      detalhe += ` O mínimo é conferido depois do desconto geral de ${fmtMoeda(ctx.desconto)}.`;
     el.innerHTML = `<div style="background:#fef3c7;border:1px solid #f59e0b;color:#92400e;border-radius:8px;padding:9px 12px;font-size:13px">🏷️ <strong>${esc(ctx.nome)}</strong> — pedido mínimo de ${fmtMoeda(ctx.minimo)}. ${detalhe}</div>`;
   }
 }
@@ -5442,7 +5467,152 @@ async function adminExcluirCampanha(id){
   } catch(e){ toast('Erro: '+e.message,'error'); }
 }
 
+let LINHAS_MIN_CAMPANHA = [];
+
+function popularSelectCampanhasMinimo(){
+  const sel = document.getElementById('camp-min-sel');
+  if(!sel) return;
+  const anterior = sel.value;
+  sel.innerHTML = '<option value="">Selecione a campanha...</option>' +
+    (CAMPANHAS_DB||[]).map(c=>`<option value="${c.id}">${esc(c.nome||'(sem nome)')}</option>`).join('');
+  if(anterior) sel.value = anterior;
+}
+
+// Monta a lista de ajuste: para cada código da campanha usa a MENOR faixa de preço
+// como base e propõe um mínimo com a folga pedida abaixo dela.
+function calcularMinimosCampanha(){
+  const sel = document.getElementById('camp-min-sel');
+  const camp = (CAMPANHAS_DB||[]).find(c=>c.id === (sel && sel.value));
+  if(!camp) return null;
+  const margem = Math.max(0, parseFloat(document.getElementById('camp-min-margem').value) || 0);
+
+  const menor = {};
+  for(const i of (camp.itens||[])){
+    const p = Number(i.preco) || 0;
+    if(!(p > 0)) continue;
+    if(menor[i.codigo] == null || p < menor[i.codigo]) menor[i.codigo] = p;
+  }
+
+  const linhas = Object.keys(menor).map(cod=>{
+    const prod = PRODUTOS_DB.find(x=>String(x.codigo) === String(cod));
+    // arredonda pra baixo: melhor sobrar folga do que faltar um centavo e travar a venda
+    const sugerido = Math.floor(menor[cod] * (1 - margem/100) * 100) / 100;
+    const atual = prod ? (Number(prod.preco_minimo) || 0) : null;
+    let acao = 'baixar';
+    if(!prod) acao = 'sem_cadastro';
+    else if(atual <= sugerido + 0.0001) acao = 'ok';
+    return { codigo: cod, nome: prod ? prod.nome : '—', promo: menor[cod], atual, sugerido, acao };
+  }).sort((a,b)=> String(a.codigo).localeCompare(String(b.codigo)));
+
+  return { camp, margem, linhas };
+}
+
+function preverMinimosCampanha(){
+  const el = document.getElementById('camp-min-resultado');
+  const r = calcularMinimosCampanha();
+  if(!r){ el.innerHTML = '<span style="color:#dc2626">Selecione uma campanha.</span>'; return; }
+  LINHAS_MIN_CAMPANHA = r.linhas;
+
+  const baixar = r.linhas.filter(l=>l.acao === 'baixar');
+  const semCad = r.linhas.filter(l=>l.acao === 'sem_cadastro');
+
+  el.innerHTML = `
+    <div style="margin-bottom:8px">
+      <strong>${r.linhas.length}</strong> item(ns) na campanha · <strong>${baixar.length}</strong> com mínimo a ajustar
+      ${semCad.length ? ` · <span style="color:#dc2626">${semCad.length} sem cadastro</span>` : ''}
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+      <tr style="background:var(--border)">
+        <th style="padding:6px;text-align:left">Código</th><th style="padding:6px;text-align:left">Produto</th>
+        <th style="padding:6px;text-align:right">Menor promo</th><th style="padding:6px;text-align:right">Mín. atual</th>
+        <th style="padding:6px;text-align:right">Mín. novo</th><th style="padding:6px;text-align:center">Situação</th>
+      </tr>
+      ${r.linhas.map(l=>`
+        <tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:6px"><strong>${esc(l.codigo)}</strong></td>
+          <td style="padding:6px">${esc(String(l.nome||'').substring(0,38))}</td>
+          <td style="padding:6px;text-align:right">${fmtMoeda(l.promo)}</td>
+          <td style="padding:6px;text-align:right">${l.atual == null ? '—' : fmtMoeda(l.atual)}</td>
+          <td style="padding:6px;text-align:right">${l.acao === 'baixar' ? '<strong>'+fmtMoeda(l.sugerido)+'</strong>' : '—'}</td>
+          <td style="padding:6px;text-align:center">${
+            l.acao === 'baixar' ? '<span style="color:#92400e">baixar</span>'
+            : l.acao === 'ok' ? '<span style="color:#16a34a">já permite</span>'
+            : '<span style="color:#dc2626">sem cadastro</span>'}</td>
+        </tr>`).join('')}
+    </table>`;
+}
+
+async function aplicarMinimosCampanha(){
+  if(!usuarioLogado || !usuarioLogado.admin){ toast('Ação restrita a administradores','error'); return; }
+  const el = document.getElementById('camp-min-resultado');
+  const r = calcularMinimosCampanha();
+  if(!r){ el.innerHTML = '<span style="color:#dc2626">Selecione uma campanha.</span>'; return; }
+
+  const marcados = r.linhas.filter(l=>l.acao === 'baixar');
+  if(!marcados.length){ toast('Nenhum item precisa de ajuste','error'); return; }
+  if(!confirm(`Baixar o preço mínimo de ${marcados.length} item(ns) da campanha "${r.camp.nome}"?\n\nFolga de ${r.margem}% abaixo do menor preço promocional.\n\nOs valores atuais serão salvos em backup e podem ser desfeitos.`)) return;
+
+  try {
+    const backupKey = 'bk_' + Date.now();
+    await db.ref('backups_preco_minimo/'+backupKey).set({
+      ts: Date.now(), data: new Date().toISOString(),
+      usuario: usuarioLogado.nome || '', campanha: r.camp.nome || '', margem: r.margem,
+      itens: marcados.map(l=>({ codigo:l.codigo, anterior:l.atual, novo:l.sugerido }))
+    });
+
+    for(let i=0; i<marcados.length; i+=400){
+      const updates = {};
+      marcados.slice(i, i+400).forEach(l=>{ updates['produtos/'+l.codigo+'/preco_minimo'] = l.sugerido; });
+      await db.ref().update(updates);
+    }
+
+    marcados.forEach(l=>{
+      const alvo = PRODUTOS_DB.find(p=>String(p.codigo) === String(l.codigo));
+      if(alvo) alvo.preco_minimo = l.sugerido;
+    });
+
+    toast(`✓ Preço mínimo ajustado em ${marcados.length} item(ns)`,'success');
+    el.innerHTML = `<div style="padding:14px;background:#dcfce7;border-radius:8px;color:#166534;line-height:1.7">
+      ✅ <strong>${marcados.length} item(ns)</strong> ajustados.<br>
+      Backup salvo como <code>${backupKey}</code> — use <strong>Desfazer último ajuste</strong> para reverter.
+    </div>`;
+  } catch(e){
+    console.error(e);
+    toast('Erro ao gravar: ' + (e.message||e),'error');
+  }
+}
+
+async function desfazerMinimosCampanha(){
+  if(!usuarioLogado || !usuarioLogado.admin){ toast('Ação restrita a administradores','error'); return; }
+  const snap = await db.ref('backups_preco_minimo').orderByKey().limitToLast(1).once('value');
+  const dados = snap.val();
+  if(!dados){ toast('Nenhum backup de preço mínimo encontrado','error'); return; }
+
+  const chave = Object.keys(dados)[0];
+  const bk = dados[chave];
+  const itens = bk.itens || [];
+  if(!itens.length){ toast('Backup vazio','error'); return; }
+  if(!confirm(`↺ Reverter o preço mínimo de ${itens.length} item(ns)?\n\nAjuste de ${new Date(bk.ts).toLocaleString('pt-BR')} por ${bk.usuario||'—'} (campanha ${bk.campanha||'—'}).`)) return;
+
+  try {
+    for(let i=0; i<itens.length; i+=400){
+      const updates = {};
+      itens.slice(i, i+400).forEach(it=>{ updates['produtos/'+it.codigo+'/preco_minimo'] = it.anterior; });
+      await db.ref().update(updates);
+    }
+    await db.ref('backups_preco_minimo/'+chave).remove();
+    await carregarProdutosFirebase();
+    toast(`✓ ${itens.length} item(ns) revertidos`,'success');
+    document.getElementById('camp-min-resultado').innerHTML =
+      `<div style="padding:14px;background:#dcfce7;border-radius:8px;color:#166534">↺ Reversão concluída em <strong>${itens.length} item(ns)</strong>.</div>`;
+  } catch(e){
+    console.error(e);
+    toast('Erro ao reverter: ' + (e.message||e),'error');
+  }
+}
+
 function renderAdminCampanhas(){
+  popularSelectCampanhasMinimo();
   const el = document.getElementById('admin-campanhas-lista');
   if(!el) return;
   if(!(CAMPANHAS_DB||[]).length){ el.innerHTML = '<div style="color:var(--muted)">Nenhuma campanha cadastrada.</div>'; return; }
@@ -5773,7 +5943,11 @@ function validarPedidoPrecosMinimos(){
 function atualizarTotais(){
   // Recalcula a campanha antes de tudo. Se ela mudou algum preço e não estamos já
   // dentro de um renderItens, redesenha a lista pra refletir o preço novo nos campos.
-  if(aplicarCampanhaPedido() && !_emRenderItens){ renderItens(); return; }
+  if(!_emRenderItens && _campanhaPasses < 3 && aplicarCampanhaPedido()){
+    _campanhaPasses++;
+    try { renderItens(); } finally { _campanhaPasses--; }
+    return;
+  }
   renderCampanhaStatus();
   // Trava de preço mínimo: se os descontos gerais (% e/ou R$) derrubarem qualquer item
   // abaixo do preço mínimo dele, limita automaticamente o campo que acabou de ser mexido.
@@ -5806,6 +5980,14 @@ function atualizarTotais(){
         }
       }
     }
+  }
+
+  // Se a trava acima limitou o desconto geral, o valor do pedido mudou — reavalia a
+  // campanha com o desconto já corrigido antes de fechar os totais.
+  if(!_emRenderItens && _campanhaPasses < 3 && aplicarCampanhaPedido()){
+    _campanhaPasses++;
+    try { renderItens(); } finally { _campanhaPasses--; }
+    return;
   }
 
   const sub = calcSubtotal();
