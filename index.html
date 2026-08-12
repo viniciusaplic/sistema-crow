@@ -2758,6 +2758,7 @@ async function fazerLogin(){
 
   document.getElementById('loading-overlay').style.display='flex';
   document.getElementById('login-error').textContent='';
+  resetarPrivacidade(); // todo login começa com os valores ocultos
   try {
     const cred = await auth.signInWithEmailAndPassword(email, pass);
     const uid = cred.user.uid;
@@ -3034,23 +3035,28 @@ document.addEventListener('click', e=>{
 });
 
 // ══ PAINEL ══
-// Privacidade dos valores no painel. Começa SEMPRE oculto a cada login: a preferência
-// fica só na sessão da aba (sessionStorage), então fechar o sistema volta ao estado
-// seguro. Não usa localStorage justamente para não "lembrar" de deixar exposto.
-function privacidadeAtiva(){
-  try { return sessionStorage.getItem('crow_valores_visiveis') !== '1'; }
-  catch(e){ return true; }
-}
+// Privacidade dos valores no painel.
+// Guardado APENAS em memória: qualquer recarga da página, novo login ou reabertura
+// do sistema volta ao estado oculto. Não usa sessionStorage nem localStorage de
+// propósito — sessionStorage sobrevive ao F5 e deixaria os valores expostos numa
+// aba que ficou aberta desde o dia anterior.
+let VALORES_VISIVEIS = false;
 
 function aplicarPrivacidade(){
-  const oculto = privacidadeAtiva();
+  const oculto = !VALORES_VISIVEIS;
   document.body.classList.toggle('valores-ocultos', oculto);
   const b = document.getElementById('btn-privacidade');
   if(b) b.innerHTML = oculto ? '👁️ Mostrar valores' : '🙈 Ocultar valores';
 }
 
 function alternarPrivacidade(){
-  try { sessionStorage.setItem('crow_valores_visiveis', privacidadeAtiva() ? '1' : '0'); } catch(e){}
+  VALORES_VISIVEIS = !VALORES_VISIVEIS;
+  aplicarPrivacidade();
+}
+
+// Ao trocar de usuário os valores voltam a ficar ocultos
+function resetarPrivacidade(){
+  VALORES_VISIVEIS = false;
   aplicarPrivacidade();
 }
 
@@ -3122,9 +3128,9 @@ async function renderPainel(){
     <div class="dash-card"><div class="dash-card-label">Pedidos do Mês</div><div class="dash-card-value">${pedidosMes}</div></div>
   ` : `
     <div class="dash-card"><div class="dash-card-label">Pedidos Hoje</div><div class="dash-card-value accent">${pedidosHoje}</div></div>
-    <div class="dash-card"><div class="dash-card-label">Total do Mês</div><div class="dash-card-value success">${fmtMoeda(totalMes)}</div></div>
+    <div class="dash-card"><div class="dash-card-label">Total do Mês</div><div class="dash-card-value success valor-sensivel">${fmtMoeda(totalMes)}</div></div>
     <div class="dash-card"><div class="dash-card-label">Pedidos do Mês</div><div class="dash-card-value">${pedidosMes}</div></div>
-    ${mostrarFaturadoMeu ? `<div class="dash-card"><div class="dash-card-label">💰 Faturado no Mês (Minhas Vendas)</div><div class="dash-card-value success">${fmtMoeda(totalFaturadoMeu)}</div><div style="font-size:11px;color:var(--muted);margin-top:2px">${pedidosFaturadosMeu} pedido(s)</div></div>` : ''}
+    ${mostrarFaturadoMeu ? `<div class="dash-card"><div class="dash-card-label">💰 Faturado no Mês (Minhas Vendas)</div><div class="dash-card-value success valor-sensivel">${fmtMoeda(totalFaturadoMeu)}</div><div style="font-size:11px;color:var(--muted);margin-top:2px">${pedidosFaturadosMeu} pedido(s)</div></div>` : ''}
   `;
 
   aplicarPrivacidade();
