@@ -412,10 +412,24 @@ tbody td{padding:11px 16px;font-size:14px}
       </div>
     </div>
   </div>
+  <style>
+  /* Modo privacidade: os valores em R$ ficam borrados até alguém clicar no olho.
+     É só efeito visual — os números continuam no lugar, nada é recalculado.
+     Blur em vez de esconder para o layout não "pular" ao alternar. */
+  body.valores-ocultos .valor-sensivel{
+    filter: blur(7px);
+    user-select: none;
+    transition: filter .15s;
+  }
+  </style>
   <div class="content">
 
     <!-- PAINEL -->
     <div id="tab-painel">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+        <button class="btn btn-outline btn-sm" id="btn-privacidade" onclick="alternarPrivacidade()"
+          title="Mostrar ou ocultar os valores em R$ desta tela">👁️ Mostrar valores</button>
+      </div>
       <div class="dashboard-cards" id="dash-cards"></div>
       <div id="dash-meta-mes" class="admin-only"></div>
       <div id="dash-alertas-manutencao"></div>
@@ -3020,6 +3034,26 @@ document.addEventListener('click', e=>{
 });
 
 // ══ PAINEL ══
+// Privacidade dos valores no painel. Começa SEMPRE oculto a cada login: a preferência
+// fica só na sessão da aba (sessionStorage), então fechar o sistema volta ao estado
+// seguro. Não usa localStorage justamente para não "lembrar" de deixar exposto.
+function privacidadeAtiva(){
+  try { return sessionStorage.getItem('crow_valores_visiveis') !== '1'; }
+  catch(e){ return true; }
+}
+
+function aplicarPrivacidade(){
+  const oculto = privacidadeAtiva();
+  document.body.classList.toggle('valores-ocultos', oculto);
+  const b = document.getElementById('btn-privacidade');
+  if(b) b.innerHTML = oculto ? '👁️ Mostrar valores' : '🙈 Ocultar valores';
+}
+
+function alternarPrivacidade(){
+  try { sessionStorage.setItem('crow_valores_visiveis', privacidadeAtiva() ? '1' : '0'); } catch(e){}
+  aplicarPrivacidade();
+}
+
 async function renderPainel(){
   renderAlertasManutencao();
   const hoje = new Date(); hoje.setHours(0,0,0,0);
@@ -3093,6 +3127,8 @@ async function renderPainel(){
     ${mostrarFaturadoMeu ? `<div class="dash-card"><div class="dash-card-label">💰 Faturado no Mês (Minhas Vendas)</div><div class="dash-card-value success">${fmtMoeda(totalFaturadoMeu)}</div><div style="font-size:11px;color:var(--muted);margin-top:2px">${pedidosFaturadosMeu} pedido(s)</div></div>` : ''}
   `;
 
+  aplicarPrivacidade();
+
   if(usuarioLogado.admin) renderMetaMes(mesInicio, meusPedidos);
   else { const elMeta=document.getElementById('dash-meta-mes'); if(elMeta) elMeta.innerHTML=''; }
 
@@ -3150,7 +3186,7 @@ async function renderPainel(){
             <div style="font-size:12px;color:var(--muted);margin-top:2px">${fmtData(p.data)}</div>
           </div>
           <div style="text-align:right">
-            <div style="font-family:'DM Sans',sans-serif;font-weight:700;font-size:16px;color:var(--success)">${fmtMoeda(p.total)}</div>
+            <div class="valor-sensivel" style="font-family:'DM Sans',sans-serif;font-weight:700;font-size:16px;color:var(--success)">${fmtMoeda(p.total)}</div>
             <div style="font-size:12px;color:var(--muted)">${p.condicao||''}</div>
           </div>
         </div>
@@ -3171,7 +3207,7 @@ async function renderPainel(){
           <tr onclick="verPedido('${p.id}')" style="cursor:pointer">
             <td><strong>#${p.numero}</strong></td>
             <td>${esc(p.cliente_nome)}</td>
-            <td><strong>${fmtMoeda(p.total)}</strong></td>
+            <td><strong class="valor-sensivel">${fmtMoeda(p.total)}</strong></td>
             <td>${p.condicao||''}</td>
             <td>${statusBadge(p.status)}</td>
             <td>${fmtData(p.data)}</td>
@@ -3846,7 +3882,7 @@ async function renderPedidos(){
             </div>
           </div>
           ${!ocultarValores ? `<div style="text-align:right">
-            <div style="font-family:'DM Sans',sans-serif;font-weight:700;font-size:16px;color:var(--success)">${fmtMoeda(p.total)}</div>
+            <div class="valor-sensivel" style="font-family:'DM Sans',sans-serif;font-weight:700;font-size:16px;color:var(--success)">${fmtMoeda(p.total)}</div>
             ${desc}
           </div>` : ''}
         </div>
