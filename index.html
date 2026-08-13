@@ -461,11 +461,11 @@ tbody td{padding:11px 16px;font-size:14px}
         <div class="filtros-inner" id="filtros-pedidos-inner">
           <div class="filtro-group">
             <label>Nº do Pedido</label>
-            <input type="text" id="f-numero" placeholder="ex: 2239..." oninput="paginaPedidos=1;renderPedidos()">
+            <input type="text" id="f-numero" placeholder="ex: 2239..." oninput="paginaPedidos=1;renderPedidosDebounced()">
           </div>
           <div class="filtro-group">
             <label>Filtrar data por</label>
-            <select id="f-tipo-data" onchange="paginaPedidos=1;renderPedidos()">
+            <select id="f-tipo-data" onchange="paginaPedidos=1;renderPedidos(true)">
               <option value="pedido">Data do Pedido</option>
               <option value="faturamento">Data de Faturamento</option>
             </select>
@@ -488,7 +488,7 @@ tbody td{padding:11px 16px;font-size:14px}
           </div>
           <div class="filtro-group admin-only" id="f-vendedor-wrap" style="display:none">
             <label>Vendedor</label>
-            <input type="text" id="f-vendedor" list="lista-vendedores-datalist" placeholder="Digite ou selecione..." oninput="paginaPedidos=1;renderPedidos()">
+            <input type="text" id="f-vendedor" list="lista-vendedores-datalist" placeholder="Digite ou selecione..." oninput="paginaPedidos=1;renderPedidosDebounced()">
             <datalist id="lista-vendedores-datalist"></datalist>
           </div>
           <div class="filtro-group">
@@ -505,7 +505,7 @@ tbody td{padding:11px 16px;font-size:14px}
           </div>
           <div class="filtro-group">
             <label>Faturamento</label>
-            <select id="f-faturado" onchange="paginaPedidos=1;renderPedidos()">
+            <select id="f-faturado" onchange="paginaPedidos=1;renderPedidos(true)">
               <option value="">Todos</option>
               <option value="sim">✅ Já faturados</option>
               <option value="nao">⏳ Ainda não faturados</option>
@@ -2576,6 +2576,21 @@ function fotoImg(codigo, size=40, style=''){
 }
 let pedidoAtual = { cliente: null, itens: [], isOrcamento: false };
 let VENDEDORES_SELECT_CACHE = null; // cache da lista de vendedores para o seletor de vendedor no pedido (admin)
+// Cache de curta duração da tela de Pedidos. Essa tela é a mais visitada do sistema e cada
+// execução dela baixava a base de pedidos inteira do Firebase — inclusive a cada tecla
+// digitada no filtro e a cada troca de página, o que era a maior fonte de consumo de banda.
+// O cache só é usado quando quem chama pede explicitamente (digitação, paginação e troca de
+// filtros que são resolvidos no cliente). Toda ação que GRAVA no banco continua chamando
+// renderPedidos() sem cache, então a tela nunca exibe dado velho depois de salvar.
+let PEDIDOS_FETCH_CACHE = null; // { chave, dados }
+let PEDIDOS_FAT_CACHE = null;   // { totalFaturadoMes, qtdFaturadosMes }
+function invalidarCachePedidos(){ PEDIDOS_FETCH_CACHE = null; PEDIDOS_FAT_CACHE = null; }
+// Espera a pessoa parar de digitar antes de consultar o banco, em vez de consultar a cada tecla.
+let _debouncePedidos = null;
+function renderPedidosDebounced(){
+  clearTimeout(_debouncePedidos);
+  _debouncePedidos = setTimeout(()=>renderPedidos(true), 400);
+}
 let paginaClientes = 1, paginaProdutos = 1, paginaPedidos = 1, paginaOrcamentos = 1, paginaInsumos = 1, paginaFornecedores = 1, paginaProducao = 1;
 let pedidosSelecionadosImprimir = new Set();
 let orcamentosSelecionadosImprimir = new Set();
@@ -2945,6 +2960,9 @@ async function carregarClientesFirebase(){
 function sair(){
   auth.signOut().catch(()=>{});
   sessionStorage.removeItem('crow_user');
+  // Zera o cache da tela de Pedidos: o resumo "Faturado no mês" é filtrado pelo vendedor
+  // logado, então não pode sobreviver a uma troca de usuário na mesma aba.
+  invalidarCachePedidos();
   usuarioLogado = null;
   document.getElementById('app').style.display='none';
   document.getElementById('login-screen').style.display='flex';
@@ -3141,9 +3159,12 @@ async function renderPainel(){
   // Clientes novos pendentes de cadastro no W3 — visível só pra admin, direto no painel
   if(usuarioLogado.admin){
     try {
-      const snapClientes = await db.ref('clientes').once('value');
-      const todosClientes = snapClientes.val() || {};
-      const pendentes = Object.values(todosClientes)
+      // Usa a lista de clientes que já está em memória (CLIENTES_DB, carregada uma vez no
+      // login) em vez de baixar a coleção inteira de clientes do Firebase toda vez que o
+      // Painel é renderizado — são milhares de registros e o Painel abre várias vezes por
+      // sessão. Só vai ao banco se a lista ainda não tiver sido carregada.
+      if(!CLIENTES_DB.length) await carregarClientesFirebase();
+      const pendentes = CLIENTES_DB
         .filter(c => c.pendente_w3 && !c.inativo)
         .sort((a,b) => (b.ts_cadastro||0) - (a.ts_cadastro||0));
 
@@ -3719,7 +3740,7 @@ async function imprimirOrcamentosSelecionados(){
   for(const id of orcamentosSelecionadosImprimir){ registrarEventoHistorico(id, 'Orçamento impresso (em lote)'); }
 }
 
-async function renderPedidos(){
+async function renderPedidos(usarCache){
   const fDataIni = document.getElementById('f-data-ini').value;
   const fDataFim = document.getElementById('f-data-fim').value;
   const fTipoData = document.getElementById('f-tipo-data')?.value || 'pedido';
@@ -3746,23 +3767,38 @@ async function renderPedidos(){
 
   let pedidos = [];
   let todosPedidos = []; // todos os pedidos (antes dos filtros) para calcular Total do Mês
+  let fonteFaturados = null; // reaproveitada no resumo quando a consulta já trouxe os faturados
   try {
     // Usa o filtro de Data Início (já vem preenchido com o começo do mês por padrão) pra
     // buscar só esse intervalo no banco, em vez de baixar TODO o histórico de pedidos toda
     // vez que essa tela é aberta ou um filtro muda — essa tela é uma das mais visitadas,
     // e baixar tudo repetidamente era a maior causa de consumo de banda do Firebase.
     // Se a pessoa limpar a Data Início de propósito, aí sim busca tudo (ação explícita).
-    let query = db.ref('pedidos');
-    if(fTipoData==='faturamento'){
-      // Filtrando por Data de Faturamento: usamos o índice por 'faturado' (só pedidos já
-      // faturados) e filtramos o intervalo de datas no cliente — o Firebase RTDB só permite
-      // ordenar/consultar por um campo por vez, então não dá pra combinar com orderByChild('data').
-      query = query.orderByChild('faturado').equalTo(true);
-    } else if(fDataIni){
-      query = query.orderByChild('data').startAt(fDataIni+'T00:00:00');
+    //
+    // Os demais filtros (número, cliente, produto, situação, vendedor, data fim) são
+    // resolvidos aqui no navegador e NÃO mudam o que precisa ser baixado. Por isso a
+    // chave do cache considera apenas o que de fato altera a consulta ao Firebase.
+    const chaveConsulta = fTipoData==='faturamento' ? 'FAT' : ('DATA:'+(fDataIni||'TUDO'));
+    let todos;
+    if(usarCache && PEDIDOS_FETCH_CACHE && PEDIDOS_FETCH_CACHE.chave === chaveConsulta){
+      todos = PEDIDOS_FETCH_CACHE.dados;
+    } else {
+      let query = db.ref('pedidos');
+      if(fTipoData==='faturamento'){
+        // Filtrando por Data de Faturamento: usamos o índice por 'faturado' (só pedidos já
+        // faturados) e filtramos o intervalo de datas no cliente — o Firebase RTDB só permite
+        // ordenar/consultar por um campo por vez, então não dá pra combinar com orderByChild('data').
+        query = query.orderByChild('faturado').equalTo(true);
+      } else if(fDataIni){
+        query = query.orderByChild('data').startAt(fDataIni+'T00:00:00');
+      }
+      const snap = await query.once('value');
+      todos = snap.val()||{};
+      PEDIDOS_FETCH_CACHE = { chave: chaveConsulta, dados: todos };
     }
-    const snap = await query.once('value');
-    const todos = snap.val()||{};
+    // Quando a consulta acima JÁ é a dos faturados, o resumo "Faturado no mês" reaproveita
+    // esses mesmos dados em vez de baixar a mesma coisa uma segunda vez.
+    if(fTipoData==='faturamento') fonteFaturados = todos;
     for(const k in todos){
       const p = todos[k];
       if(!vejaTudoDoModulo('pedidos') && p.vendedor_id!==usuarioLogado.id) continue;
@@ -3841,19 +3877,28 @@ async function renderPedidos(){
   // data de CRIAÇÃO do pedido, não pela de faturamento — um pedido criado mês passado
   // mas faturado agora não apareceria na lista principal, por isso essa conta é à parte).
   let totalFaturadoMes = 0, qtdFaturadosMes = 0;
-  try {
-    const mesInicioStr = new Date(anoAtual, mesAtual, 1).toISOString().split('T')[0];
-    const snapFat = await db.ref('pedidos').orderByChild('faturado').equalTo(true).once('value');
-    const todosFat = snapFat.val() || {};
-    Object.values(todosFat).forEach(p => {
-      if(!vejaTudoDoModulo('pedidos') && p.vendedor_id!==usuarioLogado.id) return;
-      if(!p.data_faturamento) return;
-      const df = p.data_faturamento.split('T')[0];
-      if(df < mesInicioStr) return;
-      totalFaturadoMes += Number(p.total||0);
-      qtdFaturadosMes++;
-    });
-  } catch(e){ console.warn('[CROW] falha silenciosa ignorada:', e); }
+  if(usarCache && !fonteFaturados && PEDIDOS_FAT_CACHE){
+    // Digitação no filtro ou troca de página não mudam esse número: reaproveita o já calculado
+    // em vez de baixar o histórico inteiro de faturados de novo.
+    totalFaturadoMes = PEDIDOS_FAT_CACHE.totalFaturadoMes;
+    qtdFaturadosMes  = PEDIDOS_FAT_CACHE.qtdFaturadosMes;
+  } else {
+    try {
+      const mesInicioStr = new Date(anoAtual, mesAtual, 1).toISOString().split('T')[0];
+      // Se a consulta principal já trouxe os faturados, usa aqueles dados; só vai ao banco
+      // quando realmente não tem de onde tirar.
+      const todosFat = fonteFaturados || ((await db.ref('pedidos').orderByChild('faturado').equalTo(true).once('value')).val() || {});
+      Object.values(todosFat).forEach(p => {
+        if(!vejaTudoDoModulo('pedidos') && p.vendedor_id!==usuarioLogado.id) return;
+        if(!p.data_faturamento) return;
+        const df = p.data_faturamento.split('T')[0];
+        if(df < mesInicioStr) return;
+        totalFaturadoMes += Number(p.total||0);
+        qtdFaturadosMes++;
+      });
+      PEDIDOS_FAT_CACHE = { totalFaturadoMes, qtdFaturadosMes };
+    } catch(e){ console.warn('[CROW] falha silenciosa ignorada:', e); }
+  }
 
   // Usuários sem permissão de ver valores financeiros
   const ocultarValores = ehExpedicao();
@@ -3937,7 +3982,7 @@ async function renderPedidos(){
     </div>`;
   }).join('') || '<div style="text-align:center;color:var(--muted);padding:24px">Nenhum pedido encontrado</div>';
 
-  renderPaginacao('pedidos-pag', total, paginaPedidos, n=>{ paginaPedidos=n; renderPedidos(); });
+  renderPaginacao('pedidos-pag', total, paginaPedidos, n=>{ paginaPedidos=n; renderPedidos(true); });
   atualizarBotaoImprimirPedidos();
 }
 
