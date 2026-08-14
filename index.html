@@ -1480,6 +1480,7 @@ tbody td{padding:11px 16px;font-size:14px}
       </div>
       <div id="pedido-lista-produtos" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;display:none;background:var(--card);margin-bottom:12px"></div>
       <div id="pedido-item-staging" style="display:none;margin-bottom:14px"></div>
+      <div id="itens-contador" style="display:flex;justify-content:flex-end;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:4px"></div>
       <div class="item-row item-row-header">
         <span>Produto</span><span>Qtd</span><span>Preço Unit.</span><span>Desc.</span><span>Subtotal</span><span></span>
       </div>
@@ -4383,6 +4384,7 @@ async function verPedido(id){
       ${(() => {
         const ocultarVal = usuarioLogado && ehExpedicao();
         return `
+      <div style="display:flex;justify-content:flex-end;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:4px">📦 ${(p.itens||[]).length} produto${(p.itens||[]).length>1?'s':''}</div>
       <div class="item-rows-wrap">
         <div class="item-row item-row-header"><span>Produto</span><span>Qtd</span>${!ocultarVal?'<span>Preço Unit.</span><span>Desc.%</span><span>Subtotal</span>':''}<span></span></div>
         ${(p.itens||[]).map(i=>`
@@ -5037,6 +5039,7 @@ async function abrirModalPedido(isOrcamento=false){
   document.getElementById('step-cliente-ped').style.display='';
   document.getElementById('step-itens-ped').style.display='none';
   document.getElementById('itens-lista').innerHTML='';
+  const _ic=document.getElementById('itens-contador'); if(_ic) _ic.textContent=''; // nao herdar a contagem do pedido anterior
   document.getElementById('pedido-forma').value='';
   document.getElementById('pedido-condicao').innerHTML='<option value="">Selecione...</option>';
   document.getElementById('pedido-obs').value='';
@@ -5913,6 +5916,13 @@ function renderItens(){
   _emRenderItens = true;
   aplicarCampanhaPedido();
   const lista = document.getElementById('itens-lista');
+  // Conta LINHAS de produto (nao a soma das quantidades): o vendedor anota o pedido no
+  // papel e confere aqui se digitou todos os produtos da folha.
+  const cont = document.getElementById('itens-contador');
+  if(cont){
+    const n = pedidoAtual.itens.length;
+    cont.textContent = n ? ('📦 ' + n + ' produto' + (n>1?'s':'')) : '';
+  }
   if(!pedidoAtual.itens.length){
     lista.innerHTML='<div style="padding:16px;text-align:center;color:var(--muted);font-size:13px">Nenhum item adicionado</div>';
     _emRenderItens = false;
