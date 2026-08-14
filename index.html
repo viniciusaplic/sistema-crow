@@ -2287,6 +2287,27 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
+// ── Relógio do servidor ─────────────────────────────────────────────────
+// Todas as datas do sistema (criação de pedido e orçamento, histórico de edições,
+// movimentação de estoque) vinham do relógio do aparelho de quem estava usando.
+// Aparelho com data errada gravava data errada no banco, e nada no sistema percebia.
+//
+// '.info/serverTimeOffset' NÃO é um nó de dados do banco e NÃO consome banda: o próprio
+// SDK do Firebase calcula, pela conexão já aberta, a diferença entre o relógio local e
+// o do servidor. Somando essa diferença ao relógio local chegamos à hora do servidor
+// sem nenhuma consulta ao banco.
+//
+// Continuamos gravando no formato de TEXTO ISO ('2026-08-13T23:00:00.000Z') que o
+// sistema já usa para ordenar, filtrar e comparar. Gravar um número (que é o que o
+// ServerValue.TIMESTAMP do Firebase produz) quebraria a lista de pedidos, os filtros
+// de período e o índice 'data' recém-publicado.
+//
+// Enquanto o offset ainda não chegou (primeiros instantes após abrir), vale 0 e o
+// comportamento é o mesmo de antes — nunca fica pior que a situação atual.
+let SERVER_TIME_OFFSET = 0;
+db.ref('.info/serverTimeOffset').on('value', s => { SERVER_TIME_OFFSET = Number(s.val()) || 0; });
+function agoraTs(){ return Date.now() + SERVER_TIME_OFFSET; }
+function agora(){ return new Date(agoraTs()); }
 const storage = firebase.storage();
 const auth = firebase.auth();
 // Aumentar tempo máximo de retry para arquivos grandes (10 minutos)
@@ -2485,7 +2506,7 @@ let FOTO_MAPA = {};
 async function carregarFotoMapa(){
   const cache = localStorage.getItem('crow_foto_mapa');
   const cacheTs = localStorage.getItem('crow_foto_mapa_ts');
-  if(cache && cacheTs && (Date.now()-Number(cacheTs)) < 3600000){
+  if(cache && cacheTs && (agoraTs()-Number(cacheTs)) < 3600000){
     FOTO_MAPA = JSON.parse(cache);
     return;
   }
@@ -2493,7 +2514,7 @@ async function carregarFotoMapa(){
     // Cache-bust também nessa busca (não só nas fotos individuais) — sem isso, o navegador
     // ou o próprio Cloudinary podiam devolver a LISTA de fotos antiga (de antes de um reimport),
     // mesmo com o localStorage limpo, porque a URL da busca era sempre idêntica.
-    const r = await fetch(`https://res.cloudinary.com/dleujtvtq/image/list/produtos.json?_=${Date.now()}`, { cache: 'no-store' });
+    const r = await fetch(`https://res.cloudinary.com/dleujtvtq/image/list/produtos.json?_=${agoraTs()}`, { cache: 'no-store' });
     if(r.ok){
       const data = await r.json();
       const mapa = {};
@@ -2529,7 +2550,7 @@ async function carregarFotoMapa(){
       }
       FOTO_MAPA = mapa;
       localStorage.setItem('crow_foto_mapa', JSON.stringify(mapa));
-      localStorage.setItem('crow_foto_mapa_ts', String(Date.now()));
+      localStorage.setItem('crow_foto_mapa_ts', String(agoraTs()));
     }
   } catch(e){ console.warn('Cloudinary:', e.message); }
 }
@@ -2545,7 +2566,7 @@ async function forcarAtualizacaoFotos(){
   toast('🔄 Atualizando fotos...','success');
   localStorage.removeItem('crow_foto_mapa');
   localStorage.removeItem('crow_foto_mapa_ts');
-  cacheBusterManual = Date.now();
+  cacheBusterManual = agoraTs();
   localStorage.setItem('crow_cache_buster_manual', String(cacheBusterManual));
   await carregarFotoMapa();
   renderProdutos();
@@ -2564,7 +2585,7 @@ function fotoImg(codigo, size=40, style=''){
   const pid = FOTO_MAPA[key] || ('produtos/'+codigo);
   // Cache buster: diário por padrão, mas pode ser sobreposto manualmente (botão "Atualizar Fotos")
   // para forçar atualização imediata sem esperar o cache normal expirar.
-  const cacheBuster = cacheBusterManual || new Date().toISOString().split('T')[0].replace(/-/g,'');
+  const cacheBuster = cacheBusterManual || agora().toISOString().split('T')[0].replace(/-/g,'');
   // c_fit (em vez de c_pad,b_white,f_jpg) redimensiona sem forçar nenhum preenchimento de fundo —
   // isso evita o mesmo problema da foto ampliada, onde pedir um fundo branco ao Cloudinary também
   // pintava de branco qualquer transparência que existisse DENTRO da própria foto (não só nas
@@ -2643,7 +2664,7 @@ async function registrarEventoHistorico(pedidoId, textoEvento){
     const snap = await ref.once('value');
     const historico = snap.val() || [];
     historico.push({
-      ts: Date.now(),
+      ts: agoraTs(),
       usuario_nome: usuarioLogado?.nome || 'Desconhecido',
       usuario_tipo: usuarioLogado?.admin ? 'admin' : (usuarioLogado?.tipo==='expedicao' ? 'expedicao' : 'vendedor'),
       alteracoes: [textoEvento]
@@ -3080,7 +3101,7 @@ function resetarPrivacidade(){
 
 async function renderPainel(){
   renderAlertasManutencao();
-  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const hoje = agora(); hoje.setHours(0,0,0,0);
   const mesInicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
 
   // Perfil de Produção não lida com vendas — o Painel dele mostra só os alertas de
@@ -3252,7 +3273,7 @@ async function renderPainel(){
 async function renderMetaMes(mesInicio, pedidosDoMes){
   const el = document.getElementById('dash-meta-mes');
   if(!el) return;
-  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const hoje = agora(); hoje.setHours(0,0,0,0);
   const mesFim = new Date(mesInicio.getFullYear(), mesInicio.getMonth()+1, 1);
   const mesAnteriorInicio = new Date(mesInicio.getFullYear(), mesInicio.getMonth()-1, 1);
   const chaveMes = `${mesInicio.getFullYear()}-${String(mesInicio.getMonth()+1).padStart(2,'0')}`;
@@ -3433,7 +3454,7 @@ async function salvarMetaMes(){
   if(!chave){ toast('Erro: mês não identificado','error'); return; }
   await db.ref('metas/'+chave).set({
     meta, dias_uteis, dias_trabalhados,
-    atualizado_por: usuarioLogado.nome, atualizado_em: Date.now()
+    atualizado_por: usuarioLogado.nome, atualizado_em: agoraTs()
   });
   fecharModal('modal-meta-mes');
   await renderPainel();
@@ -3448,7 +3469,7 @@ async function carregarManutencoesFirebase(){
     MANUTENCOES_DB = Object.keys(todos).map(k=>({key:k, ...todos[k]}));
   } catch(e){ MANUTENCOES_DB = []; }
 }
-function hojeISO(){ const d=new Date(); d.setHours(0,0,0,0); return d.toISOString().split('T')[0]; }
+function hojeISO(){ const d=agora(); d.setHours(0,0,0,0); return d.toISOString().split('T')[0]; }
 function diasEntre(dataISO){
   const hoje = new Date(hojeISO()+'T00:00:00');
   const d = new Date(dataISO+'T00:00:00');
@@ -3548,14 +3569,14 @@ async function salvarManutencao(){
   if(!equipamento || !manutencao || !data_prevista){ toast('Preencha equipamento, manutenção e data','error'); return; }
 
   const keyExistente = document.getElementById('manutencao-key').value;
-  const key = keyExistente || 'manut_' + Date.now();
+  const key = keyExistente || 'manut_' + agoraTs();
   const dadosBase = keyExistente ? (MANUTENCOES_DB.find(x=>x.key===keyExistente)||{}) : {};
   const dados = {
     ...dadosBase,
     equipamento, manutencao, data_prevista,
     ativo: true,
     criado_por: dadosBase.criado_por || usuarioLogado.nome,
-    criado_em: dadosBase.criado_em || Date.now()
+    criado_em: dadosBase.criado_em || agoraTs()
   };
   delete dados.key;
   await db.ref('manutencoes/'+key).set(dados);
@@ -3577,7 +3598,7 @@ function abrirModalVerificacaoManutencao(key){
   if(!m) return;
   document.getElementById('verificacao-manutencao-key').value = key;
   document.getElementById('verificacao-manutencao-info').textContent = `${m.equipamento} — ${m.manutencao} (prevista para ${fmtData(m.data_prevista)})`;
-  const agora = new Date();
+  const agora = agora();
   document.getElementById('verificacao-nome').value = usuarioLogado?.nome || '';
   document.getElementById('verificacao-data').value = hojeISO();
   document.getElementById('verificacao-hora').value = agora.toTimeString().slice(0,5);
@@ -3620,7 +3641,7 @@ function toggleFiltros(id){
 
 // Retorna a data do primeiro dia do mês vigente, no formato yyyy-mm-dd (usado em todos os filtros de data do sistema)
 function primeiroDiaMesAtual(){
-  const hoje = new Date();
+  const hoje = agora();
   const primeiroDia = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
   return primeiroDia.toISOString().split('T')[0];
 }
@@ -3630,7 +3651,7 @@ function primeiroDiaMesAtual(){
 // mês, e com o padrão no mês atual eles sumiam da lista todo dia 1º — obrigando a mexer
 // na data manualmente. Pior: limpar o campo faz o Firebase baixar o histórico INTEIRO.
 function primeiroDiaMesAnterior(){
-  const hoje = new Date();
+  const hoje = agora();
   const primeiroDia = new Date(hoje.getFullYear(), hoje.getMonth()-1, 1);
   return primeiroDia.toISOString().split('T')[0];
 }
@@ -3863,8 +3884,8 @@ async function renderPedidos(usarCache){
 
   // Resumo
   const totalValor = pedidos.filter(p=>p.status!=='Cancelado').reduce((s,p)=>s+(p.total||0),0);
-  const mesAtual = new Date().getMonth();
-  const anoAtual = new Date().getFullYear();
+  const mesAtual = agora().getMonth();
+  const anoAtual = agora().getFullYear();
   // Pedidos colocados no mês = TODOS os pedidos CRIADOS no mês vigente, não cancelados
   // (ignora filtros ativos na tela) — isso é diferente de "faturado", que é calculado à parte.
   const totalMes = todosPedidos.filter(p=>{
@@ -3993,7 +4014,7 @@ function podeEditar(p){
   // Admin e Expedição podem editar a qualquer momento — necessário para corrigir pedidos travados na
   // separação/bipagem quando falta item em estoque e não há como produzir a tempo
   if(usuarioLogado?.admin || ehExpedicao()) return true;
-  const agora = Date.now();
+  const agora = agoraTs();
   const criado = new Date(p.data).getTime();
   return (agora - criado) <= 60*60*1000; // 1 hora
 }
@@ -4011,8 +4032,8 @@ let faturarRetroativoCache = [];
 
 function abrirModalFaturarRetroativo(){
   if(!usuarioLogado?.admin){ toast('Acesso restrito — só administradores','error'); return; }
-  document.getElementById('fat-retro-ini').value = `${new Date().getFullYear()}-01-01`;
-  document.getElementById('fat-retro-fim').value = new Date().toISOString().split('T')[0];
+  document.getElementById('fat-retro-ini').value = `${agora().getFullYear()}-01-01`;
+  document.getElementById('fat-retro-fim').value = agora().toISOString().split('T')[0];
   document.getElementById('fat-retro-resultado').innerHTML = '';
   faturarRetroativoCache = [];
   abrirModal('modal-faturar-retroativo');
@@ -4091,7 +4112,7 @@ async function aplicarFaturarRetroativo(){
       const dataFaturamento = p.data.split('T')[0]; // usa a própria data do pedido, só a parte da data
       const historico = pedidoAtualDb.historico_edicoes || [];
       historico.push({
-        ts: Date.now(), usuario_nome: usuarioLogado.nome, usuario_tipo: 'admin',
+        ts: agoraTs(), usuario_nome: usuarioLogado.nome, usuario_tipo: 'admin',
         alteracoes: [`💰 Faturado retroativamente, usando a data do próprio pedido (${fmtData(dataFaturamento)})`]
       });
       await db.ref('pedidos/'+p.id).update({ faturado: true, data_faturamento: dataFaturamento, historico_edicoes: historico });
@@ -4173,7 +4194,7 @@ async function aplicarCorrecaoVendedorMassa(){
     const snap = await db.ref('pedidos/'+p.id+'/historico_edicoes').once('value');
     const historico = snap.val() || [];
     historico.push({
-      ts: Date.now(), usuario_nome: usuarioLogado.nome, usuario_tipo: 'admin',
+      ts: agoraTs(), usuario_nome: usuarioLogado.nome, usuario_tipo: 'admin',
       alteracoes: [`Vendedor corrigido em massa (ID antigo/recriado): "${p.vendedor_nome_atual||'—'}" → "${novoNome}"`]
     });
     await db.ref('pedidos/'+p.id+'/historico_edicoes').set(historico);
@@ -4220,7 +4241,7 @@ async function salvarCorrecaoVendedor(){
 
   const historico = p.historico_edicoes || [];
   historico.push({
-    ts: Date.now(),
+    ts: agoraTs(),
     usuario_nome: usuarioLogado.nome,
     usuario_tipo: 'admin',
     alteracoes: [`Vendedor corrigido manualmente: "${p.vendedor_nome||'—'}" → "${novoNome||'—'}"`]
@@ -4317,7 +4338,7 @@ async function corrigirVendedorPedidosW3EmMassa(){
     const p = snap.val(); if(!p) continue;
     const historico = p.historico_edicoes || [];
     historico.push({
-      ts: Date.now(), usuario_nome: usuarioLogado.nome, usuario_tipo: 'admin',
+      ts: agoraTs(), usuario_nome: usuarioLogado.nome, usuario_tipo: 'admin',
       alteracoes: [`Vendedor corrigido em massa (importação W3): "${p.vendedor_nome||'—'}" → "${d.vendedorCorretoNome}"`]
     });
     await db.ref('pedidos/'+d.id).update({
@@ -4337,7 +4358,7 @@ async function verPedido(id){
     const snap = await db.ref('pedidos/'+id).once('value');
     const p = snap.val(); if(!p) return;
     const bloqueado = !podeEditar(p);
-    const tempoRestante = Math.max(0, 60 - Math.floor((Date.now()-new Date(p.data).getTime())/60000));
+    const tempoRestante = Math.max(0, 60 - Math.floor((agoraTs()-new Date(p.data).getTime())/60000));
 
     document.getElementById('ver-pedido-conteudo').innerHTML = `
       <div style="font-family:'DM Sans',sans-serif;font-size:20px;font-weight:700;margin-bottom:4px">
@@ -4472,7 +4493,7 @@ async function abrirModalFaturarPedido(id){
   const snap = await db.ref('pedidos/'+id).once('value');
   const p = snap.val(); if(!p) return;
   document.getElementById('faturar-pedido-id').value = id;
-  document.getElementById('faturar-pedido-data').value = p.data_faturamento ? p.data_faturamento.split('T')[0] : new Date().toISOString().split('T')[0];
+  document.getElementById('faturar-pedido-data').value = p.data_faturamento ? p.data_faturamento.split('T')[0] : agora().toISOString().split('T')[0];
   document.querySelector('#modal-faturar-pedido .modal-title').textContent = '💰 Marcar Pedido como Faturado';
   abrirModal('modal-faturar-pedido');
 }
@@ -4485,7 +4506,7 @@ async function abrirModalFaturarLote(){
   if(!pedidosSelecionadosImprimir.size){ toast('Marque ao menos um pedido para marcar como faturado','error'); return; }
   faturarLoteIds = Array.from(pedidosSelecionadosImprimir);
   document.getElementById('faturar-pedido-id').value = '';
-  document.getElementById('faturar-pedido-data').value = new Date().toISOString().split('T')[0];
+  document.getElementById('faturar-pedido-data').value = agora().toISOString().split('T')[0];
   document.querySelector('#modal-faturar-pedido .modal-title').textContent = `💰 Marcar ${faturarLoteIds.length} Pedido(s) como Faturado`;
   abrirModal('modal-faturar-pedido');
 }
@@ -4505,7 +4526,7 @@ async function confirmarFaturamentoPedido(){
         const jaEstavaFaturado = !!p.faturado;
         const historico = p.historico_edicoes || [];
         historico.push({
-          ts: Date.now(), usuario_nome: usuarioLogado.nome, usuario_tipo: 'admin',
+          ts: agoraTs(), usuario_nome: usuarioLogado.nome, usuario_tipo: 'admin',
           alteracoes: [jaEstavaFaturado
             ? `💰 Data de faturamento alterada (em lote): ${fmtData(p.data_faturamento)} → ${fmtData(dataEscolhida)}`
             : `💰 Pedido marcado como Faturado em lote, em ${fmtData(dataEscolhida)}`]
@@ -4531,7 +4552,7 @@ async function confirmarFaturamentoPedido(){
     const jaEstavaFaturado = !!p.faturado;
     const historico = p.historico_edicoes || [];
     historico.push({
-      ts: Date.now(), usuario_nome: usuarioLogado.nome,
+      ts: agoraTs(), usuario_nome: usuarioLogado.nome,
       usuario_tipo: usuarioLogado.admin ? 'admin' : (usuarioLogado.tipo || 'vendedor'),
       alteracoes: [jaEstavaFaturado
         ? `💰 Data de faturamento alterada: ${fmtData(p.data_faturamento)} → ${fmtData(dataEscolhida)}`
@@ -4815,7 +4836,7 @@ async function exportarPedidosW3(){
   });
 
   const cabecalho = ['NUMERO_PEDIDO','VENDEDOR','CLIENTE','FORMA_PAGAMENTO','CONDICAO','OBSERVACAO','CODIGO_PRODUTO','QUANTIDADE','VALOR_UNITARIO','DESCONTO_ITEM','DESCONTO_GERAL'];
-  const data = new Date().toLocaleDateString('pt-BR').replace(/\//g,'-');
+  const data = agora().toLocaleDateString('pt-BR').replace(/\//g,'-');
 
   if(typeof XLSX !== 'undefined'){
     const ws = XLSX.utils.aoa_to_sheet([cabecalho, ...linhas]);
@@ -4879,7 +4900,7 @@ async function reativarPedido(id){
     // Registra no histórico
     const historico = p.historico_edicoes || [];
     historico.push({
-      ts: Date.now(),
+      ts: agoraTs(),
       usuario_nome: usuarioLogado.nome,
       usuario_tipo: 'admin',
       alteracoes: [`Pedido reativado — status restaurado para "${labelStatus[statusAnterior]||statusAnterior}". Reserva de estoque restaurada.`]
@@ -4929,7 +4950,7 @@ async function cancelarPedido(id){
       if(cli?._key){
         await aplicarDeltaCredito(cli._key, creditoUsado);
         await db.ref('pedidos/'+id+'/credito_debitado_valor').set(0);
-        await db.ref('pedidos/'+id+'/credito_devolvido_em').set(Date.now());
+        await db.ref('pedidos/'+id+'/credito_devolvido_em').set(agoraTs());
         toast(`💰 ${fmtMoeda(creditoUsado)} de crédito devolvido a ${p.cliente_nome}`,'success');
       } else {
         toast(`⚠ Não foi possível devolver ${fmtMoeda(creditoUsado)} de crédito: cliente não localizado no cadastro. Ajuste manualmente.`,'error');
@@ -5253,7 +5274,7 @@ async function carregarCampanhasFirebase(){
 }
 
 function hojeISO(){
-  const d = new Date();
+  const d = agora();
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 }
 
@@ -5519,7 +5540,7 @@ async function adminSalvarCampanha(){
       id, nome, data_inicio: ini, data_fim: fim,
       pedido_minimo: Math.round(minimo*100)/100,
       ativa: true, itens: r.itens,
-      atualizado_em: new Date().toISOString(),
+      atualizado_em: agora().toISOString(),
       atualizado_por: usuarioLogado?.nome || ''
     });
     await carregarCampanhasFirebase();
@@ -5654,9 +5675,9 @@ async function aplicarMinimosCampanha(){
   if(!confirm(`Baixar o preço mínimo de ${marcados.length} item(ns) da campanha "${r.camp.nome}"?\n\nFolga de ${r.margem}% abaixo do menor preço promocional.\n\nOs valores atuais serão salvos em backup e podem ser desfeitos.`)) return;
 
   try {
-    const backupKey = 'bk_' + Date.now();
+    const backupKey = 'bk_' + agoraTs();
     await db.ref('backups_preco_minimo/'+backupKey).set({
-      ts: Date.now(), data: new Date().toISOString(),
+      ts: agoraTs(), data: agora().toISOString(),
       usuario: usuarioLogado.nome || '', campanha: r.camp.nome || '', margem: r.margem,
       itens: marcados.map(l=>({ codigo:l.codigo, anterior:l.atual, novo:l.sugerido }))
     });
@@ -6166,7 +6187,7 @@ function calcularParcelas(){
     return c.split('/').map(Number).filter(n=>!isNaN(n));
   };
   const dias = parseDias(condicao);
-  const hoje = new Date();
+  const hoje = agora();
   const parcelas = dias.map((d,i)=>{
     const venc = new Date(hoje);
     venc.setDate(venc.getDate()+d);
@@ -6369,7 +6390,7 @@ async function confirmarPedido(){
       const mudancas = gerarResumoAlteracoesPedido(pedidoOriginal, pedidoAtual.itens, forma, condicao, obsAtual, dg, pedidoAtual.credito_aplicado);
       if(mudancas.length){
         historicoEdicoes = [...historicoEdicoes, {
-          ts: Date.now(),
+          ts: agoraTs(),
           usuario_nome: usuarioLogado.nome,
           usuario_tipo: usuarioLogado.admin ? 'admin' : (usuarioLogado.tipo || 'vendedor'),
           alteracoes: mudancas
@@ -6380,13 +6401,13 @@ async function confirmarPedido(){
     // sempre com data/hora exata e quem foi o responsável
     if(convertendoOrcamento){
       historicoEdicoes = [...historicoEdicoes, {
-        ts: Date.now(), usuario_nome: usuarioLogado.nome,
+        ts: agoraTs(), usuario_nome: usuarioLogado.nome,
         usuario_tipo: usuarioLogado.admin ? 'admin' : (usuarioLogado.tipo || 'vendedor'),
         alteracoes: [`Orçamento #${pedidoOriginal.numero} aprovado e convertido em Pedido`]
       }];
     } else if(!pedidoAtual.editando){
       historicoEdicoes = [{
-        ts: Date.now(), usuario_nome: usuarioLogado.nome,
+        ts: agoraTs(), usuario_nome: usuarioLogado.nome,
         usuario_tipo: usuarioLogado.admin ? 'admin' : (usuarioLogado.tipo || 'vendedor'),
         alteracoes: ['Pedido criado']
       }];
@@ -6395,7 +6416,7 @@ async function confirmarPedido(){
     const pedido = {
       ...(pedidoOriginal || {}), // preserva tudo que já existia (data original, status, codigo_w3, bipagem, etc.)
       id: pedidoAtual.id || db.ref('pedidos').push().key,
-      numero, data: convertendoOrcamento ? new Date().toISOString() : (pedidoOriginal?.data || new Date().toISOString()),
+      numero, data: convertendoOrcamento ? agora().toISOString() : (pedidoOriginal?.data || agora().toISOString()),
       cliente_codigo:c.codigo, cliente_nome:c.nome, cliente_cpf:c.cpf_cnpj||'',
       cliente_cidade:c.cidade||'', cliente_uf:c.uf||'',
       cliente_endereco: c.endereco||c.end||'', cliente_cep: c.cep||'',
@@ -6544,14 +6565,14 @@ async function salvarComoOrcamento(){
     // Registra a criação do orçamento — só na primeira vez, com data/hora exata e quem criou
     const historicoOrc = editandoExistente
       ? (dadosOriginais.historico_edicoes || [])
-      : [{ ts: Date.now(), usuario_nome: usuarioLogado.nome,
+      : [{ ts: agoraTs(), usuario_nome: usuarioLogado.nome,
            usuario_tipo: usuarioLogado.admin ? 'admin' : (usuarioLogado.tipo || 'vendedor'),
            alteracoes: ['Orçamento criado'] }];
 
     const orcamento = {
       ...dadosOriginais,
       id, numero,
-      data: dadosOriginais.data || new Date().toISOString(),
+      data: dadosOriginais.data || agora().toISOString(),
       cliente_codigo:c.codigo, cliente_nome:c.nome, cliente_cpf:c.cpf_cnpj||'',
       cliente_cidade:c.cidade||'', cliente_uf:c.uf||'',
       cliente_endereco: c.endereco||c.end||'', cliente_cep: c.cep||'',
@@ -6665,11 +6686,12 @@ async function renderOrcamentos(){
           <div style="font-family:'DM Sans',sans-serif;font-weight:700;font-size:14px">#${p.numero_orcamento_origem || p.numero}</div>
           <div style="margin-top:2px">${badgesOrc[p._status_orcamento]}</div>
         </div>
-        <div style="flex-shrink:0;font-size:12px;color:var(--muted);min-width:70px">${fmtData(p.data)}</div>
+        <div style="flex-shrink:0;font-size:12px;color:var(--muted);min-width:70px">${fmtData(p.data_orcamento_origem || p.data)}</div>
         <div style="flex:1;min-width:0;overflow:hidden">
           <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">👤 ${esc(p.cliente_nome)}</div>
           <div style="font-size:11px;color:var(--muted)">📦 ${(p.itens||[]).length} iten(s)${p._status_orcamento==='aprovado'?' · virou Pedido #'+p.numero:''}</div>
         </div>
+        <div style="flex-shrink:0;font-size:12px;color:var(--muted);min-width:80px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(p.vendedor_nome||'')}">👤 ${esc((p.vendedor_nome||'').split(' ')[0])}</div>
         <div style="flex-shrink:0;text-align:right;min-width:90px">
           <div style="font-family:'DM Sans',sans-serif;font-weight:700;font-size:14px;color:var(--success)">${fmtMoeda(p.total)}</div>
         </div>
@@ -6975,8 +6997,8 @@ async function salvarInsumo(){
     preco_custo: Number(document.getElementById('insumo-custo').value)||0,
     localizacao: document.getElementById('insumo-localizacao').value.trim(),
     categoria: document.getElementById('insumo-categoria').value||'',
-    ts: Date.now(),
-    ...(!keyExistente ? { ts_cadastro: Date.now(), inativo: !!document.getElementById('insumo-inativo-criacao')?.checked } : {})
+    ts: agoraTs(),
+    ...(!keyExistente ? { ts_cadastro: agoraTs(), inativo: !!document.getElementById('insumo-inativo-criacao')?.checked } : {})
   };
   // Ao editar, preserva campos não tratados nesta tela (fornecedores múltiplos, GTIN, inativo)
   if(keyExistente){
@@ -7117,7 +7139,7 @@ async function salvarFornecedor(){
     }
   }
 
-  const key = keyExistente || 'forn_' + Date.now();
+  const key = keyExistente || 'forn_' + agoraTs();
   const dados = {
     nome,
     cnpj: document.getElementById('fornecedor-cnpj').value.trim(),
@@ -7126,7 +7148,7 @@ async function salvarFornecedor(){
     contato: document.getElementById('fornecedor-contato').value.trim(),
     prazo_entrega_dias: Number(document.getElementById('fornecedor-prazo-entrega').value) || 0,
     obs: document.getElementById('fornecedor-obs').value.trim(),
-    ts: Date.now()
+    ts: agoraTs()
   };
   await db.ref('fornecedores/'+key).set(dados);
   fecharModal('modal-fornecedor');
@@ -7475,7 +7497,7 @@ function exportarOPsSelecionadasExcel(){
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(dados);
   XLSX.utils.book_append_sheet(wb, ws, 'Ordens de Produção');
-  const hoje = new Date().toISOString().split('T')[0];
+  const hoje = agora().toISOString().split('T')[0];
   XLSX.writeFile(wb, `ops_crow_${hoje}.xlsx`);
   toast(`✓ Excel gerado com ${dados.length} OP(s)`,'success');
 }
@@ -7631,7 +7653,7 @@ async function criarOP(){
   const numSnap = await db.ref('contador_op').transaction(v => (v||0) + 1);
   const numero = numSnap.snapshot.val();
 
-  // push() gera chave única mesmo em criações simultâneas. Date.now() colidia quando
+  // push() gera chave única mesmo em criações simultâneas. agoraTs() colidia quando
   // duas OPs nasciam no mesmo milissegundo, e uma sobrescrevia a outra por inteiro.
   const key = 'op_' + db.ref('ordens_producao').push().key;
   await db.ref('ordens_producao/'+key).set({
@@ -7645,7 +7667,7 @@ async function criarOP(){
     receita: opProdutoSelecionado.receita,
     pedido_origem: pedidoOrigem || null,
     responsavel: usuarioLogado.nome,
-    ts_criacao: Date.now(),
+    ts_criacao: agoraTs(),
     ts_conclusao: null
   });
 
@@ -7776,7 +7798,7 @@ async function salvarQtdEIniciar(key){
     qtd_solicitada: novaQtd,
     status: 'em_producao',
     responsavel_producao: responsavelProducao,
-    ts_iniciada: Date.now()
+    ts_iniciada: agoraTs()
   });
   fecharModal('modal-op-detalhe');
   await renderProducao();
@@ -7962,7 +7984,7 @@ async function concluirOP(key){
     await db.ref('ordens_producao/'+key).update({
       status: 'concluida',
       qtd_produzida: qtdProduzida,
-      ts_conclusao: Date.now()
+      ts_conclusao: agoraTs()
     });
 
     // Nos caminhos legado (campo 'estoque') e de produto novo o saldo é gravado direto,
@@ -8092,7 +8114,7 @@ async function gravarMovimentoPendente(dados){
     tipo: dados.tipoPrevisto, qtd: Number(dados.qtdPrevista)||0,
     motivo: dados.motivo || '',
     usuario: usuarioLogado?.nome || 'Sistema',
-    ts: Date.now(),
+    ts: agoraTs(),
     origem_tipo: dados.origemTipo || null,
     origem_id: dados.origemId || null,
     pendente: true
@@ -8207,7 +8229,7 @@ async function registrarMovimentoEstoque(codigo, nome, tipo, qtd, motivo, origem
     codigo, nome, tipo, qtd: Number(qtd),
     motivo: motivo || '',
     usuario: usuarioLogado?.nome || 'Sistema',
-    ts: Date.now(),
+    ts: agoraTs(),
     origem_tipo: origemTipo,   // 'pedido' | 'op' | 'compra' (futuro) | null
     origem_id: origemId        // id do pedido, key da OP, etc.
   });
@@ -8387,7 +8409,7 @@ async function exportarEstoqueExcel(){
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(dados);
   XLSX.utils.book_append_sheet(wb, ws, 'Estoque');
-  const dataHoje = new Date().toISOString().split('T')[0];
+  const dataHoje = agora().toISOString().split('T')[0];
   XLSX.writeFile(wb, `estoque_crow_${dataHoje}.xlsx`);
   toast(`✓ Excel gerado com ${dados.length} itens`,'success');
 }
@@ -9055,7 +9077,7 @@ async function abrirOrigemMovimento(tipo, id){
 
 async function abrirModalNovaCompra(){
   if(!temPermissaoEditar('compras')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
-  compraAtual = { id: null, fornecedor: '', nf: '', data: new Date().toISOString().split('T')[0], frete: 0, desconto: 0, obs: '', numero_origem: null, status: 'negociacao', condicao_pagamento: '', itens: [] };
+  compraAtual = { id: null, fornecedor: '', nf: '', data: agora().toISOString().split('T')[0], frete: 0, desconto: 0, obs: '', numero_origem: null, status: 'negociacao', condicao_pagamento: '', itens: [] };
   document.getElementById('modal-compra-titulo').textContent = 'Novo Pedido de Compra';
   if(!INSUMOS_DB.length) await carregarInsumosFirebase();
   if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
@@ -9129,7 +9151,7 @@ async function clonarPedidoCompra(id){
 
   compraAtual = {
     id: null, // sempre cria pedido novo
-    fornecedor: c.fornecedor, nf: '', data: new Date().toISOString().split('T')[0], frete: c.frete || 0,
+    fornecedor: c.fornecedor, nf: '', data: agora().toISOString().split('T')[0], frete: c.frete || 0,
     status: 'negociacao', condicao_pagamento: c.condicao_pagamento || '',
     itens: (c.itens||[]).map(i => ({
       codigo: i.codigo, nome: i.nome, tipo: i.tipo,
@@ -9348,7 +9370,7 @@ function atualizarPreviewParcelasCompra(){
   }
   if(!dias.length){ previewEl.innerHTML = ''; return; }
 
-  const hoje = new Date();
+  const hoje = agora();
   const parcelas = dias.map((d,i)=>{
     const venc = new Date(hoje);
     venc.setDate(venc.getDate()+d);
@@ -9466,7 +9488,7 @@ async function salvarPedidoCompra(){
     numero_origem: compraAtual.numero_origem || null,
     status: compraAtual.status, itens: compraAtual.itens,
     condicao_pagamento: compraAtual.condicao_pagamento || '',
-    total: totalGeral, ts_criacao: compraAtual.ts_criacao || Date.now(),
+    total: totalGeral, ts_criacao: compraAtual.ts_criacao || agoraTs(),
     criado_por: usuarioLogado.nome,
     historico_status: historicoExistente || null,
     origem: compraAtual.origem || null
@@ -9510,7 +9532,7 @@ async function darEntradaEstoqueCompra(compraId, compra, statusAnterior){
         + '\n\nOK = lançar de novo (só se a entrada anterior não tiver acontecido)'
         + '\nCancelar = não lançar (recomendado)');
       if(!ok){
-        await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado').set({ legado:true, ts:Date.now() });
+        await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado').set({ legado:true, ts:agoraTs() });
         toast('Entrada não repetida — compra marcada como já aplicada','success');
         return;
       }
@@ -9538,7 +9560,7 @@ async function darEntradaEstoqueCompra(compraId, compra, statusAnterior){
 
     // Marca item a item, logo após aplicar: se cair aqui, o próximo recebimento retoma
     // exatamente de onde parou.
-    await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado/'+chaveItem).set({ qtd:item.qtd, ts:Date.now() });
+    await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado/'+chaveItem).set({ qtd:item.qtd, ts:agoraTs() });
     entraram++;
   }
 
@@ -9614,7 +9636,7 @@ async function exportarComprasExcel(){
   const cabecalho = ['FORNECEDOR','NF','PEDIDO_ORIGEM','DATA','STATUS','CONDICAO_PAGAMENTO',
     'CODIGO','CODIGO_FORNECEDOR','DESCRICAO','QTD','VALOR_UNIT','IPI_%','VALOR_IPI','VALOR_ST',
     'RATEIO_FRETE','CUSTO_FINAL_UNIT','CUSTO_TOTAL_ITEM'];
-  const dataHoje = new Date().toLocaleDateString('pt-BR').replace(/\//g,'-');
+  const dataHoje = agora().toLocaleDateString('pt-BR').replace(/\//g,'-');
 
   const ws = XLSX.utils.aoa_to_sheet([cabecalho, ...linhas]);
   ws['!cols'] = [20,10,12,12,16,16,12,16,32,8,12,8,12,8,12,12,14,14].map(w=>({wch:w}));
@@ -9677,7 +9699,7 @@ async function renderCompras(){
 }
 
 function definirFiltroPadraoCompras(){
-  const hoje = new Date();
+  const hoje = agora();
   const primeiroDiaMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
   const ultimoDiaMes = new Date(hoje.getFullYear(), hoje.getMonth()+1, 0);
   document.getElementById('compra-f-data-ini').value = primeiroDiaMes.toISOString().split('T')[0];
@@ -9992,7 +10014,7 @@ async function registrarHistoricoStatusCompra(compraId, statusAnterior, statusNo
   await db.ref('pedidos_compra/'+compraId+'/historico_status/'+logKey).set({
     de: statusAnterior || null,
     para: statusNovo,
-    ts: Date.now(),
+    ts: agoraTs(),
     usuario: usuarioLogado?.nome || ''
   });
 }
@@ -10159,7 +10181,7 @@ async function confirmarRegistroDefeito(){
     manual: ehManual || false,
     status: 'pendente',
     registrado_por: usuarioLogado.nome,
-    ts: Date.now()
+    ts: agoraTs()
   });
 
   fecharModal('modal-defeito');
@@ -10326,7 +10348,7 @@ async function alterarStatusGarantiaEmLote(){
   if(!ok) return;
 
   const dados = { status: novoStatus };
-  if(novoStatus === 'finalizado') dados.finalizado_em = Date.now();
+  if(novoStatus === 'finalizado') dados.finalizado_em = agoraTs();
 
   let count = 0;
   for(const id of garantiasSelecionadas){
@@ -10357,7 +10379,7 @@ async function alterarStatusGarantia(id, novoStatus){
   const dados = { status: novoStatus };
   if(novoStatus === 'finalizado'){
     dados.resolvido_por = usuarioLogado.nome;
-    dados.ts_resolucao = Date.now();
+    dados.ts_resolucao = agoraTs();
   }
   await db.ref('garantias/'+id).update(dados);
   await renderGarantias();
@@ -10388,7 +10410,7 @@ async function cancelarGarantia(id){
   const g = GARANTIAS_CACHE.find(x=>x.id===id);
   if(!g) return;
   if(!confirm(`Cancelar este registro de garantia (${g.codigo} — ${g.nome})?\n\nO estoque NÃO será devolvido automaticamente — se a peça não tinha mesmo defeito, ajuste o estoque manualmente na aba Estoque.`)) return;
-  await db.ref('garantias/'+id).update({ status: 'cancelado', cancelado_por: usuarioLogado.nome, ts_cancelamento: Date.now() });
+  await db.ref('garantias/'+id).update({ status: 'cancelado', cancelado_por: usuarioLogado.nome, ts_cancelamento: agoraTs() });
   await renderGarantias();
   toast('✓ Garantia cancelada','success');
 }
@@ -10436,7 +10458,7 @@ function abrirRelatorioGarantias(){
 
   document.getElementById('relatorio-garantias-conteudo').innerHTML = `
     <div class="modal-title">📄 Relatório de Garantias Pendentes</div>
-    <div style="font-size:13px;color:var(--muted);margin-bottom:18px">Gerado em ${new Date().toLocaleString('pt-BR')} · ${pendentes.length} registro(s) no total</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:18px">Gerado em ${agora().toLocaleString('pt-BR')} · ${pendentes.length} registro(s) no total</div>
     <div id="relatorio-garantias-imprimir">${html}</div>
     <div class="form-actions" style="margin-top:18px">
       <button class="btn btn-outline" onclick="fecharModal('modal-relatorio-garantias')">Fechar</button>
@@ -10460,7 +10482,7 @@ function imprimirRelatorioGarantias(){
     </style>
     </head><body>
       <h2>Relatório de Garantias Pendentes — CROW</h2>
-      <p style="color:#666;font-size:13px">Gerado em ${new Date().toLocaleString('pt-BR')}</p>
+      <p style="color:#666;font-size:13px">Gerado em ${agora().toLocaleString('pt-BR')}</p>
       ${conteudo}
     </body></html>
   `);
@@ -10702,7 +10724,7 @@ async function confirmarGerarOPSeparacao(){
   const numSnap = await db.ref('contador_op').transaction(v=>(v||0)+1);
   const numero = numSnap.snapshot.val();
 
-  // push() gera chave única mesmo em criações simultâneas. Date.now() colidia quando
+  // push() gera chave única mesmo em criações simultâneas. agoraTs() colidia quando
   // duas OPs nasciam no mesmo milissegundo, e uma sobrescrevia a outra por inteiro.
   const key = 'op_' + db.ref('ordens_producao').push().key;
   await db.ref('ordens_producao/'+key).set({
@@ -10715,7 +10737,7 @@ async function confirmarGerarOPSeparacao(){
     receita: receita ? receita.itens : [],
     pedido_origem: '#' + pedidoSeparacaoAtual.numero,
     responsavel: usuarioLogado.nome,
-    ts_criacao: Date.now(),
+    ts_criacao: agoraTs(),
     ts_conclusao: null
   });
 
@@ -10726,7 +10748,7 @@ async function confirmarGerarOPSeparacao(){
 
 // ── Bipagem final ──
 async function irParaBipagem(){
-  pedidoSeparacaoAtual.ts_inicio_bipagem = Date.now();
+  pedidoSeparacaoAtual.ts_inicio_bipagem = agoraTs();
   await db.ref('pedidos/'+pedidoSeparacaoAtual.id+'/ts_inicio_bipagem').set(pedidoSeparacaoAtual.ts_inicio_bipagem);
   fecharModal('modal-separacao');
   renderModalBipagem();
@@ -10836,7 +10858,7 @@ async function processarBipagem(codigoLido){
     codigo: itemAtual.codigo,
     nome: itemAtual.nome,
     unidade_numero: itemAtual.qtd_bipada,
-    ts: Date.now(),
+    ts: agoraTs(),
     usuario: usuarioLogado?.nome || ''
   });
 
@@ -10887,7 +10909,7 @@ async function finalizarPedidoBipado(){
     let jaBaixado = false;
     await db.ref('pedidos/'+p.id+'/baixa_estoque_ts').transaction(atual => {
       if(atual){ jaBaixado = true; return atual; }
-      return Date.now();
+      return agoraTs();
     });
     if(jaBaixado){
       toast(`Pedido #${p.numero} já teve baixa de estoque — nada foi alterado`,'error');
@@ -10921,7 +10943,7 @@ async function finalizarPedidoBipado(){
     // Finalizar pedido
     await db.ref('pedidos/'+p.id).update({
       status: 'CC',
-      ts_fim_bipagem: Date.now(),
+      ts_fim_bipagem: agoraTs(),
       bipado_por: usuarioLogado?.nome || ''
     });
     toast(`✅ Pedido #${p.numero} concluído! Estoque atualizado.`,'success');
@@ -11163,7 +11185,7 @@ async function salvarCliente(){
       toast('✓ Cliente atualizado!','success');
     } else {
       // Modo criação manual: cliente ainda não existe no W3 — marcado como pendente de cadastro lá
-      const novo = { codigo:'N'+Date.now(), ...dados, novo:true, pendente_w3: true, ts_cadastro: Date.now(), criado_por: usuarioLogado.nome };
+      const novo = { codigo:'N'+agoraTs(), ...dados, novo:true, pendente_w3: true, ts_cadastro: agoraTs(), criado_por: usuarioLogado.nome };
       const key = 'c' + novo.codigo;
       await db.ref('clientes/' + key).set(novo);
       CLIENTES_DB.push(novo);
@@ -12282,7 +12304,7 @@ async function salvarEdicaoProduto(codigoAntigo){
   // se o valor foi deliberadamente alterado, e aí passa por balanço, com rastro.
   const dadosAtualizados = {
     nome, unidade, preco_venda, preco_minimo, estoque_minimo, gtin, localizacao, categoria, etiqueta_unica_por_lote,
-    ...(isNovo ? { ts_cadastro: Date.now(), quantidade } : {})
+    ...(isNovo ? { ts_cadastro: agoraTs(), quantidade } : {})
   };
 
   if(novoCodigo !== codigoAntigo){
@@ -12441,7 +12463,7 @@ async function salvarNovoProdutoVendavel(codigoTemp){
     localizacao: document.getElementById('pd-localizacao')?.value.trim()||'',
     gtin: document.getElementById('pd-gtin')?.value.trim()||'',
     categoria: document.getElementById('pd-categoria')?.value || '',
-    ts_cadastro: Date.now(), pendente_w3: true, novo: true,
+    ts_cadastro: agoraTs(), pendente_w3: true, novo: true,
     inativo: !!document.getElementById('pd-inativo-criacao')?.checked
   };
   await db.ref('produtos/'+novoCodigo).set(produto);
@@ -12651,7 +12673,7 @@ async function salvarVendedor(){
     if(!pass){ toast('Senha é obrigatória para novo usuário','error'); return; }
     const snap=await db.ref('usuarios').orderByChild('usuario').equalTo(user).once('value');
     if(snap.val()){ toast('Usuário já existe','error'); return; }
-    const novoId='v'+Date.now();
+    const novoId='v'+agoraTs();
     await db.ref('usuarios/'+novoId).set({ id:novoId, nome, usuario:user, senha:pass,
       telefone:document.getElementById('vend-tel').value,
       email:document.getElementById('vend-email').value, admin, tipo,
@@ -12761,13 +12783,13 @@ async function vincularClientesPorVendedor(){
         } else {
           // Cliente novo: cadastra já vinculado ao vendedor selecionado
           if(!cpfLimpo) semDocumento++;
-          const novoCodigo = linha.codigo || ('IMP'+Date.now()+Math.floor(Math.random()*10000));
+          const novoCodigo = linha.codigo || ('IMP'+agoraTs()+Math.floor(Math.random()*10000));
           const novoCliente = {
             codigo: novoCodigo, nome: linha.nome.toUpperCase(), cpf_cnpj: linha.cpf_cnpj,
             telefone: linha.telefone, email: linha.email, endereco: linha.endereco,
             cidade: linha.cidade.toUpperCase(), uf: linha.uf, cep: linha.cep,
             vendedor_id: vendedorId, vendedor_nome: vendedorNome,
-            ts_cadastro: Date.now(), importado_csv: true, pendente_w3: false
+            ts_cadastro: agoraTs(), importado_csv: true, pendente_w3: false
           };
           updates['clientes/c'+novoCodigo] = novoCliente;
           CLIENTES_DB.push(novoCliente);
@@ -12822,11 +12844,11 @@ async function importarClientes(){
         );
         if(duplicado){ jaExistiam++; continue; }
 
-        const novoCodigo = c.codigo || ('IMP'+Date.now()+Math.floor(Math.random()*1000));
+        const novoCodigo = c.codigo || ('IMP'+agoraTs()+Math.floor(Math.random()*1000));
         const novoCliente = {
           codigo: novoCodigo, nome: c.nome.toUpperCase(), cpf_cnpj: c.cpf_cnpj,
           telefone: c.telefone, email: c.email, cidade: c.cidade.toUpperCase(), uf: c.uf,
-          vendedor_id: null, ts_cadastro: Date.now(), importado_csv: true, pendente_w3: false
+          vendedor_id: null, ts_cadastro: agoraTs(), importado_csv: true, pendente_w3: false
         };
         await db.ref('clientes/c'+novoCodigo).set(novoCliente);
         CLIENTES_DB.push(novoCliente);
@@ -13014,7 +13036,7 @@ function lerCSVCompleto(texto, separador){
 
 function parseDataBR(str){
   const [d,m,a] = (str||'').split('/');
-  if(!d||!m||!a) return new Date().toISOString();
+  if(!d||!m||!a) return agora().toISOString();
   return new Date(`${a}-${m}-${d}T12:00:00`).toISOString();
 }
 
@@ -13616,7 +13638,7 @@ async function exportarPedidosW3PorPeriodoExcel(){
   const ws2 = XLSX.utils.json_to_sheet(itens);
   XLSX.utils.book_append_sheet(wb, ws2, 'Itens');
 
-  const hoje = new Date().toISOString().split('T')[0];
+  const hoje = agora().toISOString().split('T')[0];
   XLSX.writeFile(wb, `pedidos_w3_${ini}_a_${fim}_${hoje}.xlsx`);
 
   el.innerHTML = `<span style="color:var(--success)">✅ Excel gerado com ${pedidos.length} pedido(s) e ${itens.length} item(ns). Confira antes de remover.</span>`;
@@ -13844,7 +13866,7 @@ async function imprimirCapaPedidoCompra(id){
     </tbody>
   </table>
   ${c.obs?`<div class="obs"><strong>⚠️ Observações:</strong><br>${c.obs}</div>`:''}
-  <div class="footer">Sistema Crow · Pedido de Compra ${c.numero_origem||id} · ${esc(c.fornecedor)} · Gerado em ${new Date().toLocaleString('pt-BR')}</div>
+  <div class="footer">Sistema Crow · Pedido de Compra ${c.numero_origem||id} · ${esc(c.fornecedor)} · Gerado em ${agora().toLocaleString('pt-BR')}</div>
   <script>window.onload=()=>setTimeout(()=>window.print(),300);<\/script>
   </body></html>`);
   win.document.close();
@@ -14048,7 +14070,7 @@ async function relClientesInativos(dataIni, dataFim, vendedorFiltro, el){
   const snap = await db.ref('pedidos').orderByChild('faturado').equalTo(true).once('value');
   const todos = Object.values(snap.val()||{});
   // Data de referência: se filtrou período, usa a data fim; senão, hoje
-  const refFim = dataFim || new Date().toISOString().split('T')[0];
+  const refFim = dataFim || agora().toISOString().split('T')[0];
   const refIni = dataIni;
   // Clientes que compraram (faturado) neste período
   const compraramNoPeriodo = new Set();
@@ -14315,10 +14337,10 @@ const SUG_DIAS_COBERTURA = 45;    // dias de estoque que a compra deve garantir 
 let SUGESTAO_CONSUMO_CACHE = null;
 
 async function carregarConsumoAnualSugestao(forcar){
-  if(SUGESTAO_CONSUMO_CACHE && !forcar && (Date.now() - SUGESTAO_CONSUMO_CACHE.ts) < 30*60*1000){
+  if(SUGESTAO_CONSUMO_CACHE && !forcar && (agoraTs() - SUGESTAO_CONSUMO_CACHE.ts) < 30*60*1000){
     return SUGESTAO_CONSUMO_CACHE;
   }
-  const desdeTs = Date.now() - SUG_DIAS_HISTORICO*24*60*60*1000;
+  const desdeTs = agoraTs() - SUG_DIAS_HISTORICO*24*60*60*1000;
   // Dois cenarios de demanda na mesma leitura, pro seletor da tela alternar sem reler o Firebase
   const consumo    = { concluidos:{vendavel:{},insumo:{}}, ampliado:{vendavel:{},insumo:{}} };
   const emTransito = { vendavel:{}, insumo:{} };
@@ -14343,6 +14365,7 @@ async function carregarConsumoAnualSugestao(forcar){
   // Consumo de insumos: saídas de estoque (produção), ignorando balanço/estorno
   const snapMov = await db.ref('movimentos_estoque').once('value');
   Object.values(snapMov.val() || {}).forEach(m=>{
+    if(m.pendente || m.falhou) return; // movimento que nao chegou a alterar o saldo: nao e consumo real
     if(m.tipo !== 'saida') return;
     if(m.ts < desdeTs) return;
     const motivoLower = (m.motivo||'').toLowerCase();
@@ -14368,7 +14391,7 @@ async function carregarConsumoAnualSugestao(forcar){
     emTransito.vendavel[op.produto_codigo] = (emTransito.vendavel[op.produto_codigo]||0) + Number(op.qtd_solicitada||0);
   });
 
-  SUGESTAO_CONSUMO_CACHE = { ts:Date.now(), consumo, emTransito };
+  SUGESTAO_CONSUMO_CACHE = { ts:agoraTs(), consumo, emTransito };
   return SUGESTAO_CONSUMO_CACHE;
 }
 
@@ -14832,7 +14855,7 @@ function exportarRelatorioExcelEstoqueMinimo(lista){
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(dados);
   XLSX.utils.book_append_sheet(wb, ws, 'Abaixo do Mínimo');
-  XLSX.writeFile(wb, `estoque_minimo_${new Date().toISOString().split('T')[0]}.xlsx`);
+  XLSX.writeFile(wb, `estoque_minimo_${agora().toISOString().split('T')[0]}.xlsx`);
 }
 
 // ── Diagnóstico de Consumo de Insumos em OPs ──
@@ -14852,7 +14875,7 @@ function exportarRelatorioExcelEstoqueMinimo(lista){
 // criação do pedido) — usa a % de comissão cadastrada individualmente em cada vendedor.
 // ══════════════════════════════════════════════
 async function relComissionamento(el){
-  const hoje = new Date();
+  const hoje = agora();
   const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().split('T')[0];
   const fimHoje = hoje.toISOString().split('T')[0];
   el.innerHTML = `
@@ -14970,7 +14993,7 @@ function exportarComissionamentoExcel(){
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(dados);
   XLSX.utils.book_append_sheet(wb, ws, 'Comissionamento');
-  XLSX.writeFile(wb, `comissionamento_${new Date().toISOString().split('T')[0]}.xlsx`);
+  XLSX.writeFile(wb, `comissionamento_${agora().toISOString().split('T')[0]}.xlsx`);
 }
 
 async function relMRP(el){
@@ -15024,7 +15047,7 @@ async function calcularMRP(){
   if(!FORNECEDORES_DB.length) await carregarFornecedoresFirebase();
   if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
 
-  const desdeTs = Date.now() - diasHistorico*24*60*60*1000;
+  const desdeTs = agoraTs() - diasHistorico*24*60*60*1000;
   const consumoPorCodigo = {}; // codigo -> total consumido/vendido no período
   const emTransitoPorCodigo = {};
 
@@ -15033,6 +15056,7 @@ async function calcularMRP(){
     const snapMov = await db.ref('movimentos_estoque').once('value');
     const movimentos = Object.values(snapMov.val() || {});
     movimentos.forEach(m=>{
+      if(m.pendente || m.falhou) return; // movimento que nao chegou a alterar o saldo: nao e consumo real
       if(m.tipo !== 'saida') return;
       if(m.ts < desdeTs) return;
       const motivoLower = (m.motivo||'').toLowerCase();
@@ -15116,7 +15140,7 @@ async function calcularMRP(){
     const qtdSugerida = Math.max(0, Math.round(necessidadeCobertura - estoqueAtual - emTransito));
 
     const dataSugerida = (cmd > 0 && isFinite(diasAteComprar))
-      ? new Date(Date.now() + Math.max(0, diasAteComprar) * 24*60*60*1000)
+      ? new Date(agoraTs() + Math.max(0, diasAteComprar) * 24*60*60*1000)
       : null;
 
     return {
@@ -15197,7 +15221,7 @@ function exportarMRPExcel(){
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(dados);
   XLSX.utils.book_append_sheet(wb, ws, 'MRP');
-  XLSX.writeFile(wb, `mrp_necessidade_compra_${new Date().toISOString().split('T')[0]}.xlsx`);
+  XLSX.writeFile(wb, `mrp_necessidade_compra_${agora().toISOString().split('T')[0]}.xlsx`);
 }
 
 async function relDiagnosticoConsumoInsumos(el){
@@ -15225,6 +15249,7 @@ async function relDiagnosticoConsumoInsumos(el){
   // 2) Consumo já registrado no histórico de movimentação (saídas com origem = OP)
   const consumoRegistrado = {}; // codigo -> qtd
   movimentos.forEach(m => {
+    if(m.pendente || m.falhou) return; // saldo nunca foi aplicado: ignorar
     if(m.tipo === 'saida' && m.origem_tipo === 'op'){
       consumoRegistrado[m.codigo] = (consumoRegistrado[m.codigo] || 0) + Number(m.qtd || 0);
     }
@@ -15305,7 +15330,7 @@ function exportarRelatorioExcelDiagnosticoConsumo(){
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(dados);
   XLSX.utils.book_append_sheet(wb, ws, 'Diagnóstico Consumo');
-  XLSX.writeFile(wb, `diagnostico_consumo_insumos_${new Date().toISOString().split('T')[0]}.xlsx`);
+  XLSX.writeFile(wb, `diagnostico_consumo_insumos_${agora().toISOString().split('T')[0]}.xlsx`);
 }
 
 async function relSugestaoJornal(pedidos, el){
@@ -15445,11 +15470,11 @@ async function criarPedidoCompraDoRelatorio(){
       valorBruto:0, valorIpi:0, valorSt:0, rateioFrete:0, custoTotalItem:0, custoFinalUnitario:0
     }));
     await db.ref('pedidos_compra/'+key).set({
-      fornecedor: forn, nf:'', data: new Date().toISOString().split('T')[0],
+      fornecedor: forn, nf:'', data: agora().toISOString().split('T')[0],
       frete:0, desconto:0, obs:'Gerado pela Sugestão de Compra',
       numero_origem: 'C'+String(numero).padStart(4,'0'),
       status:'negociacao', itens:itensPedido, total:0,
-      ts_criacao:Date.now(), criado_por:usuarioLogado.nome
+      ts_criacao:agoraTs(), criado_por:usuarioLogado.nome
     });
     criados++;
   }
@@ -15473,10 +15498,10 @@ let RECALC_SERIE_CACHE = null;
 // Monta a série de consumo DIÁRIO por item — necessária para extrair o consumo máximo.
 // O total anual sozinho não serve: precisamos do pico observado em um único dia.
 async function carregarSerieDiariaConsumo(forcar){
-  if(RECALC_SERIE_CACHE && !forcar && (Date.now() - RECALC_SERIE_CACHE.ts) < 30*60*1000){
+  if(RECALC_SERIE_CACHE && !forcar && (agoraTs() - RECALC_SERIE_CACHE.ts) < 30*60*1000){
     return RECALC_SERIE_CACHE;
   }
-  const desdeTs = Date.now() - REC_DIAS_HISTORICO*24*60*60*1000;
+  const desdeTs = agoraTs() - REC_DIAS_HISTORICO*24*60*60*1000;
   const porDia = { vendavel:{}, insumo:{} };
 
   const add = (grupo, codigo, dia, qtd)=>{
@@ -15495,6 +15520,7 @@ async function carregarSerieDiariaConsumo(forcar){
 
   const snapMov = await db.ref('movimentos_estoque').once('value');
   Object.values(snapMov.val() || {}).forEach(m=>{
+    if(m.pendente || m.falhou) return; // movimento que nao chegou a alterar o saldo: nao e consumo real
     if(m.tipo !== 'saida') return;
     if(m.ts < desdeTs) return;
     const motivoLower = (m.motivo||'').toLowerCase();
@@ -15503,7 +15529,7 @@ async function carregarSerieDiariaConsumo(forcar){
     add('insumo', m.codigo, dia, Number(m.qtd||0));
   });
 
-  RECALC_SERIE_CACHE = { ts:Date.now(), porDia };
+  RECALC_SERIE_CACHE = { ts:agoraTs(), porDia };
   return RECALC_SERIE_CACHE;
 }
 
@@ -15723,10 +15749,10 @@ async function aplicarRecalcEstoqueMinimo(){
 
   try {
     // 1) Backup dos valores atuais ANTES de qualquer escrita
-    const backupKey = 'bk_' + Date.now();
+    const backupKey = 'bk_' + agoraTs();
     await db.ref('backups_estoque_minimo/'+backupKey).set({
-      ts: Date.now(),
-      data: new Date().toISOString(),
+      ts: agoraTs(),
+      data: agora().toISOString(),
       usuario: usuarioLogado.nome || '',
       itens: marcados.map(l=>({ tipo:l.tipo==='Insumo'?'insumo':'produto', ref:l.refKey,
         codigo:l.codigo, anterior:l.atual, novo:l.sugerido }))
@@ -15827,6 +15853,10 @@ async function relBaixasDuplicadas(el){
   const grupos = {};
   for(const [key, m] of Object.entries(movs)){
     if(!m || m.tipo !== 'saida' || m.origem_tipo !== 'pedido' || !m.origem_id) continue;
+    // Movimento pendente ou falhado NAO chegou a descontar do saldo. Conta-lo como baixa
+    // faria o relatorio enxergar uma duplicidade inexistente, e a correcao DEVOLVERIA ao
+    // estoque uma quantidade que nunca saiu de fato, inflando o saldo.
+    if(m.pendente || m.falhou) continue;
     if(!RX_BAIXA_PEDIDO.test(String(m.motivo||''))) continue; // só a baixa da bipagem
     if(m.corrigido) continue;                                  // já acertado antes
     const g = m.origem_id + '|' + m.codigo;
@@ -15907,7 +15937,7 @@ async function corrigirBaixasDuplicadas(){
       });
       // marca os movimentos excedentes para não reaparecerem na próxima análise
       for(const k of g.keysExtras){
-        await db.ref('movimentos_estoque/'+k+'/corrigido').set(Date.now());
+        await db.ref('movimentos_estoque/'+k+'/corrigido').set(agoraTs());
       }
       ok++;
     } catch(e){ console.error(e); erros++; }
@@ -16216,11 +16246,11 @@ async function aplicarCorrecaoAuditoria(){
   if(!confirm(`Corrigir o saldo de ${marcados.length} item(ns)?\n\nCada um recebe um balanço com o Saldo Esperado e fica registrado no histórico.\nOs saldos atuais serão salvos em backup e podem ser desfeitos.`)) return;
 
   const contador = document.getElementById('aud-contador');
-  const backupKey = 'bk_' + Date.now();
+  const backupKey = 'bk_' + agoraTs();
 
   try {
     await db.ref('backups_saldo_estoque/'+backupKey).set({
-      ts: Date.now(), data: new Date().toISOString(), usuario: usuarioLogado.nome || '',
+      ts: agoraTs(), data: agora().toISOString(), usuario: usuarioLogado.nome || '',
       itens: marcados.map(l=>({ refTipo:l.refTipo, refKey:l.refKey, codigo:l.codigo,
         nome:l.nome, anterior:l.saldo, novo:l.esperado }))
     });
@@ -16304,7 +16334,7 @@ function exportarRelatorioExcel(){
   }
   const ws = XLSX.utils.json_to_sheet(dados);
   XLSX.utils.book_append_sheet(wb, ws, 'Relatório');
-  XLSX.writeFile(wb, `relatorio_${tipo}_${new Date().toISOString().split('T')[0]}.xlsx`);
+  XLSX.writeFile(wb, `relatorio_${tipo}_${agora().toISOString().split('T')[0]}.xlsx`);
   toast('✓ Excel exportado!','success');
 }
 
@@ -16317,7 +16347,7 @@ async function inicializarRelatorios(){
   sel.innerHTML = '<option value="">Todos</option>' +
     usuarios.filter(u=>u.ativo!==false).map(u=>`<option value="${esc(u.nome)}">${esc(u.nome)}</option>`).join('');
   // Definir período padrão: mês atual
-  const hoje = new Date();
+  const hoje = agora();
   const ini = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().split('T')[0];
   const fim = hoje.toISOString().split('T')[0];
   document.getElementById('rel-data-ini').value = ini;
@@ -16376,7 +16406,7 @@ async function baixarBackupCompleto(){
     const blob = new Blob([JSON.stringify(dados, null, 2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    const agora = new Date();
+    const agora = agora();
     const carimbo = agora.toISOString().split('T')[0] + '_' + agora.toTimeString().slice(0,5).replace(':','');
     a.href = url; a.download = `backup_sistema_crow_${carimbo}.json`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
@@ -16452,7 +16482,7 @@ async function finalizarPedidosEmMassa(){
     if(p.status==='CC'){ jaConcluidos.push(codigo); continue; }
     if(p.status==='Cancelado'){ cancelados.push(codigo); continue; }
     updates['pedidos/'+id+'/status'] = 'CC';
-    updates['pedidos/'+id+'/ts_fim_bipagem'] = Date.now();
+    updates['pedidos/'+id+'/ts_fim_bipagem'] = agoraTs();
     updates['pedidos/'+id+'/bipado_por'] = (usuarioLogado?.nome||'') + ' (finalização em massa)';
     finalizados++;
   }
@@ -16583,13 +16613,13 @@ async function importarPedidosW3(){
           const matchCidadeUf = (pCsv.endereco||'').match(/,\s*([^,\/]+?)\/\s*([A-Z]{2})\s*-\s*\d/);
           if(matchCidadeUf){ cidadeExtraida = matchCidadeUf[1].trim(); ufExtraida = matchCidadeUf[2].trim(); }
 
-          const novoCodigo = 'W3'+Date.now()+Math.floor(Math.random()*1000);
+          const novoCodigo = 'W3'+agoraTs()+Math.floor(Math.random()*1000);
           const novoCliente = {
             codigo: novoCodigo, nome: pCsv.cliente.toUpperCase(),
             cpf_cnpj: '', telefone: '', email: '',
             cidade: cidadeExtraida.toUpperCase(), uf: ufExtraida,
             endereco: pCsv.endereco || '', vendedor_id: null,
-            importado_w3: true, ts_cadastro: Date.now()
+            importado_w3: true, ts_cadastro: agoraTs()
           };
           await db.ref('clientes/c'+novoCodigo).set(novoCliente);
           CLIENTES_DB.push(novoCliente);
@@ -16619,7 +16649,7 @@ async function importarPedidosW3(){
         // de verdade) e SEM reservar estoque, já que o estoque físico atual já reflete essas saídas.
         // Só pedidos do mês corrente (ainda em separação na prática) seguem o fluxo normal (AA + reserva).
         const dataPedido = parseDataBR(pCsv.data);
-        const hoje = new Date();
+        const hoje = agora();
         const inicioMesAtual = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
         const ehHistorico = new Date(dataPedido + 'T00:00:00') < inicioMesAtual;
         const statusPedido = ehHistorico ? 'CC' : 'AA';
@@ -16678,7 +16708,7 @@ function parseNumeroBR(str){
 
 function parseDataBRSimples(str){
   const [d,m,a] = (str||'').split('/');
-  if(!d||!m||!a) return new Date().toISOString().split('T')[0];
+  if(!d||!m||!a) return agora().toISOString().split('T')[0];
   return `${a}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
 }
 
@@ -16821,7 +16851,7 @@ async function importarPedidosCompraCSV(){
           condicao_pagamento: '',
           itens: itensCalculados,
           total: totalGeral,
-          ts_criacao: Date.now(),
+          ts_criacao: agoraTs(),
           criado_por: usuarioLogado.nome,
           observacoes_origem: pCsv.observacoes,
           origem: 'bling'
@@ -16941,7 +16971,7 @@ function importarCadastroCompletoProdutos(){
           if(gtin) exist.gtin=gtin;
         } else {
           novosCadastrados++;
-          const tsAgora = Date.now();
+          const tsAgora = agoraTs();
           updates[base+'quantidade'] = estoqueCsv;
           updates[base+'ts_cadastro'] = tsAgora;
           const novoObj = { codigo, nome, unidade, preco_venda:precoVenda, quantidade:estoqueCsv, inativo: situacao.toLowerCase()==='inativo', fornecedores:[], ts_cadastro: tsAgora };
@@ -17349,7 +17379,7 @@ async function aplicarImportCategoria(){
           estoque_atual: it.estoque, estoque_minimo: it.estoque_minimo || 0,
           localizacao: it.localizacao, fornecedor: it.fornecedor, preco_custo: it.preco_custo,
           gtin: it.gtin, categoria: cache.categoria || '', inativo: it.inativo,
-          ts_cadastro: Date.now()
+          ts_cadastro: agoraTs()
         };
         await db.ref('insumos/'+key).set(novoInsumo);
         INSUMOS_DB.push({ key, ...novoInsumo });
@@ -17379,7 +17409,7 @@ async function aplicarImportCategoria(){
           preco_venda: it.preco_venda || 0, preco_minimo: 0,
           quantidade: it.estoque, estoque_minimo: it.estoque_minimo || 0,
           localizacao: it.localizacao, gtin: it.gtin, categoria: cache.categoria || '', inativo: it.inativo,
-          ts_cadastro: Date.now(), pendente_w3: true
+          ts_cadastro: agoraTs(), pendente_w3: true
         };
         await db.ref('produtos/'+it.codigo).set(novoProduto);
         PRODUTOS_DB.push(novoProduto);
@@ -17765,7 +17795,7 @@ const FOTOS_LOCAL = {};
 async function uploadParaStorage(file, pasta, nomeCustom){
   const ext = file.name.split('.').pop().toLowerCase();
   const nomeArquivo = (nomeCustom || file.name.replace(/\.[^.]+$/,'')).replace(/[^a-zA-Z0-9À-ú ._-]/g,'_');
-  const path = `${pasta}/${Date.now()}_${nomeArquivo}.${ext}`;
+  const path = `${pasta}/${agoraTs()}_${nomeArquivo}.${ext}`;
   const ref = storage.ref(path);
 
   // Mostrar barra de progresso
@@ -17880,7 +17910,7 @@ async function adminUploadGenerico(inputId, nomeId, colecao, resultId, listaId, 
     try {
       const ext = file.name.split('.').pop().toLowerCase();
       const safeName = nomeFinal.replace(/[^a-zA-Z0-9À-ú ._-]/g,'_');
-      const path = `${pasta}/${Date.now()}_${safeName}.${ext}`;
+      const path = `${pasta}/${agoraTs()}_${safeName}.${ext}`;
       const ref = storage.ref(path);
 
       let url = null;
@@ -17909,7 +17939,7 @@ async function adminUploadGenerico(inputId, nomeId, colecao, resultId, listaId, 
       const key = db.ref(colecao).push().key;
       await db.ref(colecao + '/' + key).set({
         nome: nomeFinal, tipo, url, storagePath: path,
-        ts: Date.now(), size: file.size
+        ts: agoraTs(), size: file.size
       });
     } catch(e){
       el.innerHTML = `<span style="color:red">Erro em "${nomeFinal}": ${e.message}</span>`;
@@ -17940,7 +17970,7 @@ async function uploadArquivoColecao(files, colecao, pasta, inputId){
       const key = db.ref(colecao).push().key;
       await db.ref(colecao + '/' + key).set({
         nome: nomeFinal, tipo: tipoDoArquivo(file), url, storagePath: path,
-        ts: Date.now(), size: file.size
+        ts: agoraTs(), size: file.size
       });
       enviados++;
     } catch(e){
@@ -17995,7 +18025,7 @@ async function adminSalvarLinkPromo(){
   try {
     const key = db.ref('arquivos_promocoes').push().key;
     await db.ref('arquivos_promocoes/' + key).set({
-      nome, url, urlOriginal: urlRaw, tipo: 'link', ts: Date.now()
+      nome, url, urlOriginal: urlRaw, tipo: 'link', ts: agoraTs()
     });
     document.getElementById('admin-promo-link-nome').value = '';
     document.getElementById('admin-promo-link-url').value = '';
@@ -18016,7 +18046,7 @@ async function adminSalvarLinkCatalogo(){
   try {
     const key = db.ref('arquivos_catalogo').push().key;
     await db.ref('arquivos_catalogo/' + key).set({
-      nome, url, urlOriginal: urlRaw, tipo: 'link', ts: Date.now()
+      nome, url, urlOriginal: urlRaw, tipo: 'link', ts: agoraTs()
     });
     document.getElementById('admin-catalogo-nome').value = '';
     document.getElementById('admin-catalogo-link').value = '';
@@ -18042,7 +18072,7 @@ async function adminSalvarLinkTabela(){
   try {
     const key = db.ref('arquivos_tabela').push().key;
     await db.ref('arquivos_tabela/' + key).set({
-      nome, url, urlOriginal: urlRaw, tipo: 'link', ts: Date.now()
+      nome, url, urlOriginal: urlRaw, tipo: 'link', ts: agoraTs()
     });
     document.getElementById('admin-tabela-link-nome').value = '';
     document.getElementById('admin-tabela-link-url').value = '';
@@ -18236,7 +18266,7 @@ function montarCabecalhoSlipHTML(p, subtitulo, totalDoc){
   const tipoDoc = p.status==='Orçamento' ? 'Orçamento' : 'Pedido';
   return `
     <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#555;margin-bottom:8px">
-      <span>${new Date().toLocaleDateString('pt-BR')}, ${new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</span>
+      <span>${agora().toLocaleDateString('pt-BR')}, ${agora().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</span>
       <span>Impressão de ${totalDoc} ${tipoDoc}(s)</span>
     </div>
     <table style="width:100%;border-collapse:collapse;margin-bottom:12px">
@@ -18329,7 +18359,7 @@ function montarSummarySlipHTML(p){
     <div style="font-size:10px;font-weight:600;color:#333;margin:10px 0 4px">Observações</div>
     <div style="border:1px solid #ccc;padding:6px 8px;min-height:28px"></div>`}
     <div style="margin-top:12px;font-size:9px;color:#aaa;text-align:center">
-      CROW Importadora e Distribuidora Ltda · Gerado em ${new Date().toLocaleString('pt-BR')}
+      CROW Importadora e Distribuidora Ltda · Gerado em ${agora().toLocaleString('pt-BR')}
     </div>
   `;
 }
