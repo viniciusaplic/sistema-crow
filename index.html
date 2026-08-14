@@ -426,13 +426,15 @@ tbody td{padding:11px 16px;font-size:14px}
 
     <!-- PAINEL -->
     <div id="tab-painel">
+      <!-- Alertas de manutenção ficam no topo do Painel: são avisos de prazo vencendo,
+           e só cumprem a função se forem a primeira coisa vista ao abrir o sistema. -->
+      <div id="dash-alertas-manutencao"></div>
       <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
         <button class="btn btn-outline btn-sm" id="btn-privacidade" onclick="alternarPrivacidade()"
           title="Mostrar ou ocultar os valores em R$ desta tela">👁️ Mostrar valores</button>
       </div>
       <div class="dashboard-cards" id="dash-cards"></div>
       <div id="dash-meta-mes" class="admin-only"></div>
-      <div id="dash-alertas-manutencao"></div>
       <div class="section-header admin-only" id="dash-clientes-novos-header" style="display:none"><div class="section-title">👤 Clientes Novos — Pendentes no W3</div></div>
       <div id="dash-clientes-novos-wrap" class="admin-only"></div>
       <div class="section-header" id="dash-pedidos-header"><div class="section-title">Pedidos Recentes</div></div>
