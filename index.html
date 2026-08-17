@@ -3132,7 +3132,10 @@ async function renderPainel(){
     const todos = snap.val()||{};
     for(const k in todos){
       const p = todos[k];
-      if(p.status==='Cancelado') continue;
+      // Orçamento não é venda: não entra em nenhum valor do Painel (Total do Mês,
+      // Pedidos do Mês, Pedidos Hoje, nem em 'Vendido, Ainda Não Faturado' na Meta).
+      // A lista de 'ativos' logo abaixo já filtra AA/AP/EX por conta própria.
+      if(p.status==='Cancelado' || p.status==='Orçamento') continue;
       if(!vejaTudoDoModulo('pedidos') && p.vendedor_id!==usuarioLogado.id) continue;
       meusPedidos.push({...p, id:p.id||k});
       total++;
@@ -3296,6 +3299,11 @@ async function renderMetaMes(mesInicio, pedidosDoMes){
   try{
     const snapFat = await db.ref('pedidos').orderByChild('faturado').equalTo(true).once('value');
     Object.values(snapFat.val()||{}).forEach(p=>{
+      // Pedido faturado e DEPOIS cancelado continua com faturado=true no banco. Sem esta
+      // guarda ele seguia somando em Realizado, em Soma Faturados + A Faturar e no Total
+      // Vendido no Mês — inflando os tres. Orcamento incluido por simetria (nao deveria
+      // existir faturado, mas se existir e erro de dado e nao pode virar faturamento).
+      if(p.status==='Cancelado' || p.status==='Orçamento') return;
       if(!p.data_faturamento) return;
       const df = parseDataLocal(p.data_faturamento);
       if(df >= mesAnteriorInicio && df < mesInicio) realizadoMesAnterior += Number(p.total||0);
@@ -3305,7 +3313,9 @@ async function renderMetaMes(mesInicio, pedidosDoMes){
       if(dPedido < mesInicio) naoFatMesAnteriorVirou += Number(p.total||0);
     });
     (pedidosDoMes||[]).forEach(p=>{
-      if(p.status==='Cancelado' || p.faturado) return;
+      // Guarda redundante (pedidosDoMes já vem sem orçamento), mantida de propósito:
+      // se um dia essa função for chamada de outro lugar, o orçamento não volta a entrar.
+      if(p.status==='Cancelado' || p.status==='Orçamento' || p.faturado) return;
       vendidoNaoFaturadoMes += Number(p.total||0);
     });
   } catch(e){ console.warn('[CROW] falha silenciosa ignorada:', e); }
@@ -3889,10 +3899,13 @@ async function renderPedidos(usarCache){
   const totalValor = pedidos.filter(p=>p.status!=='Cancelado').reduce((s,p)=>s+(p.total||0),0);
   const mesAtual = agora().getMonth();
   const anoAtual = agora().getFullYear();
-  // Pedidos colocados no mês = TODOS os pedidos CRIADOS no mês vigente, não cancelados
-  // (ignora filtros ativos na tela) — isso é diferente de "faturado", que é calculado à parte.
+  // Pedidos colocados no mês = TODOS os pedidos CRIADOS no mês vigente (ignora filtros da tela).
+  // NÃO entram: cancelados nem orçamentos — orçamento não é venda colocada, só vira pedido
+  // quando aprovado (e nessa hora a data é redefinida, então não há duplicidade).
+  // Filtro por negação, e não pela lista STATUS_PEDIDO_REAL, para não derrubar pedidos
+  // antigos salvos com o status em texto ('Confirmado'), que não constam nessa lista.
   const totalMes = todosPedidos.filter(p=>{
-    if(p.status==='Cancelado') return false;
+    if(p.status==='Cancelado' || p.status==='Orçamento') return false;
     const d = new Date(p.data);
     return d.getMonth()===mesAtual && d.getFullYear()===anoAtual;
   }).reduce((s,p)=>s+(p.total||0),0);
