@@ -14514,7 +14514,12 @@ async function relSugestaoCompra(el, forcarRecarga){
       if(!d) return;
       // Produção líquida do pai no horizonte: o que a demanda pede, menos o que já existe
       // pronto ou a caminho. Pai com estoque suficiente não gera necessidade de componente.
-      const netPai = Math.max(0, d.cmd*horizonte + d.es - d.disponivel - d.emTransito);
+      // O estoque mínimo do pai NÃO desce inteiro para o componente. Mínimo cadastrado
+      // alto num produto de pouco giro (herança de importação antiga, número chutado)
+      // virava ordem de compra de matéria-prima sem nenhuma venda por trás. Limitamos a
+      // contribuição ao que o giro do pai justifica: pai parado contribui zero.
+      const esPaiEfetivo = Math.min(d.es, d.cmd * diasCobertura);
+      const netPai = Math.max(0, d.cmd*horizonte + esPaiEfetivo - d.disponivel - d.emTransito);
       total += q * netPai;
     });
     return total;
@@ -14614,7 +14619,7 @@ async function relSugestaoCompra(el, forcarRecarga){
     <br><strong>Insumos seguem outra lógica e não usam estoque mínimo:</strong> a necessidade é a produção
     líquida de todos os produtos pais dentro do <em>horizonte do próprio insumo</em> (lead time dele + ${diasCobertura} dias),
     somada ao que as OPs abertas ainda vão consumir. Assim um insumo já transformado em produto acabado não é
-    comprado de novo, e um componente de prazo longo é comprado olhando longe o suficiente.
+    comprado de novo, e um componente de prazo longo é comprado olhando longe o suficiente. O estoque mínimo do produto pai entra nessa conta limitado a ${diasCobertura} dias de venda dele — pai sem giro não gera compra de insumo.
     ${insumosSemPai ? `<br><strong style="color:#b45309">⚠ ${insumosSemPai} insumo(s) estão em receita mas sem produto pai ativo</strong> — a necessidade deles sai zero. Verifique se o produto acabado foi inativado ou não existe no cadastro.` : ''}
     ${insumosPorConsumo ? `<br><strong style="color:#b45309">ℹ ${insumosPorConsumo} insumo(s) fora de qualquer receita</strong> — sem vínculo com produto acabado, a necessidade deles caiu no cálculo por consumo histórico. Se deveriam estar numa receita, vale cadastrar.` : ''}
     ${semLeadTime ? `<br><strong style="color:#b45309">⚠ ${semLeadTime} item(ns) com fornecedor sem prazo de entrega cadastrado</strong> — o lead time entrou como 0 e a sugestão pode estar subestimada. Cadastre em <strong>Compras → Fornecedores</strong>.` : ''}
