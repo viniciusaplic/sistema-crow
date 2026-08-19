@@ -8997,11 +8997,13 @@ async function abrirHistoricoEstoque(codigo){
     ...opIds.map(async oid=>{ const s = await db.ref('ordens_producao/'+oid).once('value'); if(s.exists()) origensValidas.add(oid); })
   ]);
 
-  // Remove movimentos de pedidos/OPs deletados
-  const movimentosFiltrados = movimentos.filter(m=> {
-    if((m.origem_tipo === 'pedido' || m.origem_tipo === 'op') && m.origem_id)
-      return origensValidas.has(m.origem_id);
-    return true;
+  // Movimento de pedido/OP apagado NAO some mais da lista. Apagar a origem nao desfaz o
+  // efeito no estoque: o lancamento sumia da tela mas o saldo continuava alterado, entao a
+  // soma exibida nunca fechava com o estoque real. Agora fica visivel e marcado.
+  const movimentosFiltrados = movimentos.map(m=>{
+    const orfao = (m.origem_tipo === 'pedido' || m.origem_tipo === 'op') && m.origem_id
+      && !origensValidas.has(m.origem_id);
+    return orfao ? { ...m, _origemExcluida: true } : m;
   });
 
   // Guarda contexto para o filtro
@@ -9098,7 +9100,7 @@ function renderHistoricoFiltrado(){
         <div style="font-size:13px;font-weight:600;color:${cor}">${icon} ${label} de ${m.qtd}${
           (m.saldo_antes!=null && m.saldo_apos!=null) ? `<span style="font-weight:400;color:var(--muted);font-size:12px"> · saldo ${m.saldo_antes} → ${m.saldo_apos}</span>` : ''
         }${m.pendente ? '<span style="font-weight:400;color:#b45309;font-size:12px"> · PENDENTE</span>' : ''}${m.falhou ? '<span style="font-weight:400;color:#dc2626;font-size:12px"> · FALHOU</span>' : ''}</div>
-        <div style="font-size:12px;color:var(--muted)">${m.motivo||''}</div>
+        <div style="font-size:12px;color:var(--muted)">${m.motivo||''}${m._origemExcluida ? ' <span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;white-space:nowrap">ORIGEM EXCLUÍDA</span>' : ''}</div>
         <div style="font-size:11px;color:var(--muted)">${new Date(m.ts).toLocaleString('pt-BR')} · ${m.usuario||''}</div>
       </div>
       ${origemExiste ? `<div style="font-size:12px;color:var(--accent);font-weight:600;white-space:nowrap">${linkLabel} →</div>` : ''}
@@ -16224,7 +16226,7 @@ async function relAuditoriaEstoque(el){
   // Auditoria SEMPRE lê direto do Firebase, nunca de cache — o objetivo é justamente
   // encontrar divergências entre o que está no servidor e o que deveria estar.
   const [snapMov, snapProd, snapIns] = await Promise.all([
-    lerNoCache('movimentos_estoque'),
+    db.ref('movimentos_estoque').once('value'),
     db.ref('produtos').once('value'),
     db.ref('insumos').once('value')
   ]);
@@ -16256,7 +16258,7 @@ async function relAuditoriaEstoque(el){
   // Movimentos incompletos: gravados antes de aplicar o saldo e nunca finalizados (queda
   // de conexão no meio) ou marcados como falha. NÃO entram na reconstrução — o saldo deles
   // pode ou não ter sido aplicado, então somá-los inventaria uma divergência que não existe.
-  const incompletos = movs.filter(m => m && m.codigo && (m.pendente || m.falhou))
+  const incompletos = pendentes.filter(m => m && m.codigo)
     .sort((a,b)=> (b.ts||0) - (a.ts||0));
 
   const porCodigo = {};
