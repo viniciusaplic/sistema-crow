@@ -726,6 +726,8 @@ tbody td{padding:11px 16px;font-size:14px}
           <button class="btn btn-outline btn-sm rel-btn admin-only" onclick="mostrarRelatorio('recalc-estoque-minimo',this)">🎯 Recalcular Estoque Mínimo</button>
           <button class="btn btn-outline btn-sm rel-btn admin-only" onclick="mostrarRelatorio('baixas-duplicadas',this)">👥 Baixas Duplicadas</button>
           <button class="btn btn-outline btn-sm rel-btn admin-only" onclick="mostrarRelatorio('auditoria-estoque',this)">🔍 Auditoria de Saldo × Movimentos</button>
+          <button class="btn btn-outline btn-sm rel-btn admin-only" onclick="mostrarRelatorio('codigos-duplicados',this)">⚠️ Códigos Duplicados</button>
+          <button class="btn btn-outline btn-sm rel-btn admin-only" onclick="mostrarRelatorio('insumos-inativos',this)">🧹 Insumos Inativos</button>
         </div>
 
         <!-- Filtros específicos do relatório Abaixo do Mínimo -->
@@ -2309,6 +2311,26 @@ const db = firebase.database();
 // comportamento é o mesmo de antes — nunca fica pior que a situação atual.
 let SERVER_TIME_OFFSET = 0;
 db.ref('.info/serverTimeOffset').on('value', s => { SERVER_TIME_OFFSET = Number(s.val()) || 0; });
+
+// ── Cache de leitura para nos pesados ────────────────────────────────────────
+// O sistema baixava colecoes inteiras (movimentos_estoque, pedidos_compra) uma vez
+// por relatorio aberto, por usuario, por aba — 2 a 4 GB/dia de download. Aqui a
+// leitura e feita uma vez e reaproveitada por 2 minutos.
+// REGRA: so caminho de RELATORIO usa este cache. Validacao, aprovacao, baixa de
+// estoque e qualquer rotina que grava continuam lendo direto do banco, porque dado
+// defasado nesses pontos pode gerar venda ou baixa em cima de saldo que nao existe.
+const CACHE_NOS = {};
+const CACHE_NOS_TTL_MS = 120000;
+async function lerNoCache(no){
+  const agora = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  const c = CACHE_NOS[no];
+  if(c && (agora - c.ts) < CACHE_NOS_TTL_MS) return { val: () => c.dados };
+  const snap = await db.ref(no).once('value');
+  const dados = snap.val();
+  CACHE_NOS[no] = { dados, ts: agora };
+  return { val: () => dados };
+}
+function invalidarCacheNo(no){ delete CACHE_NOS[no]; }
 function agoraTs(){ return Date.now() + SERVER_TIME_OFFSET; }
 function agora(){ return new Date(agoraTs()); }
 const storage = firebase.storage();
@@ -8249,6 +8271,7 @@ function estoqueDisponivel(produto){
 }
 
 async function registrarMovimentoEstoque(codigo, nome, tipo, qtd, motivo, origemTipo=null, origemId=null){
+  invalidarCacheNo('movimentos_estoque'); // saldo mudou: proximo relatorio le do banco
   const key = db.ref('movimentos_estoque').push().key;
   await db.ref('movimentos_estoque/'+key).set({
     codigo, nome, tipo, qtd: Number(qtd),
@@ -8311,7 +8334,7 @@ async function renderMovimentosEstoque(){
   const fCodigo = (document.getElementById('mov-f-codigo').value||'').toLowerCase().trim();
   const fTipo = document.getElementById('mov-f-tipo').value;
 
-  const snap = await db.ref('movimentos_estoque').once('value');
+  const snap = await lerNoCache('movimentos_estoque');
   const dados = snap.val() || {};
   let movimentos = Object.keys(dados).map(key=>({ key, ...dados[key] }));
 
@@ -8334,10 +8357,23 @@ async function renderMovimentosEstoque(){
     if(!INSUMOS_DB.length) await carregarInsumosFirebase();
     if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
     const codigoExato = fCodigo.toUpperCase();
-    const produtoExato = PRODUTOS_DB.find(p=>(p.codigo||'').toUpperCase()===codigoExato);
-    const insumoExato = INSUMOS_DB.find(i=>(i.codigo||'').toUpperCase()===codigoExato);
+    // Um cadastro INATIVO guarda saldo congelado. Se existe registro vivo com o mesmo
+    // codigo, e ele que vale. E se o codigo existe em mais de um lugar, mostrar um numero
+    // so esconde o problema: avisa a duplicidade e exibe todos os saldos.
+    const achaPorCodigo = arr => arr.filter(x=>(x.codigo||'').trim().toUpperCase()===codigoExato);
+    const regsProduto = achaPorCodigo(PRODUTOS_DB);
+    const regsInsumo  = achaPorCodigo(INSUMOS_DB);
+    const produtoExato = regsProduto.find(x=>!x.inativo) || regsProduto[0];
+    const insumoExato  = regsInsumo.find(x=>!x.inativo)  || regsInsumo[0];
 
-    if(produtoExato){
+    if(regsProduto.length + regsInsumo.length > 1){
+      const partes = [
+        ...regsProduto.map(x=>`Vend\u00e1vel: <strong>${Number(x.quantidade||0).toLocaleString('pt-BR')}</strong>${x.inativo?' <em>(inativo)</em>':''}`),
+        ...regsInsumo.map(x=>`Insumo: <strong>${Number(x.estoque_atual||0).toLocaleString('pt-BR')}</strong>${x.inativo?' <em>(inativo)</em>':''}`)
+      ];
+      saldoAtualHtml = `<span style="color:#dc2626;font-size:15px">\u26a0 C\u00d3DIGO DUPLICADO</span>`
+        + `<div style="font-size:11.5px;color:#b45309;font-weight:600;line-height:1.6;margin-top:3px">${partes.join('<br>')}</div>`;
+    } else if(produtoExato){
       saldoAtualHtml = Number(produtoExato.quantidade||0).toLocaleString('pt-BR');
     } else if(insumoExato){
       saldoAtualHtml = Number(insumoExato.estoque_atual||0).toLocaleString('pt-BR') + ' <span class="badge" style="background:#ede9fe;color:#7c3aed;font-size:10px">INSUMO</span>';
@@ -13920,7 +13956,7 @@ function mostrarRelatorio(tipo, btnEl){
     tipo === 'estoque-minimo' ? 'flex' : 'none';
   // Diagnóstico de Consumo não usa período/vendedor/agrupamento — esconde só esses campos,
   // mantendo visíveis os botões Gerar/Excel que ficam no mesmo container
-  const escondePeriodoVendedorAgrupar = ['diagnostico-consumo','mrp','comissionamento','sugestao-compra','recalc-estoque-minimo','auditoria-estoque','baixas-duplicadas'].includes(tipo);
+  const escondePeriodoVendedorAgrupar = ['diagnostico-consumo','mrp','comissionamento','sugestao-compra','recalc-estoque-minimo','codigos-duplicados','insumos-inativos','auditoria-estoque','baixas-duplicadas'].includes(tipo);
   document.querySelector('#rel-filtros .filtro-group:nth-child(1)').style.display = escondePeriodoVendedorAgrupar ? 'none' : '';
   document.querySelector('#rel-filtros .filtro-group:nth-child(2)').style.display = escondePeriodoVendedorAgrupar ? 'none' : '';
 
@@ -13946,6 +13982,8 @@ async function gerarRelatorio(){
   // carregá-la aqui seria uma leitura pesada e inútil no Firebase.
   if(tipo === 'sugestao-compra'){ await relSugestaoCompra(el); return; }
   if(tipo === 'recalc-estoque-minimo'){ await relRecalcEstoqueMinimo(el); return; }
+  if(tipo === 'codigos-duplicados'){ await relCodigosDuplicados(el); return; }
+  if(tipo === 'insumos-inativos'){ await relInsumosInativos(el); return; }
   if(tipo === 'baixas-duplicadas'){ await relBaixasDuplicadas(el); return; }
   if(tipo === 'auditoria-estoque'){ await relAuditoriaEstoque(el); return; }
 
@@ -13982,6 +14020,8 @@ async function gerarRelatorio(){
     case 'mrp': await relMRP(el); break;
     case 'comissionamento': await relComissionamento(el); break;
     case 'recalc-estoque-minimo': await relRecalcEstoqueMinimo(el); break;
+    case 'codigos-duplicados': await relCodigosDuplicados(el); break;
+    case 'insumos-inativos': await relInsumosInativos(el); break;
   }
 }
 
@@ -14198,7 +14238,7 @@ function drillDownProduto(cod, nome){
 
 // ── Compras por Fornecedor ──
 async function relComprasFornecedor(dataIni, dataFim, el){
-  const snap = await db.ref('pedidos_compra').once('value');
+  const snap = await lerNoCache('pedidos_compra');
   const todos = Object.values(snap.val()||{});
   const filtrado = todos.filter(c=>(!dataIni||c.data>=dataIni)&&(!dataFim||c.data<=dataFim));
   const grupos = {};
@@ -14388,7 +14428,7 @@ async function carregarConsumoAnualSugestao(forcar){
   });
 
   // Consumo de insumos: saídas de estoque (produção), ignorando balanço/estorno
-  const snapMov = await db.ref('movimentos_estoque').once('value');
+  const snapMov = await lerNoCache('movimentos_estoque');
   Object.values(snapMov.val() || {}).forEach(m=>{
     if(m.pendente || m.falhou) return; // movimento que nao chegou a alterar o saldo: nao e consumo real
     if(m.tipo !== 'saida') return;
@@ -14401,7 +14441,7 @@ async function carregarConsumoAnualSugestao(forcar){
   });
 
   // Em trânsito: compras já fora da negociação (Separação em diante)
-  const snapCompras = await db.ref('pedidos_compra').once('value');
+  const snapCompras = await lerNoCache('pedidos_compra');
   Object.values(snapCompras.val() || {}).forEach(c=>{
     if(!['separacao','importacao','transito'].includes(c.status)) return;
     (c.itens||[]).forEach(it=>{
@@ -15083,7 +15123,7 @@ async function calcularMRP(){
 
   if(tipoMrp === 'insumo'){
     // Consumo real de insumo: saídas de estoque (produção), ignorando balanço/estorno
-    const snapMov = await db.ref('movimentos_estoque').once('value');
+    const snapMov = await lerNoCache('movimentos_estoque');
     const movimentos = Object.values(snapMov.val() || {});
     movimentos.forEach(m=>{
       if(m.pendente || m.falhou) return; // movimento que nao chegou a alterar o saldo: nao e consumo real
@@ -15096,7 +15136,7 @@ async function calcularMRP(){
 
     // Em trânsito: pedidos de compra de insumo já saíram da negociação (Separação em diante),
     // ainda não recebidos — negociação é considerada especulativa demais pra contar como garantido
-    const snapCompras = await db.ref('pedidos_compra').once('value');
+    const snapCompras = await lerNoCache('pedidos_compra');
     Object.values(snapCompras.val() || {}).forEach(c=>{
       if(!['separacao','importacao','transito'].includes(c.status)) return;
       (c.itens||[]).forEach(it=>{
@@ -15119,7 +15159,7 @@ async function calcularMRP(){
     });
 
     // Em trânsito: pedidos de compra do produto (revenda), já saídos da negociação, + OPs abertas
-    const snapCompras = await db.ref('pedidos_compra').once('value');
+    const snapCompras = await lerNoCache('pedidos_compra');
     Object.values(snapCompras.val() || {}).forEach(c=>{
       if(!['separacao','importacao','transito'].includes(c.status)) return;
       (c.itens||[]).forEach(it=>{
@@ -15260,7 +15300,7 @@ async function relDiagnosticoConsumoInsumos(el){
   if(!INSUMOS_DB.length) await carregarInsumosFirebase();
   if(!OPS_DB.length) await carregarOPsFirebase();
 
-  const movSnap = await db.ref('movimentos_estoque').once('value');
+  const movSnap = await lerNoCache('movimentos_estoque');
   const movimentos = Object.values(movSnap.val() || {});
 
   // 1) Consumo teórico total por insumo, somando a receita de cada OP concluída
@@ -15373,7 +15413,7 @@ async function relSugestaoJornal(pedidos, el){
   if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
   if(!INSUMOS_DB.length) await carregarInsumosFirebase();
 
-  const snapCompras = await db.ref('pedidos_compra').once('value');
+  const snapCompras = await lerNoCache('pedidos_compra');
   const compras = Object.values(snapCompras.val()||{});
   const codigosEmTransito = new Set();
   compras.filter(c=>['transito','separacao'].includes(c.status)).forEach(c=>{
@@ -15548,7 +15588,7 @@ async function carregarSerieDiariaConsumo(forcar){
     (p.itens||[]).forEach(it=> add('vendavel', it.codigo, dia, Number(it.qtd||0)) );
   });
 
-  const snapMov = await db.ref('movimentos_estoque').once('value');
+  const snapMov = await lerNoCache('movimentos_estoque');
   Object.values(snapMov.val() || {}).forEach(m=>{
     if(m.pendente || m.falhou) return; // movimento que nao chegou a alterar o saldo: nao e consumo real
     if(m.tipo !== 'saida') return;
@@ -15561,6 +15601,206 @@ async function carregarSerieDiariaConsumo(forcar){
 
   RECALC_SERIE_CACHE = { ts:agoraTs(), porDia };
   return RECALC_SERIE_CACHE;
+}
+
+async function relInsumosInativos(el){
+  if(!usuarioLogado || !usuarioLogado.admin){
+    el.innerHTML = '<div style="padding:24px;text-align:center;color:#dc2626">\u{1F512} Relat\u00f3rio restrito a administradores.</div>';
+    return;
+  }
+  el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px">\u23f3 Procurando v\u00ednculos de cada insumo inativo...</div>';
+
+  if(!INSUMOS_DB.length)  await carregarInsumosFirebase();
+  if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
+  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
+
+  const inativos = INSUMOS_DB.filter(i=>i.inativo);
+  if(!inativos.length){
+    el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--success)">\u2705 Nenhum insumo inativo cadastrado.</div>';
+    return;
+  }
+
+  // Leitura unica de cada colecao pesada. O resto do sistema le movimentos_estoque em
+  // varios pontos independentes; aqui um snapshot so serve todas as verificacoes.
+  const [snapMov, snapCompras] = await Promise.all([
+    lerNoCache('movimentos_estoque'),
+    lerNoCache('pedidos_compra')
+  ]);
+
+  const usoMov = {};
+  Object.values(snapMov.val() || {}).forEach(m=>{
+    const c = (m.codigo||'').trim().toUpperCase();
+    if(!c) return;
+    const reg = usoMov[c] = usoMov[c] || { n:0, ultimo:0 };
+    reg.n++;
+    if(Number(m.ts||0) > reg.ultimo) reg.ultimo = Number(m.ts||0);
+  });
+
+  const usoCompra = {};
+  Object.values(snapCompras.val() || {}).forEach(c=>{
+    (c.itens||[]).forEach(it=>{
+      const cod = (it.codigo||'').trim().toUpperCase();
+      if(cod) usoCompra[cod] = (usoCompra[cod]||0) + 1;
+    });
+  });
+
+  const usoReceita = {};
+  Object.entries(RECEITAS_DB || {}).forEach(([paiCod, r])=>{
+    (r?.itens || []).forEach(it=>{
+      const cod = (it.codigo||'').trim().toUpperCase();
+      if(!cod) return;
+      (usoReceita[cod] = usoReceita[cod] || []).push(paiCod);
+    });
+  });
+
+  const codigosVendavel = new Set(PRODUTOS_DB.map(x=>(x.codigo||'').trim().toUpperCase()));
+
+  const lista = inativos.map(i=>{
+    const cod    = (i.codigo||'').trim().toUpperCase();
+    const saldo  = Number(i.estoque_atual||0);
+    const mov    = usoMov[cod] || { n:0, ultimo:0 };
+    const pais   = usoReceita[cod] || [];
+    const compras= usoCompra[cod] || 0;
+    const gemeo  = codigosVendavel.has(cod);
+    const motivos = [];
+    if(saldo !== 0)  motivos.push(`saldo ${saldo.toLocaleString('pt-BR')}`);
+    if(pais.length)  motivos.push(`em ${pais.length} receita(s)`);
+    if(mov.n)        motivos.push(`${mov.n} movimento(s)`);
+    if(compras)      motivos.push(`${compras} pedido(s) de compra`);
+    return { codigo:i.codigo, nome:i.nome||'', saldo, mov, pais, compras, gemeo,
+             motivos, limpo: motivos.length === 0 };
+  }).sort((a,b)=> (a.limpo === b.limpo) ? a.codigo.localeCompare(b.codigo) : (a.limpo ? -1 : 1));
+
+  const limpos = lista.filter(l=>l.limpo).length;
+  const fmtData = ts => ts ? new Date(ts).toLocaleDateString('pt-BR') : '\u2014';
+  const thBase = 'padding:9px 11px;position:sticky;top:0;z-index:3;background:var(--primary);color:rgba(255,255,255,.85);white-space:nowrap';
+
+  let html = `
+    <div style="padding:12px 16px;background:#eff6ff;border-left:4px solid #1565c0;border-radius:6px;margin-bottom:12px;font-size:12.5px;color:#1e3a5f;line-height:1.7">
+      <strong>${lista.length}</strong> insumo(s) inativo(s).
+      <strong style="color:#15803d">${limpos}</strong> sem nenhum v\u00ednculo \u2014 saldo zero, fora de receita, sem movimento e sem pedido de compra. Estes podem ser exclu\u00eddos sem afetar nada.
+      <br><strong style="color:#b45309">${lista.length - limpos}</strong> t\u00eam hist\u00f3rico amarrado. Apagar estes faz o c\u00f3digo sumir de relat\u00f3rios e movimentos antigos \u2014 o item passa a aparecer sem nome no passado.
+      <br><span style="font-size:11.5px">Este relat\u00f3rio apenas l\u00ea. Nada \u00e9 alterado aqui.</span>
+    </div>
+    <div style="overflow:auto;max-height:65vh;border:1px solid var(--border);border-radius:8px">
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+    <thead><tr>
+      <th style="${thBase}">C\u00f3digo</th><th style="${thBase}">Insumo</th>
+      <th style="${thBase};text-align:center">Saldo</th>
+      <th style="${thBase};text-align:center">Receitas</th>
+      <th style="${thBase};text-align:center">Movimentos</th>
+      <th style="${thBase};text-align:center">\u00daltimo mov.</th>
+      <th style="${thBase};text-align:center">Compras</th>
+      <th style="${thBase}">Situa\u00e7\u00e3o</th>
+    </tr></thead><tbody>`;
+
+  lista.forEach(l=>{
+    const cor = l.limpo ? 'background:#f0fdf4;' : '';
+    const sit = l.limpo
+      ? '<span style="color:#15803d;font-weight:700">\u2713 sem v\u00ednculo</span>'
+      : `<span style="color:#b45309;font-weight:600">${l.motivos.join(' \u00b7 ')}</span>`;
+    const dup = l.gemeo ? ' <span class="badge" style="background:#fee2e2;color:#b91c1c;font-size:9px">C\u00d3D. TAMB\u00c9M EM VEND\u00c1VEL</span>' : '';
+    html += `<tr style="border-bottom:1px solid var(--border);${cor}">
+      <td style="padding:9px 11px;font-weight:700">${esc(l.codigo)}</td>
+      <td style="padding:9px 11px">${esc(l.nome)}${dup}</td>
+      <td style="padding:9px 11px;text-align:center;${l.saldo!==0?'color:#dc2626;font-weight:700':'color:var(--muted)'}">${l.saldo.toLocaleString('pt-BR')}</td>
+      <td style="padding:9px 11px;text-align:center">${l.pais.length || '\u2014'}</td>
+      <td style="padding:9px 11px;text-align:center">${l.mov.n || '\u2014'}</td>
+      <td style="padding:9px 11px;text-align:center;color:var(--muted)">${fmtData(l.mov.ultimo)}</td>
+      <td style="padding:9px 11px;text-align:center">${l.compras || '\u2014'}</td>
+      <td style="padding:9px 11px">${sit}</td>
+    </tr>`;
+  });
+
+  html += '</tbody></table></div>';
+  el.innerHTML = html;
+}
+
+async function relCodigosDuplicados(el){
+  if(!usuarioLogado || !usuarioLogado.admin){
+    el.innerHTML = '<div style="padding:24px;text-align:center;color:#dc2626">\u{1F512} Relat\u00f3rio restrito a administradores.</div>';
+    return;
+  }
+  el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px">\u23f3 Cruzando cadastros de vend\u00e1veis e insumos...</div>';
+
+  if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
+  if(!INSUMOS_DB.length)  await carregarInsumosFirebase();
+
+  // Indexa TODOS os cadastros (inclusive inativos) pelo codigo normalizado. Codigo repetido
+  // em duas colecoes significa duas contabilidades para o mesmo item fisico: a venda baixa
+  // de uma, a producao consome da outra, e nenhuma das duas fecha.
+  const mapa = {};
+  const registrar = (item, tipo) => {
+    const cod = (item.codigo||'').trim().toUpperCase();
+    if(!cod) return;
+    (mapa[cod] = mapa[cod] || []).push({
+      tipo, nome: item.nome||'', inativo: !!item.inativo,
+      saldo: tipo === 'Vend\u00e1vel' ? Number(item.quantidade||0) : Number(item.estoque_atual||0)
+    });
+  };
+  PRODUTOS_DB.forEach(x=>registrar(x,'Vend\u00e1vel'));
+  INSUMOS_DB.forEach(x=>registrar(x,'Insumo'));
+
+  const lista = Object.entries(mapa)
+    .filter(([,regs]) => regs.length > 1)
+    .map(([codigo, regs]) => {
+      const saldos = regs.map(r=>r.saldo);
+      return {
+        codigo, regs,
+        cruzado: new Set(regs.map(r=>r.tipo)).size > 1,
+        ativos: regs.filter(r=>!r.inativo).length,
+        divergencia: Math.max(...saldos) - Math.min(...saldos)
+      };
+    })
+    .sort((a,b)=> b.divergencia - a.divergencia || a.codigo.localeCompare(b.codigo));
+
+  if(!lista.length){
+    el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--success)">\u2705 Nenhum c\u00f3digo duplicado entre vend\u00e1veis e insumos.</div>';
+    return;
+  }
+
+  const fmt = n => Number(n||0).toLocaleString('pt-BR');
+  const thBase = 'padding:9px 11px;position:sticky;top:0;z-index:3;background:var(--primary);color:rgba(255,255,255,.85);white-space:nowrap';
+  const cruzados = lista.filter(l=>l.cruzado).length;
+  const ambosAtivos = lista.filter(l=>l.ativos > 1).length;
+
+  let html = `
+    <div style="padding:12px 16px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:6px;margin-bottom:12px;font-size:12.5px;color:#7f1d1d;line-height:1.7">
+      <strong>${lista.length}</strong> c\u00f3digo(s) com mais de um cadastro.
+      ${cruzados ? `<br><strong>${cruzados}</strong> existe(m) como <strong>vend\u00e1vel E insumo</strong> \u2014 duas contabilidades para a mesma pe\u00e7a: a venda baixa de um saldo, a produ\u00e7\u00e3o consome do outro.` : ''}
+      ${ambosAtivos ? `<br><strong>${ambosAtivos}</strong> com <strong>mais de um cadastro ativo</strong> \u2014 estes s\u00e3o os mais urgentes.` : ''}
+      <br><span style="font-size:11.5px">Cadastro inativo n\u00e3o aparece nas telas com filtro \u201cAtivos\u201d, mas continua com saldo gravado e vis\u00edvel em outros pontos do sistema.</span>
+    </div>
+    <div style="overflow:auto;max-height:65vh;border:1px solid var(--border);border-radius:8px">
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+    <thead><tr>
+      <th style="${thBase}">C\u00f3digo</th>
+      <th style="${thBase}">Cadastros encontrados</th>
+      <th style="${thBase};text-align:center">Tipos</th>
+      <th style="${thBase};text-align:center" title="Diferen\u00e7a entre o maior e o menor saldo gravado">Diverg\u00eancia</th>
+    </tr></thead><tbody>`;
+
+  lista.forEach(l=>{
+    const cor = l.ativos > 1 ? 'background:#fef2f2;' : (l.cruzado ? 'background:#fffbeb;' : '');
+    const detalhe = l.regs.map(r=>{
+      const selo = r.tipo === 'Insumo'
+        ? '<span class="badge" style="background:#ede9fe;color:#7c3aed;font-size:9px">INSUMO</span>'
+        : '<span class="badge" style="background:#dbeafe;color:#1d4ed8;font-size:9px">VEND\u00c1VEL</span>';
+      const status = r.inativo
+        ? '<span class="badge badge-gray" style="font-size:9px">INATIVO</span>'
+        : '<span class="badge" style="background:#dcfce7;color:#15803d;font-size:9px">ATIVO</span>';
+      return `<div style="padding:2px 0">${selo} ${status} saldo <strong>${fmt(r.saldo)}</strong> <span style="color:var(--muted)">\u2014 ${esc(r.nome)}</span></div>`;
+    }).join('');
+    html += `<tr style="border-bottom:1px solid var(--border);${cor}">
+      <td style="padding:9px 11px;font-weight:700">${esc(l.codigo)}</td>
+      <td style="padding:9px 11px">${detalhe}</td>
+      <td style="padding:9px 11px;text-align:center">${l.cruzado ? '<strong style="color:#dc2626">CRUZADO</strong>' : l.regs[0].tipo}</td>
+      <td style="padding:9px 11px;text-align:center;font-weight:700;color:${l.divergencia > 0 ? '#dc2626' : 'var(--muted)'}">${fmt(l.divergencia)}</td>
+    </tr>`;
+  });
+
+  html += '</tbody></table></div>';
+  el.innerHTML = html;
 }
 
 async function relRecalcEstoqueMinimo(el){
@@ -15877,7 +16117,7 @@ const RX_BAIXA_PEDIDO = /^Pedido #\d+\s+—/;
 
 async function relBaixasDuplicadas(el){
   el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">Analisando movimentos...</div>';
-  const snap = await db.ref('movimentos_estoque').once('value');
+  const snap = await lerNoCache('movimentos_estoque');
   const movs = snap.val() || {};
 
   const grupos = {};
@@ -15984,7 +16224,7 @@ async function relAuditoriaEstoque(el){
   // Auditoria SEMPRE lê direto do Firebase, nunca de cache — o objetivo é justamente
   // encontrar divergências entre o que está no servidor e o que deveria estar.
   const [snapMov, snapProd, snapIns] = await Promise.all([
-    db.ref('movimentos_estoque').once('value'),
+    lerNoCache('movimentos_estoque'),
     db.ref('produtos').once('value'),
     db.ref('insumos').once('value')
   ]);
