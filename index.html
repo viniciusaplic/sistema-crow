@@ -3633,10 +3633,10 @@ function abrirModalVerificacaoManutencao(key){
   if(!m) return;
   document.getElementById('verificacao-manutencao-key').value = key;
   document.getElementById('verificacao-manutencao-info').textContent = `${m.equipamento} — ${m.manutencao} (prevista para ${fmtData(m.data_prevista)})`;
-  const agora = agora();
+  const dtAgora = agora();
   document.getElementById('verificacao-nome').value = usuarioLogado?.nome || '';
   document.getElementById('verificacao-data').value = hojeISO();
-  document.getElementById('verificacao-hora').value = agora.toTimeString().slice(0,5);
+  document.getElementById('verificacao-hora').value = dtAgora.toTimeString().slice(0,5);
   document.getElementById('verificacao-observacao').value = '';
   document.getElementById('verificacao-proxima-data').value = '';
   abrirModal('modal-verificacao-manutencao');
@@ -16678,12 +16678,12 @@ async function baixarBackupCompleto(){
     const blob = new Blob([JSON.stringify(dados, null, 2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    const agora = agora();
-    const carimbo = agora.toISOString().split('T')[0] + '_' + agora.toTimeString().slice(0,5).replace(':','');
+    const dtAgora = agora();
+    const carimbo = dtAgora.toISOString().split('T')[0] + '_' + dtAgora.toTimeString().slice(0,5).replace(':','');
     a.href = url; a.download = `backup_sistema_crow_${carimbo}.json`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    if(statusEl) statusEl.textContent = `Último backup manual baixado: ${agora.toLocaleString('pt-BR')}`;
+    if(statusEl) statusEl.textContent = `Último backup manual baixado: ${dtAgora.toLocaleString('pt-BR')}`;
     toast('✓ Backup baixado com sucesso! Guarde esse arquivo em local seguro (Google Drive, etc.)','success');
   } catch(e){ toast('Erro ao gerar backup: '+e.message,'error'); }
 }
