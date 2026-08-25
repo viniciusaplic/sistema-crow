@@ -2630,7 +2630,7 @@ let VENDEDORES_SELECT_CACHE = null; // cache da lista de vendedores para o selet
 // renderPedidos() sem cache, então a tela nunca exibe dado velho depois de salvar.
 let PEDIDOS_FETCH_CACHE = null; // { chave, dados }
 let PEDIDOS_FAT_CACHE = null;   // { totalFaturadoMes, qtdFaturadosMes }
-function invalidarCachePedidos(){ PEDIDOS_FETCH_CACHE = null; PEDIDOS_FAT_CACHE = null; }
+function invalidarCachePedidos(){ PEDIDOS_FETCH_CACHE = null; PEDIDOS_FAT_CACHE = null; invalidarCacheNo('pedidos'); }
 // Espera a pessoa parar de digitar antes de consultar o banco, em vez de consultar a cada tecla.
 let _debouncePedidos = null;
 function renderPedidosDebounced(){
@@ -2658,6 +2658,11 @@ function fmtData(iso){
 // uma data "só o dia" (YYYY-MM-DD, ex: data_faturamento gravada por "Marcar Faturado") vira
 // meia-noite em UTC se não tratada — em comparações de mês (>= início do mês, < fim do mês)
 // isso pode jogar um pedido faturado no dia 1º pro mês ANTERIOR, sumindo da conta do mês certo.
+// Converte Date -> 'AAAA-MM-DD' no fuso local. Usado para montar o startAt das consultas
+// por data_faturamento (o campo e string ISO, entao a comparacao e textual).
+function ymdLocal(d){
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
 function parseDataLocal(iso){
   if(!iso) return null;
   return /^\d{4}-\d{2}-\d{2}$/.test(iso) ? new Date(iso+'T00:00:00') : new Date(iso);
@@ -3176,7 +3181,10 @@ async function renderPainel(){
   const mostrarFaturadoMeu = !usuarioLogado.admin && !ehExpedicao();
   if(mostrarFaturadoMeu){
     try {
-      const snapFat = await db.ref('pedidos').orderByChild('faturado').equalTo(true).once('value');
+      // Antes baixava TODO faturado ja existente so pra somar o mes corrente. Agora usa o
+      // indice de data_faturamento e traz so do inicio do mes pra frente. O filtro cliente
+      // abaixo continua igual, entao o resultado exibido nao muda.
+      const snapFat = await db.ref('pedidos').orderByChild('data_faturamento').startAt(ymdLocal(mesInicio)).once('value');
       const todosFat = snapFat.val() || {};
       Object.values(todosFat).forEach(p => {
         if(p.vendedor_id !== usuarioLogado.id) return;
@@ -3319,7 +3327,8 @@ async function renderMetaMes(mesInicio, pedidosDoMes){
   // original é de antes).
   let realizadoMes = 0, realizadoMesAnterior = 0, naoFatMesAnteriorVirou = 0, vendidoNaoFaturadoMes = 0;
   try{
-    const snapFat = await db.ref('pedidos').orderByChild('faturado').equalTo(true).once('value');
+    // Precisa do mes anterior (pedido antigo que faturou agora) — busca a partir dele.
+    const snapFat = await db.ref('pedidos').orderByChild('data_faturamento').startAt(ymdLocal(mesAnteriorInicio)).once('value');
     Object.values(snapFat.val()||{}).forEach(p=>{
       // Pedido faturado e DEPOIS cancelado continua com faturado=true no banco. Sem esta
       // guarda ele seguia somando em Realizado, em Soma Faturados + A Faturar e no Total
@@ -3946,7 +3955,7 @@ async function renderPedidos(usarCache){
       const mesInicioStr = new Date(anoAtual, mesAtual, 1).toISOString().split('T')[0];
       // Se a consulta principal já trouxe os faturados, usa aqueles dados; só vai ao banco
       // quando realmente não tem de onde tirar.
-      const todosFat = fonteFaturados || ((await db.ref('pedidos').orderByChild('faturado').equalTo(true).once('value')).val() || {});
+      const todosFat = fonteFaturados || ((await db.ref('pedidos').orderByChild('data_faturamento').startAt(mesInicioStr).once('value')).val() || {});
       Object.values(todosFat).forEach(p => {
         if(!vejaTudoDoModulo('pedidos') && p.vendedor_id!==usuarioLogado.id) return;
         if(!p.data_faturamento) return;
@@ -4808,7 +4817,7 @@ async function exportarPedidosW3(){
     const fVendedor = (document.getElementById('f-vendedor')?.value || '').toLowerCase().trim();
 
     try {
-      const snap = await db.ref('pedidos').once('value');
+      const snap = await lerNoCache('pedidos');
       const todos = snap.val()||{};
       for(const k in todos){
         const p = todos[k];
@@ -6525,6 +6534,9 @@ async function confirmarPedido(){
     }
 
     await db.ref('pedidos/'+pedido.id).update(pedido);
+    // Pedido gravado: derruba o cache de 2min usado pelos relatorios, senao MRP,
+    // sugestao de compra e reservas seguiriam mostrando a versao anterior nesta aba.
+    invalidarCachePedidos();
 
     // Reserva de estoque: pedido novo reserva tudo; pedido editado ajusta a diferença.
     // Pedido já bipado (CC) NÃO tem reserva — a baixa física já aconteceu. Nele, o que
@@ -7622,7 +7634,7 @@ async function selecionarProdutoOP(codigo){
   document.getElementById('op-lista-produtos').style.display = 'none';
 
   // Buscar quantos pedidos AP/EX estão esperando esse item
-  const snap = await db.ref('pedidos').once('value');
+  const snap = await lerNoCache('pedidos');
   const todos = snap.val() || {};
   let totalPendente = 0, qtdPedidos = 0;
   Object.values(todos).forEach(ped => {
@@ -8544,7 +8556,7 @@ async function abrirReservasItem(codigo){
     conteudo.innerHTML = `<div class="modal-title">🔒 Reservas — ${codigo}</div><div style="text-align:center;padding:24px;color:var(--muted)">Buscando pedidos...</div>`;
     abrirModal('modal-reservas-item');
 
-    const snap = await db.ref('pedidos').once('value');
+    const snap = await lerNoCache('pedidos');
     const todos = snap.val() || {};
     // Considera reservado apenas em pedidos ainda não bipados/cancelados (AA, AP ou EX)
     const statusReservam = ['AA','AP','EX'];
@@ -13327,7 +13339,7 @@ async function abrirVinculacaoW3(){
   if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
   if(!Object.keys(MAPEAMENTO_W3_DB).length) await carregarMapeamentoW3();
 
-  const snap = await db.ref('pedidos').once('value');
+  const snap = await lerNoCache('pedidos');
   const todos = snap.val() || {};
 
   // Coleta todos os nomes W3 únicos que ainda não têm código válido
@@ -13548,7 +13560,7 @@ async function detectarDuplicados(){
   const resultEl = document.getElementById('duplicados-result');
   resultEl.innerHTML = '<span style="color:var(--accent)">⏳ Analisando pedidos...</span>';
 
-  const snap = await db.ref('pedidos').once('value');
+  const snap = await lerNoCache('pedidos');
   const todos = snap.val() || {};
 
   // 1. Pedidos com mesmo codigo_w3
@@ -13638,7 +13650,7 @@ async function exportarPedidosW3PorPeriodoExcel(){
   const dIni = new Date(ini+'T00:00:00');
   const dFim = new Date(fim+'T23:59:59');
 
-  const snap = await db.ref('pedidos').once('value');
+  const snap = await lerNoCache('pedidos');
   const todos = snap.val() || {};
 
   const pedidos = [];
@@ -13991,7 +14003,12 @@ async function gerarRelatorio(){
 
   el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:40px">⏳ Carregando...</div>';
 
-  const snap = await db.ref('pedidos').orderByChild('faturado').equalTo(true).once('value');
+  // Com periodo informado, busca so a faixa (indice data_faturamento). Sem periodo, cai no
+  // indice antigo porque ai o relatorio realmente precisa do historico inteiro.
+  const qRel = dataIni
+    ? db.ref('pedidos').orderByChild('data_faturamento').startAt(dataIni)
+    : db.ref('pedidos').orderByChild('faturado').equalTo(true);
+  const snap = await qRel.once('value');
   const todos = snap.val() || {};
 
   // Filtra por FATURAMENTO (não mais pela data de criação) — todos os relatórios de
@@ -14413,7 +14430,7 @@ async function carregarConsumoAnualSugestao(forcar){
   const emTransito = { vendavel:{}, insumo:{} };
 
   // Demanda de vendáveis: vendas reais em pedidos confirmados/concluídos no período
-  const snapPedidos = await db.ref('pedidos').once('value');
+  const snapPedidos = await lerNoCache('pedidos');
   Object.values(snapPedidos.val() || {}).forEach(p=>{
     // Só pedidos concluídos contam como demanda real: status anteriores podem ser
     // cancelados ou ter itens alterados antes da liberação, o que distorceria o CMD.
@@ -14976,7 +14993,7 @@ async function calcularComissionamento(){
 
   // Busca só os pedidos FATURADOS (não todo o histórico) — filtra pelo campo
   // data_faturamento, que é a data real da nota fiscal, não a data de criação do pedido.
-  const snap = await db.ref('pedidos').orderByChild('faturado').equalTo(true).once('value');
+  const snap = await db.ref('pedidos').orderByChild('data_faturamento').startAt(dataIni).once('value');
   const todos = snap.val() || {};
   const faturados = Object.values(todos).filter(p => {
     if(!p.data_faturamento) return false;
@@ -15150,7 +15167,7 @@ async function calcularMRP(){
     // Demanda de produto vendável: vendas reais em pedidos confirmados/concluídos no período
     // (não usa movimento de estoque — vendas são o sinal de demanda real, independente de
     // como/se o estoque do produto é baixado no sistema)
-    const snapPedidos = await db.ref('pedidos').once('value');
+    const snapPedidos = await lerNoCache('pedidos');
     Object.values(snapPedidos.val() || {}).forEach(p=>{
       if(!['AP','EX','CC','Concluído'].includes(p.status)) return;
       const dataPedido = new Date(p.data).getTime();
@@ -15581,7 +15598,7 @@ async function carregarSerieDiariaConsumo(forcar){
     porDia[grupo][codigo][dia] = (porDia[grupo][codigo][dia]||0) + qtd;
   };
 
-  const snapPedidos = await db.ref('pedidos').once('value');
+  const snapPedidos = await lerNoCache('pedidos');
   Object.values(snapPedidos.val() || {}).forEach(p=>{
     if(!['CC','Concluído'].includes(p.status)) return;
     const ts = new Date(p.data).getTime();
