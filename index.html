@@ -3325,7 +3325,7 @@ async function renderMetaMes(mesInicio, pedidosDoMes){
   // achar os deste mês, os do mês anterior (pro gráfico) e os que eram de mês anterior e só
   // faturaram agora (essa informação não dá pra tirar dos pedidos deste mês, porque o pedido
   // original é de antes).
-  let realizadoMes = 0, realizadoMesAnterior = 0, naoFatMesAnteriorVirou = 0, vendidoNaoFaturadoMes = 0;
+  let realizadoMes = 0, realizadoMesAnterior = 0, fatEsteMesDePedidoAntigo = 0, vendidoNaoFaturadoMes = 0;
   try{
     // Precisa do mes anterior (pedido antigo que faturou agora) — busca a partir dele.
     const snapFat = await db.ref('pedidos').orderByChild('data_faturamento').startAt(ymdLocal(mesAnteriorInicio)).once('value');
@@ -3341,7 +3341,7 @@ async function renderMetaMes(mesInicio, pedidosDoMes){
       if(df < mesInicio || df >= mesFim) return;
       realizadoMes += Number(p.total||0);
       const dPedido = parseDataLocal(p.data);
-      if(dPedido < mesInicio) naoFatMesAnteriorVirou += Number(p.total||0);
+      if(dPedido < mesInicio) fatEsteMesDePedidoAntigo += Number(p.total||0);
     });
     (pedidosDoMes||[]).forEach(p=>{
       // Guarda redundante (pedidosDoMes já vem sem orçamento), mantida de propósito:
@@ -3351,8 +3351,34 @@ async function renderMetaMes(mesInicio, pedidosDoMes){
     });
   } catch(e){ console.warn('[CROW] falha silenciosa ignorada:', e); }
 
+  // CARTEIRA QUE VIROU O MES: pedidos lancados em meses ANTERIORES que nao foram faturados
+  // dentro do proprio mes da venda — ou seja, o saldo em aberto que atravessou a virada.
+  // Nao da pra tirar da consulta de faturados acima: pedido em aberto nao tem
+  // data_faturamento e por isso nem entra naquele resultado. Busca limitada aos ultimos 6
+  // meses pra nao baixar o historico inteiro de pedidos a cada abertura do Painel (este
+  // painel e so do admin, entao o custo fica restrito a esses logins).
+  let carteiraVirouMesAnterior = 0;
+  try{
+    const janelaInicio = new Date(mesInicio.getFullYear(), mesInicio.getMonth()-6, 1);
+    const snapAnt = await db.ref('pedidos').orderByChild('data')
+      .startAt(janelaInicio.toISOString()).endAt(mesInicio.toISOString()).once('value');
+    Object.values(snapAnt.val()||{}).forEach(p=>{
+      if(p.status==='Cancelado' || p.status==='Orçamento') return;
+      const dPedido = parseDataLocal(p.data);
+      if(!dPedido || dPedido >= mesInicio) return;
+      // Faturado marcado sem data (registro antigo): nao da pra provar que estava em aberto
+      // na virada, entao fica de fora pra nao inflar o numero.
+      if(p.faturado && !p.data_faturamento) return;
+      // Ja tinha sido faturado ANTES da virada do mes: nao atravessou nada.
+      if(p.data_faturamento && parseDataLocal(p.data_faturamento) < mesInicio) return;
+      carteiraVirouMesAnterior += Number(p.total||0);
+    });
+  } catch(e){ console.warn('[CROW] falha silenciosa ignorada:', e); }
+
   const somaFaturadosMaisAFaturar = realizadoMes + vendidoNaoFaturadoMes;
-  const totalVendidoNoMes = somaFaturadosMaisAFaturar - naoFatMesAnteriorVirou;
+  // Subtrai so o que JA virou faturamento neste mes (senao o Total Vendido no Mes
+  // descontaria tambem a carteira ainda em aberto, que nao entrou em realizadoMes).
+  const totalVendidoNoMes = somaFaturadosMaisAFaturar - fatEsteMesDePedidoAntigo;
   const diasRestantes = Math.max(0, (cfg.dias_uteis||0) - (cfg.dias_trabalhados||0));
   const metaProporcional = cfg.dias_uteis>0 ? (cfg.meta||0) * (cfg.dias_trabalhados||0)/cfg.dias_uteis : 0;
   const diferenca = realizadoMes - metaProporcional;
@@ -3389,7 +3415,8 @@ async function renderMetaMes(mesInicio, pedidosDoMes){
             ${linha('Diária Real', fmtMoeda(diariaReal))}
             ${linha('Soma Faturados + A Faturar', fmtMoeda(somaFaturadosMaisAFaturar))}
             ${linha('Vendido, Ainda Não Faturado', fmtMoeda(vendidoNaoFaturadoMes))}
-            ${linha('Não Fat. Mês Anterior (virou este mês)', fmtMoeda(naoFatMesAnteriorVirou))}
+            ${linha('Não Fat. Mês Anterior (virou este mês)', fmtMoeda(carteiraVirouMesAnterior))}
+            ${linha('— destes, já faturado neste mês', fmtMoeda(fatEsteMesDePedidoAntigo))}
             <tr style="border-bottom:1px solid var(--border);background:var(--bg)">
               <td style="padding:7px 10px;font-weight:700">Total Vendido no Mês</td>
               <td class="valor-sensivel" style="padding:7px 10px;text-align:right;font-weight:700">${fmtMoeda(totalVendidoNoMes)}</td>
