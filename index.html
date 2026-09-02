@@ -1277,6 +1277,10 @@ tbody td{padding:11px 16px;font-size:14px}
         </div>
       </div>
       <div class="dashboard-cards" id="garantias-resumo" style="margin-bottom:16px"></div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <button id="btn-visao-lista" class="btn btn-primary btn-sm" onclick="trocarVisaoGarantias('lista')">📋 Lista</button>
+        <button id="btn-visao-caixa" class="btn btn-outline btn-sm" onclick="trocarVisaoGarantias('caixa')">📦 Conferência da Caixa</button>
+      </div>
       <div class="filtros-bar">
         <button class="filtros-toggle" onclick="toggleFiltros('filtros-garantia-inner')">
           <span>🔍 Filtros</span><span id="filtros-garantia-arrow">▼</span>
@@ -1292,7 +1296,9 @@ tbody td{padding:11px 16px;font-size:14px}
           </div>
           <div class="filtro-group">
             <label>Fornecedor</label>
-            <input type="text" id="garantia-f-fornecedor" placeholder="Nome do fornecedor...">
+            <select id="garantia-f-fornecedor" onchange="paginaGarantias=1;renderGarantias()">
+              <option value="">Todos</option>
+            </select>
           </div>
           <div class="filtro-group">
             <label>Código do insumo</label>
@@ -1317,6 +1323,7 @@ tbody td{padding:11px 16px;font-size:14px}
       </div>
       <div id="garantias-lista"></div>
       <div class="pagination" id="garantias-pag"></div>
+      <div id="garantias-caixa" style="display:none"></div>
     </div>
 
     <!-- MANUTENÇÃO PREVENTIVA -->
@@ -2173,6 +2180,31 @@ tbody td{padding:11px 16px;font-size:14px}
 </div>
 
 <!-- MODAL RELATÓRIO DE GARANTIAS -->
+<!-- MODAL REGISTRAR REMESSA DE GARANTIA -->
+<div class="modal-overlay" id="modal-remessa">
+  <div class="modal" style="max-width:460px">
+    <button class="modal-close" onclick="fecharModal('modal-remessa')">×</button>
+    <div class="modal-title">📦 Registrar Remessa</div>
+    <div style="background:var(--bg);border-radius:8px;padding:12px 14px;margin-bottom:14px">
+      <div style="font-weight:700">🚚 <span id="remessa-fornecedor"></span></div>
+      <div style="font-size:12px;color:var(--muted);margin-top:2px" id="remessa-resumo"></div>
+    </div>
+    <div class="form-row single"><div class="form-group">
+      <label>Data do envio</label>
+      <input type="date" id="remessa-data" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px">
+    </div></div>
+    <div class="form-row single"><div class="form-group">
+      <label>Observação (opcional)</label>
+      <input type="text" id="remessa-obs" placeholder="ex: levado pelo representante" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px">
+    </div></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Todas as peças deste fornecedor que estão na caixa serão marcadas como <strong>Enviado</strong> e receberão o mesmo número de remessa. Em seguida a lista de acompanhamento abre para impressão.</div>
+    <div class="form-actions">
+      <button class="btn btn-outline" onclick="fecharModal('modal-remessa')">Cancelar</button>
+      <button class="btn btn-primary" id="btn-confirmar-remessa" onclick="confirmarRemessa()">Registrar Remessa</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-relatorio-garantias">
   <div class="modal" style="max-width:700px">
     <button class="modal-close" onclick="fecharModal('modal-relatorio-garantias')">×</button>
@@ -3076,7 +3108,7 @@ function showTab(tab, el){
     renderCompras();
   }
   if(tab==='garantias'){
-    if(!filtroGarantiasJaAplicado){ document.getElementById('garantia-f-data-ini').value = primeiroDiaMesAtual(); filtroGarantiasJaAplicado = true; }
+    // Sem data padrao: garantia arrasta por meses e o recorte do mes atual escondia registros antigos
     renderGarantias();
   }
   if(tab==='manutencao') renderManutencao();
@@ -4656,10 +4688,38 @@ async function cancelarBipagemPedido(id){
   const snap = await db.ref('pedidos/'+id).once('value');
   const p = snap.val();
   if(!p) return;
-  if(!confirm(`Cancelar a bipagem do pedido #${p.numero}?\n\nIsso vai:\n- Devolver ${p.itens.length} item(ns) ao estoque\n- Voltar o status para "Aprovado"\n\nUse isso apenas se o pedido precisa ser editado após já ter sido finalizado por engano.`)) return;
+  if(p.status !== 'CC'){
+    toast(`Pedido #${p.numero} não está concluído — não há bipagem a cancelar`,'error');
+    return;
+  }
+  if(!confirm(`Cancelar a bipagem do pedido #${p.numero}?\n\nIsso vai:\n- Devolver ${(p.itens||[]).length} item(ns) ao estoque\n- Voltar o status para "Aprovado"\n\nUse isso apenas se o pedido precisa ser editado após já ter sido finalizado por engano.`)) return;
+
+  // Trava atomica: a virada CC -> AP acontece dentro de transaction(), entao so a
+  // PRIMEIRA execucao passa daqui. Duas abas, ou clique duplo, devolviam o estoque
+  // duas vezes — o cancelamento nao tinha nenhuma protecao, ao contrario da bipagem.
+  const resStatus = await db.ref('pedidos/'+id+'/status').transaction(atual => {
+    if(atual !== 'CC') return;   // aborta a transaction sem gravar
+    return 'AP';
+  });
+  if(!resStatus.committed){
+    toast(`Pedido #${p.numero} já teve a bipagem cancelada — nada foi alterado`,'error');
+    fecharModal('modal-ver-pedido');
+    renderPedidos();
+    return;
+  }
+
+  // Libera a trava da baixa. Ela era gravada na bipagem e NUNCA era apagada em lugar
+  // nenhum: o pedido voltava para Aprovado mas a rebipagem sempre abortava em "ja teve
+  // baixa de estoque", o pedido nunca fechava e a reserva recriada logo abaixo ficava
+  // presa. Guardamos a data da reversao em outro campo para o historico nao se perder.
+  await db.ref('pedidos/'+id).update({
+    baixa_estoque_ts: null,
+    baixa_revertida_ts: agoraTs(),
+    baixa_revertida_por: usuarioLogado?.nome || ''
+  });
 
   // Devolver estoque de cada item
-  for(const item of p.itens){
+  for(const item of (p.itens||[])){
     const prodSnap = await db.ref('produtos/'+item.codigo).once('value');
     if(prodSnap.exists()){
       await movimentarEstoque('produto', item.codigo, { codigo:item.codigo, nome:item.nome, delta:item.qtd,
@@ -4670,10 +4730,11 @@ async function cancelarBipagemPedido(id){
     item.qtd_bipada = 0;
   }
 
-  await db.ref('pedidos/'+id).update({ status: 'AP', itens: p.itens });
+  // O status ja foi virado para AP pela transaction acima; aqui so gravamos os itens
+  await db.ref('pedidos/'+id+'/itens').set(p.itens || []);
 
   // Pedido volta a estar "em aberto" (AP) — precisa reservar de novo, já que a bipagem tinha liberado a reserva
-  await reservarEstoquePedido(p.itens);
+  await reservarEstoquePedido(p.itens || []);
 
   fecharModal('modal-ver-pedido');
   renderPedidos();
@@ -4932,10 +4993,15 @@ async function exportarPedidosW3(){
 }
 
 async function reativarPedido(id){
+  if(!temPermissaoEditar('pedidos')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const snap = await db.ref('pedidos/'+id).once('value');
   const p = snap.val(); if(!p) return;
+  if(p.status !== 'Cancelado'){ toast('Este pedido não está cancelado','error'); return; }
 
-  const statusAnterior = p.status_antes_cancelamento || 'AA';
+  let statusAnterior = p.status_antes_cancelamento || 'AA';
+  // Registro estragado por um cancelamento duplo antigo: restaurar para "Cancelado"
+  // deixaria o pedido num estado sem sentido e ainda reservaria estoque.
+  if(statusAnterior === 'Cancelado') statusAnterior = 'AA';
   const labelStatus = { AA:'Aguardando Aprovação', AP:'Aprovado', EX:'Em Separação/Expedição', CC:'Conferido/Concluído' };
 
   const eraBipado = statusAnterior === 'CC';
@@ -4992,9 +5058,14 @@ async function reativarPedido(id){
 
 async function cancelarPedido(id){
   try {
+    // Faltava a verificacao de permissao que todas as funcoes vizinhas fazem — e esta
+    // mexe em estoque e em credito de cliente.
+    if(!temPermissaoEditar('pedidos')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
     if(!confirm('Cancelar este pedido?')) return;
     const snap = await db.ref('pedidos/'+id).once('value');
     const p = snap.val();
+    if(!p){ toast('Pedido não encontrado','error'); return; }
+    if(p.status === 'Cancelado'){ toast('Este pedido já está cancelado','error'); return; }
 
     // Se o pedido já foi bipado (CC), pergunta se deve estornar os itens ao estoque
     let estornarEstoque = false;
@@ -5007,10 +5078,15 @@ async function cancelarPedido(id){
       );
     }
 
-    await db.ref('pedidos/'+id).update({
-      status: 'Cancelado',
-      status_antes_cancelamento: p?.status || 'AA'
+    // Transaction para nao cancelar duas vezes: na segunda passada o status_antes_cancelamento
+    // virava "Cancelado", e reativar depois restaurava o pedido para "Cancelado" e ainda
+    // reservava estoque — reserva fantasma que nunca seria liberada.
+    const resCancel = await db.ref('pedidos/'+id+'/status').transaction(atual => {
+      if(atual === 'Cancelado') return;   // aborta
+      return 'Cancelado';
     });
+    if(!resCancel.committed){ toast('Este pedido já está cancelado','error'); return; }
+    await db.ref('pedidos/'+id+'/status_antes_cancelamento').set(p?.status || 'AA');
 
     // Libera a reserva (só se não estava bipado — bipado já não tem reserva)
     if(p && p.status !== 'CC' && p.itens){
@@ -8045,15 +8121,20 @@ async function concluirOP(key){
     if(prodSnap.exists()){
       const valProd = prodSnap.val();
       if(valProd.quantidade === undefined && valProd.estoque !== undefined){
-        // Registro antigo que ainda guarda o saldo no campo 'estoque'
-        novaQtdProduto = Number(valProd.estoque||0) + qtdProduzida;
-        await db.ref('produtos/'+op.produto_codigo+'/quantidade').set(novaQtdProduto);
-      } else {
-        novaQtdProduto = (await movimentarEstoque('produto', op.produto_codigo, { codigo:op.produto_codigo,
-          nome:op.produto_nome, delta:qtdProduzida, motivo:`Produção concluída — OP #${op.numero}`,
-          origemTipo:'op', origemId:key })).novo;
-        movimentoProdutoRegistrado = true;
+        // Registro antigo que guardava o saldo no campo 'estoque'. Antes, esse caminho
+        // lia o saldo, somava em JS e gravava com set() — nao atomico, e deixava o campo
+        // 'estoque' velho para tras, com dois numeros diferentes no mesmo produto.
+        // Agora migramos o saldo para 'quantidade', apagamos o campo antigo e caimos no
+        // mesmo lancamento atomico usado por todo o resto do sistema.
+        await db.ref('produtos/'+op.produto_codigo).update({
+          quantidade: Number(valProd.estoque||0),
+          estoque: null
+        });
       }
+      novaQtdProduto = (await movimentarEstoque('produto', op.produto_codigo, { codigo:op.produto_codigo,
+        nome:op.produto_nome, delta:qtdProduzida, motivo:`Produção concluída — OP #${op.numero}`,
+        origemTipo:'op', origemId:key })).novo;
+      movimentoProdutoRegistrado = true;
     } else {
       novaQtdProduto = qtdProduzida;
       await db.ref('produtos/'+op.produto_codigo).set({
@@ -8142,6 +8223,22 @@ function esc(v){
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
+// Confere no Firebase qual chave de insumo realmente existe antes de mexer no saldo.
+// Sem isso, 'ins_'+codigo usado como palpite fazia a transaction CRIAR o no: nascia um
+// insumo fantasma so com estoque_atual, sem nome e sem codigo, fora de qualquer relatorio.
+// Retorna a chave valida ou null.
+async function resolverChaveInsumo(codigo, keySugerida){
+  const candidatos = [];
+  if(keySugerida) candidatos.push(keySugerida);
+  if(codigo) candidatos.push('ins_' + codigo);
+  for(const k of candidatos){
+    if(!k) continue;
+    const snap = await db.ref('insumos/' + k).once('value');
+    if(snap.exists()) return k;
+  }
+  return null;
+}
+
 function caminhoEstoque(tipo, chave){
   return tipo === 'insumo' ? 'insumos/'+chave+'/estoque_atual' : 'produtos/'+chave+'/quantidade';
 }
@@ -8194,6 +8291,10 @@ async function definirEstoqueAbsoluto(tipo, chave, valor){
 // ══════════════════════════════════════════════
 
 async function gravarMovimentoPendente(dados){
+  // O cache de 'movimentos_estoque' tem 2 minutos de validade. Sem invalidar aqui, a
+  // auditoria e os relatorios liam um retrato sem o movimento recem-lancado e acusavam
+  // divergencia que nao existe — e "corrigir" essa divergencia falsa estraga o saldo real.
+  invalidarCacheNo('movimentos_estoque');
   const movKey = db.ref('movimentos_estoque').push().key;
   await db.ref('movimentos_estoque/'+movKey).set({
     codigo: dados.codigo, nome: dados.nome || '',
@@ -8209,6 +8310,7 @@ async function gravarMovimentoPendente(dados){
 }
 
 async function finalizarMovimento(movKey, r, motivoFinal){
+  invalidarCacheNo('movimentos_estoque'); // o movimento mudou de forma apos a gravacao inicial
   const dif = r.novo - r.anterior;
   await db.ref('movimentos_estoque/'+movKey).update({
     pendente: null,
@@ -8730,8 +8832,11 @@ function preVisualizarEstornoProducao(){
   `;
 }
 
+let estornoEmAndamento = false;
 async function confirmarEstornoProducao(){
   if(!usuarioLogado?.admin){ toast('Acesso restrito — só administradores podem fazer estorno de produção','error'); return; }
+  // Sem esta trava, dois cliques durante o await da confirmacao disparavam dois estornos
+  if(estornoEmAndamento){ toast('Estorno em andamento, aguarde...','error'); return; }
   const dados = estornoProducaoPreview;
   if(!dados){ toast('Nada pra confirmar','error'); return; }
 
@@ -8742,6 +8847,7 @@ async function confirmarEstornoProducao(){
   );
   if(!ok) return;
 
+  estornoEmAndamento = true;
   const el = document.getElementById('estorno-producao-preview');
   el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--muted)">⏳ Processando estorno...</div>';
 
@@ -8753,18 +8859,26 @@ async function confirmarEstornoProducao(){
     dados.produto.quantidade = novoEstoqueProduto;
 
     // 2) Entrada em cada insumo (menos embalagem, já filtrado no preview)
+    const insumosNaoLocalizados = [];
     for(const it of dados.itensDevolucao){
-      const key = it.key || ('ins_'+it.codigo);
+      const key = await resolverChaveInsumo(it.codigo, it.key);
+      if(!key){ insumosNaoLocalizados.push(it.codigo + ' — ' + (it.nome||'')); continue; }
       await movimentarEstoque('insumo', key, { codigo:it.codigo, nome:it.nome, delta:it.qtdDevolver,
         motivo:`Estorno de Produção — desmontagem de ${dados.qtd}x ${esc(dados.produto.nome)}${motivoTexto}` });
     }
+    if(insumosNaoLocalizados.length){
+      toast('⚠ Insumo(s) não encontrados no cadastro, não devolvidos: ' + insumosNaoLocalizados.join(' · '), 'error');
+    }
 
+    estornoProducaoPreview = null; // impede reaproveitar o mesmo preview
     fecharModal('modal-estorno-producao');
     toast(`✅ Estorno concluído — ${dados.itensDevolucao.length} insumo(s) devolvido(s) ao estoque`, 'success');
     renderProdutos();
     renderEstoque();
   } catch(err){
     el.innerHTML = `<div style="color:#dc2626;padding:12px">Erro: ${err.message}</div>`;
+  } finally {
+    estornoEmAndamento = false;
   }
 }
 
@@ -8834,8 +8948,10 @@ function atualizarLabelMovimento(){
   else label.textContent = 'Quantidade a remover';
 }
 
+let movimentoEstoqueEmAndamento = false;
 async function confirmarMovimentoEstoque(){
   if(!temPermissaoEditar('estoque')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  if(movimentoEstoqueEmAndamento){ toast('Lançamento em andamento, aguarde...','error'); return; }
   if(!movProdutoSelecionado){ toast('Selecione um produto','error'); return; }
   const tipo = document.getElementById('mov-tipo').value;
   const valor = Number(document.getElementById('mov-qtd').value);
@@ -8845,30 +8961,43 @@ async function confirmarMovimentoEstoque(){
   const codigo = movProdutoSelecionado.codigo;
   const nome = movProdutoSelecionado.nome;
   const tipoItem = movProdutoSelecionado._tipo === 'insumo' ? 'insumo' : 'produto';
-  const chaveItem = tipoItem === 'insumo'
-    ? (movProdutoSelecionado.key || ('ins_'+codigo))
-    : codigo;
 
-  // Entrada/saída somam ou subtraem no servidor. Balanço grava o valor contado, mas
-  // devolve o saldo real anterior — o histórico passa a registrar a diferença correta.
-  const motivoManual = obs || (tipo==='entrada' ? 'Entrada manual' : 'Saída manual');
-  let resultado;
-  if(tipo === 'entrada'){
-    resultado = await movimentarEstoque(tipoItem, chaveItem, { codigo, nome, delta:valor, motivo:motivoManual });
-  } else if(tipo === 'saida'){
-    resultado = await movimentarEstoque(tipoItem, chaveItem, { codigo, nome, delta:-valor, motivo:motivoManual });
-  } else { // balanco
-    resultado = await balancearEstoque(tipoItem, chaveItem, { codigo, nome, valor,
-      motivoFn: (de, para) => `Balanço: ${de} → ${para}${obs ? ' — '+obs : ''}` });
+  movimentoEstoqueEmAndamento = true;
+  try {
+    // Confere a chave real do insumo: o palpite 'ins_'+codigo criava registro fantasma
+    let chaveItem = codigo;
+    if(tipoItem === 'insumo'){
+      chaveItem = await resolverChaveInsumo(codigo, movProdutoSelecionado.key);
+      if(!chaveItem){
+        toast(`Insumo "${codigo}" não encontrado no cadastro — nada foi lançado`,'error');
+        return;
+      }
+    }
+
+    // Entrada/saída somam ou subtraem no servidor. Balanço grava o valor contado, mas
+    // devolve o saldo real anterior — o histórico passa a registrar a diferença correta.
+    const motivoManual = obs || (tipo==='entrada' ? 'Entrada manual' : 'Saída manual');
+    let resultado;
+    if(tipo === 'entrada'){
+      resultado = await movimentarEstoque(tipoItem, chaveItem, { codigo, nome, delta:valor, motivo:motivoManual });
+    } else if(tipo === 'saida'){
+      resultado = await movimentarEstoque(tipoItem, chaveItem, { codigo, nome, delta:-valor, motivo:motivoManual });
+    } else { // balanco
+      resultado = await balancearEstoque(tipoItem, chaveItem, { codigo, nome, valor,
+        motivoFn: (de, para) => `Balanço: ${de} → ${para}${obs ? ' — '+obs : ''}` });
+    }
+    const novoEstoque = resultado.novo;
+    movProdutoSelecionado.quantidade = novoEstoque;
+    if(tipoItem === 'insumo') movProdutoSelecionado.estoque_atual = novoEstoque;
+
+    fecharModal('modal-movimento-estoque');
+    await renderEstoque();
+    toast(`✓ Estoque de "${nome}" atualizado para ${novoEstoque}`,'success');
+  } catch(e){
+    toast('Erro ao lançar movimento: ' + (e?.message||e), 'error');
+  } finally {
+    movimentoEstoqueEmAndamento = false;
   }
-  const estoqueAtual = resultado.anterior;
-  const novoEstoque  = resultado.novo;
-  movProdutoSelecionado.quantidade = novoEstoque;
-  if(tipoItem === 'insumo') movProdutoSelecionado.estoque_atual = novoEstoque;
-
-  fecharModal('modal-movimento-estoque');
-  await renderEstoque();
-  toast(`✓ Estoque de "${nome}" atualizado para ${novoEstoque}`,'success');
 }
 
 // ══════════════════════════════════════════════
@@ -9642,6 +9771,7 @@ async function darEntradaEstoqueCompra(compraId, compra, statusAnterior){
   }
 
   let entraram = 0, pulados = 0;
+  const naoLocalizados = [];
 
   for(let idx = 0; idx < compra.itens.length; idx++){
     const item = compra.itens[idx];
@@ -9653,7 +9783,13 @@ async function darEntradaEstoqueCompra(compraId, compra, statusAnterior){
 
     if(item.tipo === 'insumo'){
       const insumo = INSUMOS_DB.find(x=>x.codigo===item.codigo);
-      await movimentarEstoque('insumo', insumo?.key || ('ins_'+item.codigo), { codigo:item.codigo, nome:item.nome,
+      const chaveIns = await resolverChaveInsumo(item.codigo, insumo?.key);
+      if(!chaveIns){
+        // Nao inventa a chave: lancar num no inexistente criaria um insumo fantasma.
+        naoLocalizados.push(item.codigo + ' — ' + (item.nome||''));
+        continue;
+      }
+      await movimentarEstoque('insumo', chaveIns, { codigo:item.codigo, nome:item.nome,
         delta:item.qtd, motivo:`Compra ${compra.nf?'NF '+compra.nf:''} — ${esc(compra.fornecedor)}`, origemTipo:'compra', origemId:compraId });
     } else {
       await movimentarEstoque('produto', item.codigo, { codigo:item.codigo, nome:item.nome,
@@ -9668,6 +9804,10 @@ async function darEntradaEstoqueCompra(compraId, compra, statusAnterior){
 
   if(pulados){
     toast(`✓ ${entraram} item(ns) lançados · ${pulados} já haviam entrado antes`,'success');
+  }
+  if(naoLocalizados.length){
+    toast('⚠ Insumo(s) não encontrados no cadastro, NÃO lançados: ' + naoLocalizados.join(' · ')
+      + '. Cadastre o insumo e lance a entrada manualmente.', 'error');
   }
 }
 
@@ -10265,7 +10405,8 @@ async function confirmarRegistroDefeito(){
       i.quantidade = (await movimentarEstoque('produto', i.codigo, { codigo:i.codigo, nome:i.nome, delta:-qtd,
         motivo: motivoDefeito, origemTipo: ehManual ? null : 'op', origemId: ehManual ? null : opContextoDefeito.key })).novo;
     } else {
-      const key = i.key || ('ins_'+i.codigo);
+      const key = await resolverChaveInsumo(i.codigo, i.key);
+      if(!key){ toast(`Insumo "${i.codigo}" não encontrado no cadastro — baixa não realizada`,'error'); return; }
       i.estoque_atual = (await movimentarEstoque('insumo', key, { codigo:i.codigo, nome:i.nome, delta:-qtd,
         motivo: motivoDefeito, origemTipo: ehManual ? null : 'op', origemId: ehManual ? null : opContextoDefeito.key })).novo;
     }
@@ -10277,6 +10418,9 @@ async function confirmarRegistroDefeito(){
     codigo: i.codigo,
     nome: i.nome,
     fornecedor: fornecedorNome,
+    // Custo congelado no momento do lancamento: o cadastro pode mudar depois e o
+    // valor parado com o fornecedor tem que refletir o custo da epoca
+    custo_unit: Number(i.preco_custo) || 0,
     qtd, motivo, obs,
     op_numero: ehManual ? null : opContextoDefeito.numero,
     op_key: ehManual ? null : opContextoDefeito.key,
@@ -10339,6 +10483,7 @@ async function renderGarantias(){
   const snap = await db.ref('garantias').once('value');
   const todos = snap.val() || {};
   GARANTIAS_CACHE = Object.keys(todos).map(id=>({id, ...todos[id]})).sort((a,b)=>b.ts-a.ts);
+  popularSelectFornecedoresGarantia();
 
   const fDataIni = document.getElementById('garantia-f-data-ini')?.value;
   const fDataFim = document.getElementById('garantia-f-data-fim')?.value;
@@ -10365,9 +10510,17 @@ async function renderGarantias(){
     <div class="dash-card"><div class="dash-card-label">Fornecedores Envolvidos</div><div class="dash-card-value">${fornecedoresEnvolvidos}</div></div>
   `;
 
+  garantiasFiltradasCache = filtrado; // usado pelo "Gerar Relatório", pra respeitar os filtros aplicados
+
+  // Alterna entre a lista cronologica e a conferencia da caixa
+  const ehCaixa = garantiaModoVisao === 'caixa';
+  document.getElementById('garantias-lista').style.display = ehCaixa ? 'none' : '';
+  document.getElementById('garantias-pag').style.display   = ehCaixa ? 'none' : '';
+  document.getElementById('garantias-caixa').style.display = ehCaixa ? '' : 'none';
+  if(ehCaixa){ renderGarantiasCaixa(filtrado); return; }
+
   const total = filtrado.length, inicio=(paginaGarantias-1)*POR_PAGINA;
   const pagina = filtrado.slice(inicio, inicio+POR_PAGINA);
-  garantiasFiltradasCache = filtrado; // usado pelo "Gerar Relatório", pra respeitar os filtros aplicados
 
   const abertosNaPagina = pagina.filter(g=>g.status!=='finalizado' && g.status!=='cancelado');
   const barraSelecao = abertosNaPagina.length ? `
@@ -10466,7 +10619,7 @@ async function alterarStatusGarantiaEmLote(){
 }
 
 function limparFiltrosGarantias(){
-  document.getElementById('garantia-f-data-ini').value = primeiroDiaMesAtual();
+  document.getElementById('garantia-f-data-ini').value = '';
   document.getElementById('garantia-f-data-fim').value = '';
   document.getElementById('garantia-f-fornecedor').value = '';
   document.getElementById('garantia-f-codigo').value = '';
@@ -10515,6 +10668,312 @@ async function cancelarGarantia(id){
   await db.ref('garantias/'+id).update({ status: 'cancelado', cancelado_por: usuarioLogado.nome, ts_cancelamento: agoraTs() });
   await renderGarantias();
   toast('✓ Garantia cancelada','success');
+}
+
+// ══════════════════════════════════════════════
+// ══ VISÃO CAIXA — conferência física × sistema ══
+// ══════════════════════════════════════════════
+// A lista cronológica não bate com a caixa física, que é organizada por fornecedor
+// e por peça. Esta visão agrupa do mesmo jeito que a caixa é montada, para a
+// conferência deixar de ser cruzamento manual.
+
+let garantiaModoVisao = 'lista';
+let CAIXA_GRUPOS = [];      // índice -> { fornecedor, linhas, totPecas, totValor, dias }
+let remessaCtx = null;      // grupo escolhido no modal de remessa
+
+function trocarVisaoGarantias(modo){
+  garantiaModoVisao = modo;
+  const bl = document.getElementById('btn-visao-lista');
+  const bc = document.getElementById('btn-visao-caixa');
+  if(bl) bl.className = modo==='lista' ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm';
+  if(bc) bc.className = modo==='caixa' ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm';
+  paginaGarantias = 1;
+  renderGarantias();
+}
+
+// O select é montado com os fornecedores que REALMENTE aparecem nos registros.
+// Assim toda opção escolhida devolve resultado — o campo de texto livre antigo
+// deixava digitar nomes que não existiam em nenhum registro.
+function popularSelectFornecedoresGarantia(){
+  const sel = document.getElementById('garantia-f-fornecedor');
+  if(!sel) return;
+  const atual = sel.value;
+  const nomes = [...new Set(GARANTIAS_CACHE.map(g=>(g.fornecedor||'').trim()).filter(Boolean))]
+    .sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  sel.innerHTML = '<option value="">Todos</option>' +
+    nomes.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  if(nomes.includes(atual)) sel.value = atual;
+}
+
+// Custo do registro: usa o congelado no lançamento; para registros antigos que não
+// têm esse campo, cai no custo atual do cadastro.
+function custoGarantia(g){
+  if(g.custo_unit != null) return Number(g.custo_unit)||0;
+  const p = (PRODUTOS_DB||[]).find(x=>x.codigo===g.codigo);
+  if(p) return Number(p.preco_custo)||0;
+  const i = (INSUMOS_DB||[]).find(x=>x.codigo===g.codigo);
+  if(i) return Number(i.preco_custo)||0;
+  return 0;
+}
+
+function renderGarantiasCaixa(filtrado){
+  const alvo = document.getElementById('garantias-caixa');
+  // Pendente e Aguardando Envio = peça fisicamente na caixa. Enviado já saiu.
+  const naCaixa = filtrado.filter(g=>g.status==='pendente' || g.status==='aguardando_envio');
+
+  if(!naCaixa.length){
+    CAIXA_GRUPOS = [];
+    alvo.innerHTML = '<div style="padding:34px;text-align:center;color:var(--muted);font-size:14px">Nenhuma peça na caixa dentro dos filtros atuais.</div>';
+    return;
+  }
+
+  const porForn = {};
+  naCaixa.forEach(g=>{
+    const f = (g.fornecedor||'').trim() || 'Não identificado';
+    if(!porForn[f]) porForn[f] = {};
+    const cod = g.codigo || '—';
+    if(!porForn[f][cod]) porForn[f][cod] = { codigo:cod, nome:g.nome||'', qtd:0, valor:0, maisAntiga:g.ts, registros:[] };
+    const l = porForn[f][cod];
+    l.qtd    += Number(g.qtd||0);
+    l.valor  += Number(g.qtd||0) * custoGarantia(g);
+    if(g.ts < l.maisAntiga) l.maisAntiga = g.ts;
+    l.registros.push(g.id);
+  });
+
+  const hoje = agoraTs();
+  CAIXA_GRUPOS = Object.keys(porForn).sort((a,b)=>a.localeCompare(b,'pt-BR')).map(forn=>{
+    const linhas = Object.values(porForn[forn]).sort((a,b)=>String(a.codigo).localeCompare(String(b.codigo)));
+    const maisAntiga = Math.min(...linhas.map(l=>l.maisAntiga));
+    return {
+      fornecedor: forn,
+      linhas,
+      totPecas: linhas.reduce((sm,l)=>sm+l.qtd,0),
+      totValor: linhas.reduce((sm,l)=>sm+l.valor,0),
+      dias: Math.floor((hoje - maisAntiga)/86400000)
+    };
+  });
+
+  alvo.innerHTML = `
+    <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
+      Conte as peças da caixa e digite o que encontrou na coluna <strong>Físico</strong>. Deixe em branco o que não for conferir.
+    </div>` + CAIXA_GRUPOS.map((g,idx)=>{
+    const alerta = g.dias >= 60 ? '#dc2626' : (g.dias >= 30 ? '#d97706' : 'var(--muted)');
+    return `
+    <div class="pedido-card" style="margin-bottom:14px">
+      <div class="pedido-card-header" style="align-items:center">
+        <div>
+          <div class="pedido-card-num">🚚 ${esc(g.fornecedor)}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">
+            ${g.linhas.length} item(ns) · <strong>${g.totPecas}</strong> peça(s) · ${fmtMoeda(g.totValor)}
+            · <span style="color:${alerta}">mais antiga há ${g.dias} dia(s)</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="conferirCaixa(${idx})">✓ Conferir</button>
+          <button class="btn btn-primary btn-sm" onclick="abrirRemessa(${idx})">📦 Registrar Remessa</button>
+        </div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:10px">
+        <thead><tr style="background:var(--bg)">
+          <th style="padding:7px;text-align:left">Código</th>
+          <th style="padding:7px;text-align:left">Descrição</th>
+          <th style="padding:7px;text-align:center;width:70px">Sistema</th>
+          <th style="padding:7px;text-align:center;width:90px">Físico</th>
+          <th style="padding:7px;text-align:center;width:60px"></th>
+        </tr></thead>
+        <tbody>${g.linhas.map((l,j)=>`
+          <tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:7px"><strong>${esc(l.codigo)}</strong></td>
+            <td style="padding:7px">${esc(l.nome)}</td>
+            <td style="padding:7px;text-align:center"><strong>${l.qtd}</strong></td>
+            <td style="padding:7px;text-align:center">
+              <input type="number" min="0" id="cx-${idx}-${j}" style="width:64px;padding:4px;border:1px solid var(--border);border-radius:6px;text-align:center;font-size:13px">
+            </td>
+            <td style="padding:7px;text-align:center" id="cx-ok-${idx}-${j}"></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      <div id="cx-res-${idx}" style="margin-top:10px"></div>
+    </div>`;
+  }).join('');
+}
+
+function conferirCaixa(idx){
+  const g = CAIXA_GRUPOS[idx];
+  if(!g) return;
+  const divergencias = [];
+  let conferidos = 0;
+
+  g.linhas.forEach((l,j)=>{
+    const el  = document.getElementById(`cx-${idx}-${j}`);
+    const mk  = document.getElementById(`cx-ok-${idx}-${j}`);
+    const txt = (el?.value||'').trim();
+    if(txt === ''){ if(mk) mk.innerHTML = ''; return; }
+    conferidos++;
+    const fisico = Number(txt);
+    const dif = fisico - l.qtd;
+    if(dif === 0){
+      if(mk) mk.innerHTML = '<span style="color:#16a34a;font-size:16px">✓</span>';
+    } else {
+      if(mk) mk.innerHTML = '<span style="color:#dc2626;font-size:16px">⚠️</span>';
+      divergencias.push({ ...l, fisico, dif, j });
+    }
+  });
+
+  const res = document.getElementById(`cx-res-${idx}`);
+  if(!conferidos){
+    res.innerHTML = '<div style="font-size:13px;color:var(--muted)">Digite as quantidades encontradas antes de conferir.</div>';
+    return;
+  }
+  if(!divergencias.length){
+    res.innerHTML = `<div style="background:#dcfce7;color:#166534;border-radius:8px;padding:10px 14px;font-size:13px">
+      ✓ Conferência bate — ${conferidos} item(ns) conferido(s), nenhuma divergência.</div>`;
+    return;
+  }
+
+  res.innerHTML = `
+    <div style="background:#fef2f2;border-left:3px solid #dc2626;border-radius:8px;padding:12px 14px">
+      <div style="font-weight:700;color:#dc2626;font-size:13px;margin-bottom:8px">
+        ⚠️ ${divergencias.length} divergência(s) entre a caixa e o sistema
+      </div>
+      ${divergencias.map(d=>`
+        <div style="font-size:13px;margin-bottom:6px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
+          <span><strong>${esc(d.codigo)}</strong> ${esc(d.nome)} — sistema ${d.qtd}, caixa ${d.fisico}
+            <strong style="color:#dc2626">(${d.dif>0?'+':''}${d.dif})</strong></span>
+          <button class="btn btn-outline btn-sm" onclick="irParaRegistrosGarantia(${idx},${d.j})">Ver registros</button>
+        </div>`).join('')}
+      <div style="font-size:12px;color:var(--muted);margin-top:8px;line-height:1.5">
+        <strong>Faltando na caixa</strong> (negativo): peça foi enviada sem registro, devolvida ao estoque sem lançamento, ou extraviada.<br>
+        <strong>Sobrando na caixa</strong> (positivo): peça física sem registro no sistema — lance em <em>+ Nova Garantia</em>.
+      </div>
+    </div>`;
+}
+
+// Leva para a lista já filtrada no item divergente, para ajustar registro a registro
+function irParaRegistrosGarantia(idx, j){
+  const g = CAIXA_GRUPOS[idx];
+  if(!g || !g.linhas[j]) return;
+  const sel = document.getElementById('garantia-f-fornecedor');
+  if(sel){
+    // O select so tem as opcoes montadas a partir dos registros existentes;
+    // se o nome nao casar, deixa em Todos para nao zerar a lista sem aviso.
+    sel.value = g.fornecedor;
+    if(sel.value !== g.fornecedor) sel.value = '';
+  }
+  document.getElementById('garantia-f-codigo').value = g.linhas[j].codigo;
+  trocarVisaoGarantias('lista');
+}
+
+// ── REMESSA: envio em bloco por fornecedor ──
+// Marcar peça por peça era o que descolava a lista da caixa. Aqui tudo do
+// fornecedor sai de uma vez, com o mesmo identificador.
+function abrirRemessa(idx){
+  if(!temPermissaoEditar('garantias')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  const g = CAIXA_GRUPOS[idx];
+  if(!g) return;
+  remessaCtx = g;
+  document.getElementById('remessa-fornecedor').textContent = g.fornecedor;
+  document.getElementById('remessa-resumo').textContent =
+    `${g.linhas.length} item(ns) · ${g.totPecas} peça(s) · ${fmtMoeda(g.totValor)}`;
+  document.getElementById('remessa-data').value = hojeISO();
+  document.getElementById('remessa-obs').value = '';
+  abrirModal('modal-remessa');
+}
+
+async function proximoNumeroRemessa(){
+  const ano = new Date(agoraTs()).getFullYear();
+  const snap = await db.ref('contador_remessa_garantia').transaction(v => (v||0) + 1);
+  const n = snap.snapshot.val() || 1;
+  return `REM-${ano}-${String(n).padStart(3,'0')}`;
+}
+
+async function confirmarRemessa(){
+  if(!remessaCtx) return;
+  if(!temPermissaoEditar('garantias')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  const dataStr = document.getElementById('remessa-data').value;
+  if(!dataStr){ toast('Informe a data do envio','error'); return; }
+  const obs = document.getElementById('remessa-obs').value.trim();
+  const btn = document.getElementById('btn-confirmar-remessa');
+  btn.disabled = true; btn.textContent = 'Registrando...';
+
+  try {
+    // Relê do Firebase antes de gravar: outra aba pode ter mudado o status desses
+    // registros, e enviar peça que já saiu é exatamente o erro que se quer evitar.
+    const snap  = await db.ref('garantias').once('value');
+    const todos = snap.val() || {};
+    const ids = remessaCtx.linhas.flatMap(l=>l.registros)
+      .filter(id => todos[id] && (todos[id].status==='pendente' || todos[id].status==='aguardando_envio'));
+
+    if(!ids.length){
+      toast('Nenhum registro elegível — a lista mudou desde que a tela foi carregada. Atualize e refaça.','error');
+      btn.disabled = false; btn.textContent = 'Registrar Remessa';
+      return;
+    }
+
+    const remessaId = await proximoNumeroRemessa();
+    const updates = {};
+    ids.forEach(id=>{
+      updates['garantias/'+id+'/status']       = 'enviado';
+      updates['garantias/'+id+'/remessa_id']   = remessaId;
+      updates['garantias/'+id+'/remessa_data'] = dataStr;
+      updates['garantias/'+id+'/remessa_obs']  = obs || null;
+      updates['garantias/'+id+'/remessa_por']  = usuarioLogado.nome;
+      updates['garantias/'+id+'/ts_envio']     = agoraTs();
+    });
+    await db.ref().update(updates);
+
+    const itensImpressos = remessaCtx.linhas.filter(l => l.registros.some(id => ids.includes(id)));
+    const fornecedorImpresso = remessaCtx.fornecedor;
+
+    fecharModal('modal-remessa');
+    toast(`✓ Remessa ${remessaId} registrada — ${ids.length} registro(s) marcado(s) como enviado`,'success');
+    imprimirRemessa(remessaId, fornecedorImpresso, itensImpressos, dataStr, obs);
+    await renderGarantias();
+  } catch(e){
+    toast('Erro ao registrar remessa: ' + (e?.message||e), 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Registrar Remessa';
+  }
+}
+
+function imprimirRemessa(remessaId, fornecedor, linhas, dataStr, obs){
+  const totPecas = linhas.reduce((sm,l)=>sm+l.qtd,0);
+  const totValor = linhas.reduce((sm,l)=>sm+l.valor,0);
+  const dataBR = dataStr.split('-').reverse().join('/');
+  const win = window.open('', '_blank');
+  if(!win){ toast('Libere as janelas pop-up para imprimir a lista da remessa','error'); return; }
+  win.document.write(`
+    <html><head><title>Remessa ${remessaId}</title>
+    <style>
+      body{font-family:Arial,sans-serif;padding:24px;color:#1a1a2e}
+      h2{margin:0 0 4px}
+      table{width:100%;border-collapse:collapse;margin-top:14px}
+      th,td{padding:8px;font-size:13px;border-bottom:1px solid #e0e0e0}
+      th{background:#f0f0f0;text-align:left}
+      .tot{font-weight:700;background:#fafafa}
+      .cab{color:#666;font-size:13px}
+      .ass{margin-top:46px;font-size:13px}
+    </style></head><body>
+      <h2>Remessa de Garantia — ${remessaId}</h2>
+      <div class="cab">CROW · Fornecedor: <strong>${esc(fornecedor)}</strong> · Envio: ${dataBR}</div>
+      ${obs ? `<div class="cab">Observação: ${esc(obs)}</div>` : ''}
+      <table>
+        <thead><tr><th>Código</th><th>Descrição</th><th style="text-align:center">Qtd</th><th style="text-align:right">Valor</th></tr></thead>
+        <tbody>
+          ${linhas.map(l=>`<tr>
+            <td><strong>${esc(l.codigo)}</strong></td>
+            <td>${esc(l.nome)}</td>
+            <td style="text-align:center">${l.qtd}</td>
+            <td style="text-align:right">${fmtMoeda(l.valor)}</td></tr>`).join('')}
+          <tr class="tot"><td colspan="2">TOTAL</td>
+            <td style="text-align:center">${totPecas}</td>
+            <td style="text-align:right">${fmtMoeda(totValor)}</td></tr>
+        </tbody>
+      </table>
+      <div class="ass">Conferido por: ____________________________&nbsp;&nbsp;&nbsp;&nbsp;Recebido por: ____________________________</div>
+    </body></html>`);
+  win.document.close();
+  setTimeout(()=>win.print(), 300);
 }
 
 function abrirRelatorioGarantias(){
