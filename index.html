@@ -372,6 +372,7 @@ tbody td{padding:11px 16px;font-size:14px}
         <div class="nav-tab" data-tab="pedidos" onclick="showTab('pedidos',this)">Pedidos</div>
         <div class="nav-tab" data-tab="orcamentos" onclick="showTab('orcamentos',this)">Orçamentos</div>
         <div class="nav-tab" data-tab="clientes" onclick="showTab('clientes',this)">Clientes</div>
+        <div class="nav-tab" data-tab="garantias_clientes" onclick="showTab('garantias_clientes',this)">🤝 Garantias de Clientes</div>
       </div>
     </div>
 
@@ -1268,6 +1269,44 @@ tbody td{padding:11px 16px;font-size:14px}
     </div>
 
     <!-- GARANTIAS -->
+    <div id="tab-garantias_clientes" style="display:none">
+      <div class="section-header">
+        <div class="section-title">🤝 Garantias de Clientes</div>
+        <div class="search-box">
+          <button class="btn btn-primary" onclick="abrirNovaGarantiaCliente()">+ Nova Garantia</button>
+        </div>
+      </div>
+      <div class="dashboard-cards" id="gcli-resumo" style="margin-bottom:16px"></div>
+      <div class="filtros-bar">
+        <button class="filtros-toggle" onclick="toggleFiltros('filtros-gcli-inner')">
+          <span>🔍 Filtros</span><span id="filtros-gcli-arrow">▼</span>
+        </button>
+        <div class="filtros-inner" id="filtros-gcli-inner">
+          <div class="filtro-group">
+            <label>Cliente</label>
+            <input type="text" id="gcli-f-cliente" placeholder="Nome do cliente...">
+          </div>
+          <div class="filtro-group">
+            <label>Status</label>
+            <select id="gcli-f-status" onchange="paginaGCli=1;renderGarantiasClientes()">
+              <option value="">Todos</option>
+              <option value="aberta">Aberta — aguardando produção</option>
+              <option value="em_analise">Em análise</option>
+              <option value="aguardando_envio">Aguardando envio</option>
+              <option value="finalizada">Finalizada</option>
+              <option value="cancelada">Cancelada</option>
+            </select>
+          </div>
+          <div class="filtros-btns">
+            <button class="btn btn-secondary btn-sm" onclick="paginaGCli=1;renderGarantiasClientes()">Filtrar</button>
+            <button class="btn btn-outline btn-sm" onclick="limparFiltrosGCli()">Limpar</button>
+          </div>
+        </div>
+      </div>
+      <div id="gcli-lista"></div>
+      <div class="pagination" id="gcli-pag"></div>
+    </div>
+
     <div id="tab-garantias" style="display:none">
       <div class="section-header">
         <div class="section-title">🛡️ Garantias com Fornecedor</div>
@@ -2146,7 +2185,7 @@ tbody td{padding:11px 16px;font-size:14px}
       </div>
       <div class="form-actions">
         <button class="btn btn-outline" onclick="fecharModal('modal-defeito')">Cancelar</button>
-        <button class="btn btn-primary" style="background:#d97706;border-color:#d97706" onclick="confirmarRegistroDefeito()">⚠️ Registrar Defeito</button>
+        <button class="btn btn-primary" id="btn-confirmar-defeito" style="background:#d97706;border-color:#d97706" onclick="confirmarRegistroDefeito()">⚠️ Registrar Defeito</button>
       </div>
     </div>
   </div>
@@ -2180,6 +2219,56 @@ tbody td{padding:11px 16px;font-size:14px}
 </div>
 
 <!-- MODAL RELATÓRIO DE GARANTIAS -->
+<!-- MODAL NOVA GARANTIA DE CLIENTE (vendedor) -->
+<div class="modal-overlay" id="modal-nova-gcli">
+  <div class="modal" style="max-width:640px">
+    <button class="modal-close" onclick="fecharModal('modal-nova-gcli')">×</button>
+    <div class="modal-title">🤝 Nova Garantia de Cliente</div>
+
+    <div class="form-row single"><div class="form-group" style="position:relative">
+      <label>Cliente</label>
+      <input type="text" id="gcli-busca-cliente" placeholder="Digite o nome ou CNPJ..." autocomplete="off" oninput="buscarClienteGCli()">
+      <div id="gcli-lista-clientes" style="display:none;position:absolute;z-index:50;background:#fff;border:1px solid var(--border);border-radius:8px;width:100%;max-height:220px;overflow-y:auto;box-shadow:0 4px 14px rgba(0,0,0,.1)"></div>
+      <div id="gcli-cliente-selecionado"></div>
+    </div></div>
+
+    <div id="gcli-step-itens" style="display:none">
+      <div class="form-row single"><div class="form-group" style="position:relative">
+        <label>Produto em garantia</label>
+        <input type="text" id="gcli-busca-produto" placeholder="Código ou nome do produto..." autocomplete="off" oninput="buscarProdutoGCli()">
+        <div id="gcli-lista-produtos" style="display:none;position:absolute;z-index:50;background:#fff;border:1px solid var(--border);border-radius:8px;width:100%;max-height:220px;overflow-y:auto;box-shadow:0 4px 14px rgba(0,0,0,.1)"></div>
+      </div></div>
+      <div id="gcli-itens-lista" style="margin-bottom:12px"></div>
+      <div class="form-row single"><div class="form-group">
+        <label>Observação do vendedor (opcional)</label>
+        <input type="text" id="gcli-obs" placeholder="ex: cliente relatou vazamento após 2 meses">
+      </div></div>
+    </div>
+
+    <div class="form-actions">
+      <button class="btn btn-outline" onclick="fecharModal('modal-nova-gcli')">Cancelar</button>
+      <button class="btn btn-primary" id="btn-salvar-gcli" onclick="salvarNovaGarantiaCliente()">Abrir Garantia</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL ANALISE DA GARANTIA (producao) -->
+<div class="modal-overlay" id="modal-analise-gcli">
+  <div class="modal" style="max-width:820px">
+    <button class="modal-close" onclick="fecharModal('modal-analise-gcli')">×</button>
+    <div class="modal-title">🔧 Análise da Garantia</div>
+    <div id="analise-gcli-conteudo"></div>
+  </div>
+</div>
+
+<!-- MODAL CONFIRMACAO DE ENVIO NA BIPAGEM (expedicao) -->
+<div class="modal-overlay" id="modal-envio-gcli">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-title">📦 Garantia deste cliente</div>
+    <div id="envio-gcli-conteudo"></div>
+  </div>
+</div>
+
 <!-- MODAL REGISTRAR REMESSA DE GARANTIA -->
 <div class="modal-overlay" id="modal-remessa">
   <div class="modal" style="max-width:460px">
@@ -2401,7 +2490,8 @@ const MODULOS_PERMISSAO = [
   { id:'separacao',    label:'Separação' },
   { id:'producao',     label:'Ordens de Produção' },
   { id:'compras',      label:'Pedidos de Compra' },
-  { id:'garantias',    label:'Garantias' },
+  { id:'garantias',    label:'Garantias com Fornecedor' },
+  { id:'garantias_clientes', label:'Garantias de Clientes' },
   { id:'manutencao',   label:'Manutenção Preventiva' },
   { id:'estoque',      label:'Estoque' },
   { id:'fornecedores', label:'Fornecedores' },
@@ -2410,9 +2500,9 @@ const MODULOS_PERMISSAO = [
   { id:'importar',     label:'Importar Dados' },
 ];
 // Módulos que um "vendedor" comum sempre vê (filtrado aos próprios registros nas telas)
-const MODULOS_VENDEDOR_PADRAO = ['pedidos','orcamentos','clientes','produtos','promocoes','catalogo'];
+const MODULOS_VENDEDOR_PADRAO = ['pedidos','orcamentos','clientes','produtos','promocoes','catalogo','garantias_clientes'];
 // Módulos que o tipo Expedição pode VER
-const MODULOS_EXPEDICAO_VER = ['pedidos','catalogo','produtos','separacao','producao','compras','estoque'];
+const MODULOS_EXPEDICAO_VER = ['pedidos','catalogo','produtos','separacao','producao','compras','estoque','garantias_clientes'];
 // Módulos que o tipo Expedição pode EDITAR
 const MODULOS_EXPEDICAO_EDITAR = ['separacao','producao'];
 
@@ -2464,6 +2554,20 @@ function temPermissaoEditar(modulo){
   // Vendedor comum (sem tipo especial): pode cadastrar clientes novos — a restrição de só
   // ver/gerenciar os próprios clientes continua valendo separadamente, via vejaTudoDoModulo().
   if(modulo==='clientes') return true;
+  // Vendedor comum lanca garantia em nome do cliente. A ANALISE (o que foi trocado) fica
+  // restrita a producao/admin por podeAnalisarGarantiaCliente(), nao por esta funcao.
+  if(modulo==='garantias_clientes') return true;
+  return false;
+}
+
+// Quem pode fazer a analise tecnica da garantia: conferir as pecas que chegaram e lancar
+// o que foi trocado. O vendedor abre e acompanha, mas nao mexe nisso.
+function podeAnalisarGarantiaCliente(){
+  if(!usuarioLogado) return false;
+  if(usuarioLogado.admin) return true;
+  if(usuarioLogado.tipo === 'personalizado'){
+    return !!(usuarioLogado.permissoes?.producao?.editar || usuarioLogado.permissoes?.garantias_clientes?.editar);
+  }
   return false;
 }
 // Vê TODOS os registros do módulo (não só os vinculados ao próprio usuário)?
@@ -3079,6 +3183,7 @@ function showTab(tab, el){
     renderOrcamentos();
   }
   if(tab==='clientes') renderClientes();
+  if(tab==='garantias_clientes'){ paginaGCli = 1; renderGarantiasClientes(true); }
   if(tab==='produtos') renderProdutos();
   if(tab==='vendedores') renderVendedores();
   if(tab==='relatorios'){ inicializarRelatorios(); }
@@ -4793,6 +4898,7 @@ async function editarPedido(id){
       ${podeTrocarCliente ? `<button type="button" class="btn btn-outline btn-sm" onclick="habilitarTrocaClientePedido()">🔄 Trocar Cliente</button>` : ''}
     </div>
     ${creditoHtmlEdicao}`;
+  injetarAlertaGarantiaPedido(p.cliente_codigo);
   document.getElementById('step-cliente-ped').style.display='none';
   document.getElementById('step-itens-ped').style.display='';
   document.getElementById('desc-geral').value = p.desconto_geral||0;
@@ -4865,6 +4971,7 @@ async function clonarPedido(id){
       <span>✓ ${esc(p.cliente_nome)} · ${p.cliente_cidade||''}/${p.cliente_uf||''}</span>
       <button type="button" class="btn btn-outline btn-sm" onclick="habilitarTrocaClientePedido()">🔄 Trocar Cliente</button>
     </div>`;
+  injetarAlertaGarantiaPedido(p.cliente_codigo);
   document.getElementById('step-cliente-ped').style.display='none';
   document.getElementById('step-itens-ped').style.display='';
   document.getElementById('desc-geral').value = p.desconto_geral||0;
@@ -5237,12 +5344,21 @@ function buscarClientePedido(){
 
 async function selecionarClientePedido(cod){
   const c = CLIENTES_DB.find(x=>x.codigo===cod); if(!c) return;
+  // Garantia liberada pela producao aparece aqui, no momento em que o vendedor monta o
+  // pedido. Vender tem prioridade: se a leitura falhar, o alerta some mas o pedido segue.
+  let gPend = [];
+  try {
+    await carregarGarantiasClientes();
+    gPend = garantiasAguardandoEnvio(c.codigo);
+  } catch(e){ console.warn('Alerta de garantia não carregado:', e); }
   pedidoAtual.cliente = c;
   pedidoAtual.credito_disponivel = Number(c.credito||0);
   pedidoAtual.credito_aplicado = 0;
   carregarHistoricoPrecosCliente(c.codigo); // busca só o histórico deste cliente, em segundo plano
   document.getElementById('pedido-lista-clientes').style.display='none';
   document.getElementById('pedido-busca-cliente').value=c.nome;
+  const garantiaHtml = htmlAlertaGarantiaCliente(gPend);
+
   const alertaHtml = c.alerta ? `
     <div class="alerta alerta-warning" style="margin-top:8px;border:2px solid #d97706;background:#fef3c7;padding:12px 14px;border-radius:8px">
       <div style="font-weight:700;color:#92400e">⚠️ Atenção a este cliente:</div>
@@ -5289,6 +5405,7 @@ async function selecionarClientePedido(cod){
       <button onclick="trocarCliente()" style="float:right;background:none;border:none;cursor:pointer;color:var(--success);font-weight:600">Trocar</button>
       ${vendedorHtml}
     </div>
+    ${garantiaHtml}
     ${alertaHtml}
     ${creditoHtml}`;
   document.getElementById('step-itens-ped').style.display='';
@@ -6888,6 +7005,7 @@ async function confirmarOrcamento(id){
     document.getElementById('pedido-busca-cliente').value=p.cliente_nome;
     document.getElementById('pedido-cliente-selecionado').innerHTML=
       `<div class="alerta alerta-success" style="margin-top:8px">✓ ${esc(p.cliente_nome)}</div>`;
+    injetarAlertaGarantiaPedido(p.cliente_codigo);
     document.getElementById('step-cliente-ped').style.display='none';
     document.getElementById('step-itens-ped').style.display='';
     document.getElementById('desc-geral').value=p.desconto_geral||0;
@@ -6906,6 +7024,9 @@ async function confirmarOrcamento(id){
 // ══ CLIENTES ══
 async function renderClientes(){
   try {
+    // Garantias liberadas viram um selo no card do cliente. Leitura em cache, e se falhar
+    // o cadastro continua abrindo normalmente — so o selo nao aparece.
+    try { await carregarGarantiasClientes(); } catch(e){ console.warn('Selo de garantia não carregado:', e); }
     // Se clientes ainda não carregaram, aguarda até 5 segundos
     if(!CLIENTES_DB.length){
       document.getElementById('clientes-table').innerHTML =
@@ -6985,6 +7106,7 @@ async function renderClientes(){
         ${c.credito>0?`<div class="cliente-card-info">💰 Crédito disponível: <span style="color:#16a34a;font-weight:700">${fmtMoeda(c.credito)}</span></div>`:''}
         ${c.ts_cadastro?`<div class="cliente-card-info" style="font-size:11px">📅 Cadastrado em ${new Date(c.ts_cadastro).toLocaleDateString('pt-BR')}</div>`:''}
         ${c.alerta?`<div style="background:#fef3c7;color:#92400e;border-radius:6px;padding:6px 10px;margin-top:6px;font-size:12px">⚠️ ${c.alerta}</div>`:''}
+        ${htmlBadgeGarantiaCliente(c.codigo)}
         <div class="cliente-card-actions">
           ${mapsUrl?`<a href="${mapsUrl}" target="_blank" class="btn-maps">📍 Abrir no Maps</a>`:''}
           <button class="btn btn-outline btn-sm" onclick="verHistoricoCliente('${c.codigo}')">Histórico</button>
@@ -8262,6 +8384,10 @@ async function aplicarDeltaEstoque(tipo, chave, delta){
     anterior = Number(atual)||0;
     return anterior + d;
   });
+  // Transaction abortada (regra do banco, erro de rede) devolve committed=false e o valor
+  // atual do no. Sem esta checagem o codigo seguia como se a baixa tivesse acontecido,
+  // gravava o movimento no historico e o saldo ficava divergente em silencio.
+  if(!res.committed) throw new Error(`Movimento de estoque não confirmado pelo banco (${tipo} ${chave}). Nada foi alterado.`);
   const novo = Number(res.snapshot.val())||0;
   sincronizarEstoqueMemoria(tipo, chave, novo);
   return { anterior, novo };
@@ -8272,10 +8398,11 @@ async function aplicarDeltaEstoque(tipo, chave, delta){
 async function definirEstoqueAbsoluto(tipo, chave, valor){
   const v = Number(valor)||0;
   let anterior = 0;
-  await db.ref(caminhoEstoque(tipo, chave)).transaction(atual => {
+  const resAbs = await db.ref(caminhoEstoque(tipo, chave)).transaction(atual => {
     anterior = Number(atual)||0;
     return v;
   });
+  if(!resAbs.committed) throw new Error(`Balanço não confirmado pelo banco (${tipo} ${chave}). Nada foi alterado.`);
   sincronizarEstoqueMemoria(tipo, chave, v);
   return { anterior, novo: v };
 }
@@ -9256,7 +9383,7 @@ function renderHistoricoFiltrado(){
   el.innerHTML = lista.length ? lista.map(m=>{
     const origemExiste = m.origem_tipo && m.origem_id &&
       (m.origem_tipo !== 'pedido' || origensValidas.has(m.origem_id));
-    const linkLabel = m.origem_tipo === 'pedido' ? '🧾 Ver pedido' : m.origem_tipo === 'op' ? '🏭 Ver OP' : m.origem_tipo === 'compra' ? '🛒 Ver compra' : '';
+    const linkLabel = m.origem_tipo === 'pedido' ? '🧾 Ver pedido' : m.origem_tipo === 'op' ? '🏭 Ver OP' : m.origem_tipo === 'compra' ? '🛒 Ver compra' : m.origem_tipo === 'garantia_cliente' ? '🤝 Ver garantia' : '';
     const isBalanco = (m.motivo||'').toLowerCase().includes('balanço') || (m.motivo||'').toLowerCase().includes('balanco') || (m.motivo||'').toLowerCase().includes('ajuste');
     const cor = isBalanco ? '#7c3aed' : m.tipo==='entrada' ? 'var(--success)' : '#dc2626';
     const icon = isBalanco ? '⚖️' : m.tipo==='entrada' ? '⬆️' : '⬇️';
@@ -9299,6 +9426,11 @@ async function abrirOrigemMovimento(tipo, id){
     await verDetalheOP(id);
   } else if(tipo === 'compra'){
     await abrirDetalheCompra(id);
+  } else if(tipo === 'garantia_cliente'){
+    // Sem este ramo a linha do historico ficava com cursor de clique e nao abria nada
+    await carregarGarantiasClientes(true);
+    if(GCLI_CACHE.find(g=>g.id===id)) await abrirAnaliseGarantiaCliente(id);
+    else toast('Garantia de cliente não encontrada — pode ter sido removida','error');
   }
 }
 
@@ -10378,8 +10510,12 @@ function selecionarInsumoDefeito(codigo, tipo){
   document.getElementById('defeito-form-resto').style.display = 'block';
 }
 
+let registroDefeitoEmAndamento = false;
 async function confirmarRegistroDefeito(){
   if(!temPermissaoEditar('garantias')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  // Sem esta trava, dois cliques criavam DOIS registros e baixavam o estoque DUAS vezes:
+  // o sistema passava a mostrar mais peças do que existem na caixa.
+  if(registroDefeitoEmAndamento){ toast('Registro em andamento, aguarde...','error'); return; }
   if(!insumoDefeitoSelecionado){ toast('Selecione um insumo','error'); return; }
   const qtd = Number(document.getElementById('defeito-qtd').value) || 0;
   if(qtd <= 0){ toast('Quantidade inválida','error'); return; }
@@ -10395,6 +10531,10 @@ async function confirmarRegistroDefeito(){
   const darBaixa = ehManual ? document.getElementById('defeito-dar-baixa').checked : true;
   const ehProduto = i._tipo === 'vendavel';
 
+  registroDefeitoEmAndamento = true;
+  const btnDefeito = document.getElementById('btn-confirmar-defeito');
+  if(btnDefeito) btnDefeito.disabled = true;
+  try {
   // Dá baixa no estoque do item defeituoso (se aplicável) — produto vendável e insumo
   // ficam em coleções e campos diferentes no banco
   if(darBaixa){
@@ -10406,7 +10546,7 @@ async function confirmarRegistroDefeito(){
         motivo: motivoDefeito, origemTipo: ehManual ? null : 'op', origemId: ehManual ? null : opContextoDefeito.key })).novo;
     } else {
       const key = await resolverChaveInsumo(i.codigo, i.key);
-      if(!key){ toast(`Insumo "${i.codigo}" não encontrado no cadastro — baixa não realizada`,'error'); return; }
+      if(!key){ toast(`Insumo "${i.codigo}" não encontrado no cadastro — nada foi lançado`,'error'); return; }
       i.estoque_atual = (await movimentarEstoque('insumo', key, { codigo:i.codigo, nome:i.nome, delta:-qtd,
         motivo: motivoDefeito, origemTipo: ehManual ? null : 'op', origemId: ehManual ? null : opContextoDefeito.key })).novo;
     }
@@ -10417,6 +10557,10 @@ async function confirmarRegistroDefeito(){
   await db.ref('garantias/'+garantiaKey).set({
     codigo: i.codigo,
     nome: i.nome,
+    // Produto vendável e insumo podem compartilhar o mesmo código. Sem guardar o tipo,
+    // a conferência somava dois itens físicos diferentes na mesma linha.
+    tipo_item: ehProduto ? 'produto' : 'insumo',
+    baixa_estoque: darBaixa,
     fornecedor: fornecedorNome,
     // Custo congelado no momento do lancamento: o cadastro pode mudar depois e o
     // valor parado com o fornecedor tem que refletir o custo da epoca
@@ -10432,7 +10576,657 @@ async function confirmarRegistroDefeito(){
 
   fecharModal('modal-defeito');
   toast(`✓ Garantia registrada! ${darBaixa ? qtd+'x '+i.nome+' retirado(s) do estoque.' : 'Sem baixa de estoque.'}`, 'success');
-  renderGarantias();
+  await renderGarantias();
+  } catch(e){
+    // A baixa acontece antes da gravação do registro. Se falhar no meio, o estoque saiu
+    // sem que a peça entrasse na lista — a mensagem precisa deixar isso explícito.
+    toast('Erro ao registrar garantia: ' + (e?.message||e) + '. Confira o estoque de ' + i.codigo + ' antes de lançar de novo.', 'error');
+  } finally {
+    registroDefeitoEmAndamento = false;
+    if(btnDefeito) btnDefeito.disabled = false;
+  }
+}
+
+// ══════════════════════════════════════════════
+// ══ GARANTIAS DE CLIENTES ══
+// ══════════════════════════════════════════════
+// Fluxo: vendedor abre em nome do cliente -> producao confere e lanca o que foi trocado
+// -> garantia fica "Aguardando Envio" e o cliente ganha alerta -> expedicao confirma na
+// bipagem que embalou junto, e so entao a garantia finaliza.
+//
+// O alerta do cliente NAO e um campo gravado no cadastro: e calculado a partir das
+// garantias em "aguardando_envio". Campo gravado fica preso para sempre se alguma etapa
+// falhar no meio — e alerta preso faz o pessoal parar de ler alerta.
+
+const STATUS_GCLI = {
+  aberta:           { label:'Aberta',            cor:'#d97706', bg:'#fef3c7' },
+  em_analise:       { label:'Em Análise',        cor:'#7c3aed', bg:'#ede9fe' },
+  aguardando_envio: { label:'Aguardando Envio',  cor:'#2563eb', bg:'#dbeafe' },
+  finalizada:       { label:'Finalizada',        cor:'#16a34a', bg:'#dcfce7' },
+  cancelada:        { label:'Cancelada',         cor:'#6b7280', bg:'#f3f4f6' }
+};
+function statusInfoGCli(st){ return STATUS_GCLI[st] || STATUS_GCLI.aberta; }
+
+let GCLI_CACHE = [];
+let paginaGCli = 1;
+let novaGCli = null;            // rascunho da garantia sendo aberta pelo vendedor
+let analiseGCli = null;         // estado da analise da producao
+let salvandoGCli = false;
+
+// ── Leitura ──────────────────────────────────────────────
+// Os alertas (pedido, separacao, bipagem) chamam isto o tempo todo. Ler o no inteiro em
+// cada chamada seria banda desperdicada: aqui e leitura so para EXIBIR, entao passa pelo
+// cache de 2 minutos. Toda gravacao do modulo invalida o cache logo em seguida.
+async function carregarGarantiasClientes(forcar){
+  if(forcar) invalidarCacheNo('garantias_clientes');
+  const snap = await lerNoCache('garantias_clientes');
+  const todos = snap.val() || {};
+  GCLI_CACHE = Object.keys(todos).map(id=>({ id, ...todos[id] })).sort((a,b)=>(b.ts||0)-(a.ts||0));
+  return GCLI_CACHE;
+}
+
+// Garantias prontas para ir junto com um pedido deste cliente
+function garantiasAguardandoEnvio(clienteCodigo){
+  return GCLI_CACHE.filter(g => g.status === 'aguardando_envio' && g.cliente_codigo === clienteCodigo);
+}
+
+// ── Tela principal ───────────────────────────────────────
+async function renderGarantiasClientes(forcar){
+  if(!podeVer('garantias_clientes')) return;
+  await carregarGarantiasClientes(forcar);
+
+  const fCliente = (document.getElementById('gcli-f-cliente')?.value||'').toLowerCase().trim();
+  const fStatus  = document.getElementById('gcli-f-status')?.value || '';
+
+  let lista = GCLI_CACHE;
+  // Vendedor comum so enxerga as garantias dos proprios clientes
+  if(!vejaTudoDoModulo('garantias_clientes') && !podeAnalisarGarantiaCliente()){
+    lista = lista.filter(g => g.vendedor_id === usuarioLogado.id);
+  }
+  const filtrado = lista.filter(g=>{
+    if(fCliente && !(g.cliente_nome||'').toLowerCase().includes(fCliente)) return false;
+    if(fStatus && (g.status||'aberta') !== fStatus) return false;
+    return true;
+  });
+
+  const abertas    = lista.filter(g=>g.status==='aberta').length;
+  const analise    = lista.filter(g=>g.status==='em_analise').length;
+  const aguardando = lista.filter(g=>g.status==='aguardando_envio').length;
+  document.getElementById('gcli-resumo').innerHTML = `
+    <div class="dash-card"><div class="dash-card-label">Aguardando Produção</div><div class="dash-card-value" style="color:#d97706">${abertas}</div></div>
+    <div class="dash-card"><div class="dash-card-label">Em Análise</div><div class="dash-card-value" style="color:#7c3aed">${analise}</div></div>
+    <div class="dash-card"><div class="dash-card-label">Aguardando Envio</div><div class="dash-card-value" style="color:#2563eb">${aguardando}</div></div>`;
+
+  const total = filtrado.length, inicio = (paginaGCli-1)*POR_PAGINA;
+  const pagina = filtrado.slice(inicio, inicio+POR_PAGINA);
+  const alvo = document.getElementById('gcli-lista');
+
+  if(!total){
+    alvo.innerHTML = '<div style="padding:34px;text-align:center;color:var(--muted);font-size:14px">Nenhuma garantia encontrada.</div>';
+    document.getElementById('gcli-pag').innerHTML = '';
+    return;
+  }
+
+  alvo.innerHTML = pagina.map(g=>{
+    const si = statusInfoGCli(g.status);
+    const itens = g.itens || [];
+    const totPecas = itens.reduce((sm,i)=>sm+Number(i.qtd||0),0);
+    const podeAnalisar = podeAnalisarGarantiaCliente() && (g.status==='aberta' || g.status==='em_analise');
+    const podeCancelar = temPermissaoEditar('garantias_clientes') && g.status!=='finalizada' && g.status!=='cancelada';
+    return `
+    <div class="pedido-card" style="margin-bottom:12px">
+      <div class="pedido-card-header" style="align-items:center">
+        <div>
+          <div class="pedido-card-num">Garantia #${g.numero || '—'} · ${esc(g.cliente_nome||'')}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">
+            ${itens.length} item(ns) · ${totPecas} peça(s) · aberta por ${esc(g.aberta_por||'')} em ${g.ts?new Date(g.ts).toLocaleDateString('pt-BR'):'—'}
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span class="badge" style="background:${si.bg};color:${si.cor}">${si.label}</span>
+          ${podeAnalisar ? `<button class="btn btn-primary btn-sm" onclick="abrirAnaliseGarantiaCliente('${g.id}')">🔧 Analisar</button>` : ''}
+          ${g.analise ? `<button class="btn btn-outline btn-sm" onclick="abrirAnaliseGarantiaCliente('${g.id}')">Ver análise</button>` : ''}
+          ${podeCancelar ? `<button class="btn btn-outline btn-sm" onclick="cancelarGarantiaCliente('${g.id}')">Cancelar</button>` : ''}
+        </div>
+      </div>
+      <div style="font-size:13px;margin-top:8px">
+        ${itens.map(i=>`<div style="padding:3px 0">• <strong>${esc(i.codigo)}</strong> ${esc(i.nome)} — ${i.qtd} un</div>`).join('')}
+      </div>
+      ${g.obs ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">📝 ${esc(g.obs)}</div>` : ''}
+      ${g.status==='aguardando_envio' ? `<div style="margin-top:8px;background:#dbeafe;color:#1e40af;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:600">✓ Liberada pela produção — enviar junto com o próximo pedido deste cliente</div>` : ''}
+      ${g.status==='finalizada' && g.pedido_numero ? `<div style="margin-top:8px;font-size:12px;color:var(--muted)">Enviada com o pedido #${g.pedido_numero} em ${g.finalizada_em?new Date(g.finalizada_em).toLocaleDateString('pt-BR'):'—'}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  renderPaginacao('gcli-pag', total, paginaGCli, p=>{ paginaGCli=p; renderGarantiasClientes(); });
+}
+
+function limparFiltrosGCli(){
+  document.getElementById('gcli-f-cliente').value = '';
+  document.getElementById('gcli-f-status').value = '';
+  paginaGCli = 1;
+  renderGarantiasClientes();
+}
+
+// ── Alerta reaproveitado por todas as telas ──────────────
+// Uma fonte so: pedido novo, edicao, clone, orcamento convertido e cadastro do cliente
+// mostram exatamente o mesmo texto, a partir das garantias em "aguardando_envio".
+function htmlAlertaGarantiaCliente(gPend){
+  if(!gPend || !gPend.length) return '';
+  return `
+    <div class="alerta" style="margin-top:8px;border:2px solid #2563eb;background:#dbeafe;padding:12px 14px;border-radius:8px">
+      <div style="font-weight:700;color:#1e40af">🤝 GARANTIA LIBERADA PARA ENVIO</div>
+      <div style="color:#1e40af;margin-top:4px;font-size:13px">
+        Este cliente tem ${gPend.length} garantia(s) esperando para ir junto com o pedido:
+        ${gPend.map(g=>`<div style="margin-top:3px">• Garantia #${g.numero} — ${(g.itens||[]).map(i=>`${i.qtd}x ${esc(i.codigo)}`).join(', ')}</div>`).join('')}
+      </div>
+      <div style="color:#1e40af;margin-top:6px;font-size:12px">Avise a expedição para embalar junto.</div>
+    </div>`;
+}
+
+// Selo curto para o card do cliente na aba Clientes
+function htmlBadgeGarantiaCliente(clienteCodigo){
+  const g = garantiasAguardandoEnvio(clienteCodigo);
+  if(!g.length) return '';
+  return `<div style="background:#dbeafe;color:#1e40af;border-radius:6px;padding:6px 10px;margin-top:6px;font-size:12px;font-weight:700">
+    🤝 GARANTIA LIBERADA PARA ENVIO — ${g.map(x=>'#'+x.numero).join(', ')}</div>`;
+}
+
+// Usado nas telas que ja abrem com o cliente definido (editar, clonar, orcamento).
+// Nunca deixa uma falha de leitura atrapalhar o pedido: em caso de erro, so nao mostra.
+async function injetarAlertaGarantiaPedido(clienteCodigo){
+  try {
+    const el = document.getElementById('pedido-cliente-selecionado');
+    if(!el || !clienteCodigo) return;
+    await carregarGarantiasClientes();
+    const html = htmlAlertaGarantiaCliente(garantiasAguardandoEnvio(clienteCodigo));
+    if(html) el.insertAdjacentHTML('beforeend', html);
+  } catch(e){ console.warn('Alerta de garantia não carregado:', e); }
+}
+
+// ── Abertura pelo vendedor ───────────────────────────────
+async function abrirNovaGarantiaCliente(){
+  if(!temPermissaoEditar('garantias_clientes')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  // Quem abre a garantia pode nao ter passado pelas abas que carregam esses cadastros
+  if(!CLIENTES_DB.length) await carregarClientesFirebase();
+  if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
+  novaGCli = { cliente:null, itens:[] };
+  document.getElementById('gcli-busca-cliente').value = '';
+  document.getElementById('gcli-cliente-selecionado').innerHTML = '';
+  document.getElementById('gcli-busca-produto').value = '';
+  document.getElementById('gcli-obs').value = '';
+  document.getElementById('gcli-itens-lista').innerHTML = '';
+  document.getElementById('gcli-step-itens').style.display = 'none';
+  abrirModal('modal-nova-gcli');
+}
+
+function buscarClienteGCli(){
+  const q = document.getElementById('gcli-busca-cliente').value.toLowerCase();
+  const lista = document.getElementById('gcli-lista-clientes');
+  if(q.length < 2){ lista.style.display='none'; return; }
+  let base = CLIENTES_DB.filter(c=>!c.inativo);
+  if(!vejaTudoDoModulo('clientes')) base = base.filter(c=>c.vendedor_id === usuarioLogado.id);
+  const res = base.filter(c=>c.nome.toLowerCase().includes(q)||(c.cpf_cnpj||'').includes(q)).slice(0,8);
+  if(!res.length){ lista.style.display='none'; return; }
+  lista.innerHTML = res.map(c=>`
+    <div onclick="selecionarClienteGCli('${c.codigo}')" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px"
+      onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">
+      <strong>${esc(c.nome)}</strong><br><span style="color:var(--muted)">${c.cpf_cnpj||''} · ${c.cidade||''}/${c.uf||''}</span>
+    </div>`).join('');
+  lista.style.display='block';
+}
+
+function selecionarClienteGCli(cod){
+  const c = CLIENTES_DB.find(x=>x.codigo===cod); if(!c) return;
+  novaGCli.cliente = c;
+  document.getElementById('gcli-lista-clientes').style.display='none';
+  document.getElementById('gcli-busca-cliente').value = c.nome;
+  document.getElementById('gcli-cliente-selecionado').innerHTML =
+    `<div class="alerta alerta-success" style="margin-top:8px">✓ <strong>${esc(c.nome)}</strong> · ${c.cidade||''}/${c.uf||''}</div>`;
+  document.getElementById('gcli-step-itens').style.display = '';
+}
+
+function buscarProdutoGCli(){
+  const q = document.getElementById('gcli-busca-produto').value.toLowerCase();
+  const lista = document.getElementById('gcli-lista-produtos');
+  if(q.length < 2){ lista.style.display='none'; return; }
+  // So produtos vendaveis: e o que o cliente comprou e devolve em garantia
+  const res = PRODUTOS_DB.filter(p=>!p.inativo &&
+    ((p.codigo||'').toLowerCase().includes(q) || (p.nome||'').toLowerCase().includes(q))).slice(0,8);
+  if(!res.length){ lista.style.display='none'; return; }
+  lista.innerHTML = res.map(p=>`
+    <div onclick="adicionarItemGCli('${p.codigo}')" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px"
+      onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">
+      <strong>${esc(p.codigo)}</strong> — ${esc(p.nome)}
+    </div>`).join('');
+  lista.style.display='block';
+}
+
+function adicionarItemGCli(codigo){
+  const p = PRODUTOS_DB.find(x=>x.codigo===codigo); if(!p) return;
+  document.getElementById('gcli-lista-produtos').style.display='none';
+  document.getElementById('gcli-busca-produto').value = '';
+  const existente = novaGCli.itens.find(i=>i.codigo===codigo);
+  if(existente){ existente.qtd = Number(existente.qtd) + 1; }
+  else novaGCli.itens.push({ codigo:p.codigo, nome:p.nome, qtd:1 });
+  renderItensGCli();
+}
+
+function renderItensGCli(){
+  const alvo = document.getElementById('gcli-itens-lista');
+  if(!novaGCli.itens.length){ alvo.innerHTML = '<div style="font-size:13px;color:var(--muted)">Nenhum produto adicionado ainda.</div>'; return; }
+  alvo.innerHTML = novaGCli.itens.map((i,idx)=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid var(--border);font-size:13px">
+      <div style="flex:1"><strong>${esc(i.codigo)}</strong> ${esc(i.nome)}</div>
+      <input type="number" min="1" value="${i.qtd}" onchange="alterarQtdItemGCli(${idx}, this.value)"
+        style="width:64px;padding:4px;border:1px solid var(--border);border-radius:6px;text-align:center">
+      <button class="btn btn-outline btn-sm" onclick="removerItemGCli(${idx})">Remover</button>
+    </div>`).join('');
+}
+
+function alterarQtdItemGCli(idx, v){
+  const q = Number(v);
+  if(!q || q <= 0){ toast('Quantidade inválida','error'); renderItensGCli(); return; }
+  novaGCli.itens[idx].qtd = q;
+}
+function removerItemGCli(idx){ novaGCli.itens.splice(idx,1); renderItensGCli(); }
+
+async function proximoNumeroGCli(){
+  const r = await db.ref('contador_garantia_cliente').transaction(v => (v||0) + 1);
+  return r.snapshot.val() || 1;
+}
+
+async function salvarNovaGarantiaCliente(){
+  if(!temPermissaoEditar('garantias_clientes')){ toast('Acesso restrito','error'); return; }
+  if(salvandoGCli){ toast('Salvando, aguarde...','error'); return; }
+  if(!novaGCli?.cliente){ toast('Selecione o cliente','error'); return; }
+  if(!novaGCli.itens.length){ toast('Adicione ao menos um produto','error'); return; }
+
+  salvandoGCli = true;
+  const btn = document.getElementById('btn-salvar-gcli');
+  if(btn) btn.disabled = true;
+  try {
+    const c = novaGCli.cliente;
+    const numero = await proximoNumeroGCli();
+    const key = db.ref('garantias_clientes').push().key;
+    await db.ref('garantias_clientes/'+key).set({
+      numero,
+      cliente_codigo: c.codigo, cliente_nome: c.nome,
+      cliente_cidade: c.cidade || '', cliente_uf: c.uf || '',
+      vendedor_id: c.vendedor_id || usuarioLogado.id || '',
+      vendedor_nome: c.vendedor_nome || usuarioLogado.nome || '',
+      itens: novaGCli.itens,
+      obs: document.getElementById('gcli-obs').value.trim(),
+      status: 'aberta',
+      aberta_por: usuarioLogado.nome,
+      ts: agoraTs()
+    });
+    invalidarCacheNo('garantias_clientes');
+    fecharModal('modal-nova-gcli');
+    toast(`✓ Garantia #${numero} aberta para ${c.nome}`,'success');
+    novaGCli = null;
+    await renderGarantiasClientes(true);
+  } catch(e){
+    toast('Erro ao abrir garantia: ' + (e?.message||e), 'error');
+  } finally {
+    salvandoGCli = false;
+    if(btn) btn.disabled = false;
+  }
+}
+
+async function cancelarGarantiaCliente(id){
+  if(!temPermissaoEditar('garantias_clientes')){ toast('Acesso restrito','error'); return; }
+  const g = GCLI_CACHE.find(x=>x.id===id); if(!g) return;
+  // Se a analise ja rodou, houve baixa de estoque e possivelmente registro na caixa do
+  // fornecedor. Cancelar NAO desfaz nada disso — a mensagem precisa dizer com todas as letras.
+  const jaAnalisada = !!g.analise;
+  const aviso = jaAnalisada
+    ? `\n\nATENÇÃO: esta garantia já foi analisada. O estoque das peças trocadas NÃO será devolvido e os registros gerados na caixa do fornecedor NÃO serão apagados. Ajuste manualmente se for o caso.`
+    : '';
+  if(!confirm(`Cancelar a garantia #${g.numero} de ${g.cliente_nome}?${aviso}`)) return;
+  await db.ref('garantias_clientes/'+id).update({
+    status:'cancelada', cancelada_por: usuarioLogado.nome, cancelada_em: agoraTs()
+  });
+  invalidarCacheNo('garantias_clientes');
+  toast('✓ Garantia cancelada','success');
+  await renderGarantiasClientes(true);
+}
+
+// ── Analise pela producao ────────────────────────────────
+// Para cada item que chegou, a producao diz o que aconteceu. Duas decisoes ficam
+// explicitas item a item, porque foi assim que o processo foi definido:
+//   1) a peca NOVA sai do estoque? (checkbox, marcado por padrao)
+//   2) a peca DEFEITUOSA vai para a caixa do fornecedor? (checkbox + fornecedor)
+async function abrirAnaliseGarantiaCliente(id){
+  const g = GCLI_CACHE.find(x=>x.id===id); if(!g) return;
+  // O status vinha do cache em memoria, que pode estar ate 2 minutos atrasado. Duas
+  // pessoas analisando ao mesmo tempo: a segunda abria a tela editavel numa garantia que
+  // a primeira ja liberou. A gravacao e protegida por transaction, entao nao havia risco
+  // de baixa dupla — mas a tela mentia. Aqui lemos o status atual, que e uma leitura so.
+  let statusReal = g.status;
+  try {
+    const snapSt = await db.ref('garantias_clientes/'+id+'/status').once('value');
+    if(snapSt.exists()) statusReal = snapSt.val();
+    g.status = statusReal;
+  } catch(e){ console.warn('Status da garantia não relido:', e); }
+  const somenteLeitura = !podeAnalisarGarantiaCliente() || statusReal==='aguardando_envio' || statusReal==='finalizada' || statusReal==='cancelada';
+  if(!FORNECEDORES_DB.length) await carregarFornecedoresFirebase();
+  // A producao costuma abrir a analise sem ter passado pelas abas de cadastro; sem isso
+  // a lista de insumos vem vazia e toda peca lancada dava "nao encontrado".
+  if(!INSUMOS_DB.length) await carregarInsumosFirebase();
+  if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
+
+  // Retoma a analise ja gravada, ou parte dos itens que o vendedor lancou
+  const base = (g.analise?.itens?.length ? g.analise.itens : (g.itens||[]).map(i=>({
+    codigo:i.codigo, nome:i.nome, qtd:i.qtd, qtd_conferida:i.qtd,
+    resolucao:'', insumos:[], baixa_estoque:true, gerar_garantia_fornecedor:true, fornecedor:'', obs:''
+  })));
+  analiseGCli = { id, garantia:g, itens: JSON.parse(JSON.stringify(base)), somenteLeitura };
+  renderAnaliseGCli();
+  abrirModal('modal-analise-gcli');
+}
+
+function renderAnaliseGCli(){
+  const a = analiseGCli; if(!a) return;
+  const g = a.garantia;
+  const ro = a.somenteLeitura;
+  const optsForn = '<option value="">Selecione o fornecedor</option>' +
+    FORNECEDORES_DB.map(f=>`<option value="${esc(f.nome)}">${esc(f.nome)}</option>`).join('');
+
+  document.getElementById('analise-gcli-conteudo').innerHTML = `
+    <div style="background:var(--bg);border-radius:8px;padding:12px 14px;margin-bottom:14px">
+      <div style="font-weight:700">Garantia #${g.numero} · ${esc(g.cliente_nome||'')}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:2px">
+        ${g.cliente_cidade||''}/${g.cliente_uf||''} · Vendedor: ${esc(g.vendedor_nome||'—')} · Aberta por ${esc(g.aberta_por||'')}
+      </div>
+      ${g.obs ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">📝 ${esc(g.obs)}</div>` : ''}
+    </div>
+
+    ${a.itens.map((it,idx)=>`
+      <div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:12px">
+        <div style="font-weight:700;font-size:13px;margin-bottom:8px">
+          ${esc(it.codigo)} — ${esc(it.nome)} <span style="color:var(--muted);font-weight:400">· lançado: ${it.qtd} un</span>
+        </div>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">
+          <div>
+            <label style="font-size:12px;color:var(--muted);display:block">Qtd que chegou</label>
+            <input type="number" min="0" value="${it.qtd_conferida}" ${ro?'disabled':''}
+              onchange="setAnaliseCampo(${idx},'qtd_conferida',this.value)"
+              style="width:80px;padding:5px;border:1px solid var(--border);border-radius:6px;text-align:center">
+          </div>
+          <div style="flex:1;min-width:200px">
+            <label style="font-size:12px;color:var(--muted);display:block">O que foi feito</label>
+            <select ${ro?'disabled':''} onchange="setAnaliseCampo(${idx},'resolucao',this.value)"
+              style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+              <option value="">Selecione...</option>
+              <option value="troca_insumo" ${it.resolucao==='troca_insumo'?'selected':''}>Troquei peça(s) do produto</option>
+              <option value="troca_produto" ${it.resolucao==='troca_produto'?'selected':''}>Troquei o produto inteiro</option>
+              <option value="sem_defeito" ${it.resolucao==='sem_defeito'?'selected':''}>Sem defeito constatado</option>
+            </select>
+          </div>
+        </div>
+
+        ${it.resolucao==='troca_insumo' ? `
+          <div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:10px">
+            <div style="font-size:12px;font-weight:700;margin-bottom:6px">Peças trocadas</div>
+            ${it.insumos.map((ins,j)=>`
+              <div style="display:flex;gap:8px;align-items:center;font-size:13px;padding:3px 0">
+                <div style="flex:1"><strong>${esc(ins.codigo)}</strong> ${esc(ins.nome)}</div>
+                <div>${ins.qtd} un</div>
+                ${ro?'':`<button class="btn btn-outline btn-sm" onclick="removerInsumoAnalise(${idx},${j})">×</button>`}
+              </div>`).join('') || '<div style="font-size:12px;color:var(--muted)">Nenhuma peça lançada ainda.</div>'}
+            ${ro?'':`
+            <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+              <input type="text" id="analise-ins-${idx}" list="analise-insumos-list" placeholder="Código do insumo"
+                style="flex:1;min-width:150px;padding:5px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+              <input type="number" id="analise-insqtd-${idx}" min="1" value="1"
+                style="width:70px;padding:5px;border:1px solid var(--border);border-radius:6px;text-align:center">
+              <button class="btn btn-outline btn-sm" onclick="adicionarInsumoAnalise(${idx})">+ Adicionar</button>
+            </div>`}
+          </div>` : ''}
+
+        ${(it.resolucao==='troca_insumo' || it.resolucao==='troca_produto') ? `
+          <label style="display:block;font-size:13px;margin-bottom:5px">
+            <input type="checkbox" ${it.baixa_estoque?'checked':''} ${ro?'disabled':''}
+              onchange="setAnaliseCampo(${idx},'baixa_estoque',this.checked)">
+            Dar baixa no estoque da peça nova que saiu
+          </label>
+          <label style="display:block;font-size:13px;margin-bottom:5px">
+            <input type="checkbox" ${it.gerar_garantia_fornecedor?'checked':''} ${ro?'disabled':''}
+              onchange="setAnaliseCampo(${idx},'gerar_garantia_fornecedor',this.checked)">
+            Mandar a peça defeituosa para a caixa do fornecedor
+          </label>
+          ${it.gerar_garantia_fornecedor ? `
+            <select ${ro?'disabled':''} onchange="setAnaliseCampo(${idx},'fornecedor',this.value)"
+              style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:6px">
+              ${optsForn.replace(`value="${esc(it.fornecedor||'')}"`, `value="${esc(it.fornecedor||'')}" selected`)}
+            </select>` : ''}
+        ` : ''}
+
+        <input type="text" value="${esc(it.obs||'')}" placeholder="Observação técnica (opcional)" ${ro?'disabled':''}
+          onchange="setAnaliseCampo(${idx},'obs',this.value)"
+          style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+      </div>`).join('')}
+
+    <datalist id="analise-insumos-list">
+      ${INSUMOS_DB.filter(i=>!i.inativo).slice(0,600).map(i=>`<option value="${esc(i.codigo)}">${esc(i.nome)}</option>`).join('')}
+    </datalist>
+
+    <div class="form-actions">
+      <button class="btn btn-outline" onclick="fecharModal('modal-analise-gcli')">Fechar</button>
+      ${ro?'':`
+        <button class="btn btn-outline" onclick="salvarAnaliseGCli(false)">Salvar sem finalizar</button>
+        <button class="btn btn-primary" id="btn-finalizar-analise" onclick="salvarAnaliseGCli(true)">✓ Finalizar e liberar para envio</button>`}
+    </div>`;
+}
+
+function setAnaliseCampo(idx, campo, valor){
+  if(!analiseGCli) return;
+  if(campo === 'qtd_conferida') valor = Number(valor) || 0;
+  analiseGCli.itens[idx][campo] = valor;
+  if(campo === 'resolucao' || campo === 'gerar_garantia_fornecedor') renderAnaliseGCli();
+}
+
+function adicionarInsumoAnalise(idx){
+  const cod = (document.getElementById('analise-ins-'+idx)?.value||'').trim();
+  const qtd = Number(document.getElementById('analise-insqtd-'+idx)?.value) || 0;
+  if(!cod){ toast('Informe o código do insumo','error'); return; }
+  if(qtd <= 0){ toast('Quantidade inválida','error'); return; }
+  const ins = INSUMOS_DB.find(x=>x.codigo === cod) || PRODUTOS_DB.find(x=>x.codigo === cod);
+  if(!ins){ toast(`"${cod}" não encontrado no cadastro`,'error'); return; }
+  const tipo = INSUMOS_DB.find(x=>x.codigo === cod) ? 'insumo' : 'produto';
+  analiseGCli.itens[idx].insumos.push({ codigo: ins.codigo, nome: ins.nome, qtd, tipo });
+  renderAnaliseGCli();
+}
+
+function removerInsumoAnalise(idx, j){
+  analiseGCli.itens[idx].insumos.splice(j,1);
+  renderAnaliseGCli();
+}
+
+// Finalizar: aplica as baixas escolhidas, gera os registros na caixa do fornecedor
+// para quem foi marcado, e joga a garantia para "Aguardando Envio".
+async function salvarAnaliseGCli(finalizar){
+  if(!podeAnalisarGarantiaCliente()){ toast('Acesso restrito — só produção ou administrador faz a análise','error'); return; }
+  const a = analiseGCli; if(!a) return;
+
+  if(finalizar){
+    const semResolucao = a.itens.filter(i=>!i.resolucao);
+    if(semResolucao.length){ toast('Informe o que foi feito em todos os itens antes de finalizar','error'); return; }
+    const semInsumo = a.itens.filter(i=>i.resolucao==='troca_insumo' && !i.insumos.length);
+    if(semInsumo.length){ toast('Lance ao menos uma peça trocada nos itens marcados como troca de peça','error'); return; }
+    const semForn = a.itens.filter(i=>i.gerar_garantia_fornecedor && (i.resolucao==='troca_insumo'||i.resolucao==='troca_produto') && !i.fornecedor);
+    if(semForn.length){ toast('Escolha o fornecedor dos itens que vão para a caixa','error'); return; }
+    if(!confirm('Finalizar a análise e liberar esta garantia para envio?')) return;
+  }
+
+  const btn = document.getElementById('btn-finalizar-analise');
+  if(btn) btn.disabled = true;
+
+  try {
+    // Trava atomica: so a primeira finalizacao passa. Sem isso, duas abas aplicariam as
+    // baixas de estoque duas vezes.
+    if(finalizar){
+      const res = await db.ref('garantias_clientes/'+a.id+'/status').transaction(atual => {
+        if(atual === 'aguardando_envio' || atual === 'finalizada' || atual === 'cancelada') return;
+        return 'aguardando_envio';
+      });
+      if(!res.committed){
+        toast('Esta garantia já foi finalizada ou cancelada — nada foi alterado','error');
+        fecharModal('modal-analise-gcli');
+        await renderGarantiasClientes(true);
+        return;
+      }
+      // Grava a analise ANTES de mexer em estoque: se uma baixa falhar no meio, a
+      // garantia nao fica liberada sem o registro do que foi trocado.
+      await db.ref('garantias_clientes/'+a.id).update({
+        analise: { por: usuarioLogado.nome, ts: agoraTs(), itens: a.itens },
+        liberada_em: agoraTs(),
+        liberada_por: usuarioLogado.nome
+      });
+    }
+
+    const avisos = [];
+    if(finalizar){
+      for(const it of a.itens){
+        const trocou = it.resolucao === 'troca_insumo' || it.resolucao === 'troca_produto';
+        if(!trocou) continue;
+
+        // Pecas NOVAS que sairam do estoque
+        const pecas = it.resolucao === 'troca_produto'
+          ? [{ codigo: it.codigo, nome: it.nome, qtd: Number(it.qtd_conferida)||0, tipo:'produto' }]
+          : it.insumos;
+
+        if(it.baixa_estoque){
+          for(const pc of pecas){
+            if(!pc.qtd) continue;
+            const motivo = `Garantia de cliente #${a.garantia.numero} — ${a.garantia.cliente_nome}`;
+            if(pc.tipo === 'insumo'){
+              const chave = await resolverChaveInsumo(pc.codigo, null);
+              if(!chave){ avisos.push(`${pc.codigo}: insumo não encontrado, baixa não feita`); continue; }
+              await movimentarEstoque('insumo', chave, { codigo:pc.codigo, nome:pc.nome, delta:-pc.qtd,
+                motivo, origemTipo:'garantia_cliente', origemId:a.id });
+            } else {
+              const prodSnap = await db.ref('produtos/'+pc.codigo).once('value');
+              if(!prodSnap.exists()){ avisos.push(`${pc.codigo}: produto não encontrado, baixa não feita`); continue; }
+              await movimentarEstoque('produto', pc.codigo, { codigo:pc.codigo, nome:pc.nome, delta:-pc.qtd,
+                motivo, origemTipo:'garantia_cliente', origemId:a.id });
+            }
+          }
+        }
+
+        // Pecas DEFEITUOSAS que vao para a caixa do fornecedor
+        if(it.gerar_garantia_fornecedor && it.fornecedor){
+          for(const pc of pecas){
+            if(!pc.qtd) continue;
+            const cad = pc.tipo === 'insumo'
+              ? INSUMOS_DB.find(x=>x.codigo===pc.codigo)
+              : PRODUTOS_DB.find(x=>x.codigo===pc.codigo);
+            const gk = db.ref('garantias').push().key;
+            await db.ref('garantias/'+gk).set({
+              codigo: pc.codigo, nome: pc.nome,
+              tipo_item: pc.tipo,
+              baixa_estoque: false, // a peca defeituosa voltou do cliente, nao saiu do estoque
+              custo_unit: Number(cad?.preco_custo) || 0,
+              fornecedor: it.fornecedor,
+              qtd: pc.qtd,
+              motivo: `Defeito em garantia de cliente #${a.garantia.numero}`,
+              obs: it.obs || '',
+              garantia_cliente_id: a.id,
+              garantia_cliente_numero: a.garantia.numero,
+              manual: false,
+              status: 'pendente',
+              registrado_por: usuarioLogado.nome,
+              ts: agoraTs()
+            });
+          }
+        }
+      }
+    }
+
+    if(!finalizar){
+      const dados = { analise: { por: usuarioLogado.nome, ts: agoraTs(), itens: a.itens } };
+      if((a.garantia.status||'aberta') === 'aberta') dados.status = 'em_analise';
+      await db.ref('garantias_clientes/'+a.id).update(dados);
+    }
+    invalidarCacheNo('garantias_clientes');
+
+    fecharModal('modal-analise-gcli');
+    if(avisos.length) toast('⚠ ' + avisos.join(' · '), 'error');
+    toast(finalizar ? '✓ Garantia liberada para envio' : '✓ Análise salva', 'success');
+    analiseGCli = null;
+    await renderGarantiasClientes();
+    if(typeof renderGarantias === 'function' && document.getElementById('tab-garantias')?.style.display === '') renderGarantias();
+  } catch(e){
+    toast('Erro ao salvar análise: ' + (e?.message||e), 'error');
+  } finally {
+    // Mesmo com erro no meio, parte dos dados ja mudou — o cache nao pode sobreviver
+    invalidarCacheNo('garantias_clientes');
+    if(btn) btn.disabled = false;
+  }
+}
+
+// ── Expedicao: confirmacao apos a bipagem ────────────────
+let envioGCliPendentes = [];
+let envioGCliPedido = null;
+
+function abrirConfirmacaoEnvioGarantia(pendentes, pedido){
+  envioGCliPendentes = pendentes;
+  envioGCliPedido = pedido;
+  document.getElementById('envio-gcli-conteudo').innerHTML = `
+    <div style="background:#fef3c7;border-left:3px solid #d97706;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px">
+      <strong>${esc(pedido.cliente_nome||'')}</strong> tem ${pendentes.length} garantia(s) aguardando envio.
+    </div>
+    <div style="font-size:14px;font-weight:700;margin-bottom:8px">A garantia foi embalada para ir junto do pedido?</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Marque abaixo o que foi embalado. O que ficar desmarcado continua aguardando envio e o alerta permanece.</div>
+    ${pendentes.map((g,idx)=>`
+      <label style="display:block;padding:9px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:7px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="envio-gcli-${idx}">
+        <strong>Garantia #${g.numero}</strong> — ${(g.itens||[]).map(i=>`${i.qtd}x ${esc(i.codigo)}`).join(', ')}
+      </label>`).join('')}
+    <div class="form-actions">
+      <button class="btn btn-outline" onclick="responderEnvioGarantia(false)">Não foi embalada</button>
+      <button class="btn btn-primary" onclick="responderEnvioGarantia(true)">Confirmar embaladas</button>
+    </div>`;
+  abrirModal('modal-envio-gcli');
+}
+
+async function responderEnvioGarantia(sim){
+  const pedido = envioGCliPedido;
+  if(!sim){
+    fecharModal('modal-envio-gcli');
+    toast('Garantia continua aguardando envio','error');
+    if(pedido) abrirModalEtiqueta(pedido.id);
+    return;
+  }
+  const marcadas = envioGCliPendentes.filter((g,idx)=>document.getElementById('envio-gcli-'+idx)?.checked);
+  if(!marcadas.length){ toast('Marque ao menos uma garantia, ou escolha "Não foi embalada"','error'); return; }
+
+  try {
+    for(const g of marcadas){
+      // Transaction para nao finalizar duas vezes se houver dois leitores no mesmo pedido
+      const res = await db.ref('garantias_clientes/'+g.id+'/status').transaction(atual => {
+        if(atual !== 'aguardando_envio') return;
+        return 'finalizada';
+      });
+      if(!res.committed) continue;
+      await db.ref('garantias_clientes/'+g.id).update({
+        finalizada_em: agoraTs(),
+        finalizada_por: usuarioLogado?.nome || '',
+        pedido_numero: pedido?.numero || null,
+        pedido_id: pedido?.id || null
+      });
+    }
+    invalidarCacheNo('garantias_clientes');
+    fecharModal('modal-envio-gcli');
+    toast(`✓ ${marcadas.length} garantia(s) finalizada(s) e enviada(s) com o pedido`,'success');
+    await carregarGarantiasClientes(true);
+  } catch(e){
+    toast('Erro ao finalizar garantia: ' + (e?.message||e), 'error');
+  } finally {
+    if(pedido) abrirModalEtiqueta(pedido.id);
+  }
 }
 
 // ── Edição de garantia existente (fornecedor + motivo) ──
@@ -10517,7 +11311,17 @@ async function renderGarantias(){
   document.getElementById('garantias-lista').style.display = ehCaixa ? 'none' : '';
   document.getElementById('garantias-pag').style.display   = ehCaixa ? 'none' : '';
   document.getElementById('garantias-caixa').style.display = ehCaixa ? '' : 'none';
-  if(ehCaixa){ renderGarantiasCaixa(filtrado); return; }
+  if(ehCaixa){
+    // A caixa fisica nao conhece recorte de data nem de status. Aqui valem so os
+    // filtros que descrevem O QUE esta na caixa: fornecedor e codigo.
+    const filtradoCaixa = GARANTIAS_CACHE.filter(g=>{
+      if(fFornecedor && !(g.fornecedor||'').toLowerCase().includes(fFornecedor)) return false;
+      if(fCodigo && !(g.codigo||'').toLowerCase().includes(fCodigo)) return false;
+      return true;
+    });
+    renderGarantiasCaixa(filtradoCaixa);
+    return;
+  }
 
   const total = filtrado.length, inicio=(paginaGarantias-1)*POR_PAGINA;
   const pagina = filtrado.slice(inicio, inicio+POR_PAGINA);
@@ -10646,6 +11450,7 @@ async function marcarGarantiaResolvida(id){
 }
 
 function abrirEdicaoGarantia(id){
+  if(!temPermissaoEditar('garantias')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const g = GARANTIAS_CACHE.find(x=>x.id===id);
   if(!g) return;
   const novaQtd = prompt('Quantidade:', g.qtd);
@@ -10654,7 +11459,15 @@ function abrirEdicaoGarantia(id){
   if(!qtd || qtd <= 0){ toast('Quantidade inválida','error'); return; }
   const novoMotivo = prompt('Motivo / Observação:', g.motivo||'');
   if(novoMotivo === null) return;
-  db.ref('garantias/'+id).update({ qtd, motivo: novoMotivo.trim() }).then(()=>{
+  // Mudar a quantidade aqui NAO mexe no estoque: a peca ja foi baixada no lancamento.
+  // Guardamos o valor anterior para a divergencia entre caixa e sistema ter rastro.
+  const dadosEdicao = { qtd, motivo: novoMotivo.trim() };
+  if(qtd !== Number(g.qtd||0)){
+    dadosEdicao.qtd_anterior = Number(g.qtd||0);
+    dadosEdicao.qtd_alterada_em = agoraTs();
+    dadosEdicao.qtd_alterada_por = usuarioLogado?.nome || '';
+  }
+  db.ref('garantias/'+id).update(dadosEdicao).then(()=>{
     renderGarantias();
     toast('✓ Garantia atualizada','success');
   });
@@ -10718,12 +11531,40 @@ function custoGarantia(g){
 
 function renderGarantiasCaixa(filtrado){
   const alvo = document.getElementById('garantias-caixa');
-  // Pendente e Aguardando Envio = peça fisicamente na caixa. Enviado já saiu.
-  const naCaixa = filtrado.filter(g=>g.status==='pendente' || g.status==='aguardando_envio');
+
+  // Status ausente ou desconhecido conta como Pendente — é assim que a lista trata
+  // (STATUS_GARANTIA[status] || STATUS_GARANTIA.pendente). Antes a caixa exigia o texto
+  // exato, então registro antigo sem o campo aparecia na lista e sumia da conferência.
+  const statusNaCaixa = g => {
+    const st = (g.status||'').trim();
+    return st === '' || st === 'pendente' || st === 'aguardando_envio';
+  };
+  const naCaixa = filtrado.filter(statusNaCaixa);
+
+  // O que a conferência NÃO conta, e por quê. Peça marcada como enviada que nunca saiu,
+  // ou registro cancelado (o cancelamento não devolve estoque nem retira a peça da caixa),
+  // continua fisicamente na caixa — é a origem mais comum de divergência.
+  const fora = filtrado.filter(g=>!statusNaCaixa(g));
+  const porStatusFora = {};
+  fora.forEach(g=>{
+    const st = (g.status||'').trim() || 'pendente';
+    if(!porStatusFora[st]) porStatusFora[st] = { registros:0, pecas:0 };
+    porStatusFora[st].registros++;
+    porStatusFora[st].pecas += Number(g.qtd||0);
+  });
+  const avisoFora = Object.keys(porStatusFora).length ? `
+    <div style="background:#fffbeb;border-left:3px solid #d97706;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px">
+      <div style="font-weight:700;color:#b45309;margin-bottom:6px">Fora da conferência</div>
+      ${Object.keys(porStatusFora).map(st=>`
+        <div style="margin-bottom:3px">${statusInfoGarantia(st).label}: <strong>${porStatusFora[st].registros}</strong> registro(s), <strong>${porStatusFora[st].pecas}</strong> peça(s)</div>`).join('')}
+      <div style="color:var(--muted);margin-top:7px;line-height:1.5">
+        Se alguma dessas peças ainda está na caixa, o número não vai bater. <strong>Enviado</strong> marcado à mão antes do envio real e <strong>Cancelado</strong> (que não devolve estoque nem retira a peça) são as causas mais comuns.
+      </div>
+    </div>` : '';
 
   if(!naCaixa.length){
     CAIXA_GRUPOS = [];
-    alvo.innerHTML = '<div style="padding:34px;text-align:center;color:var(--muted);font-size:14px">Nenhuma peça na caixa dentro dos filtros atuais.</div>';
+    alvo.innerHTML = avisoFora + '<div style="padding:34px;text-align:center;color:var(--muted);font-size:14px">Nenhuma peça na caixa dentro dos filtros atuais.</div>';
     return;
   }
 
@@ -10732,8 +11573,9 @@ function renderGarantiasCaixa(filtrado){
     const f = (g.fornecedor||'').trim() || 'Não identificado';
     if(!porForn[f]) porForn[f] = {};
     const cod = g.codigo || '—';
-    if(!porForn[f][cod]) porForn[f][cod] = { codigo:cod, nome:g.nome||'', qtd:0, valor:0, maisAntiga:g.ts, registros:[] };
+    if(!porForn[f][cod]) porForn[f][cod] = { codigo:cod, nome:g.nome||'', qtd:0, valor:0, maisAntiga:g.ts, registros:[], tipos:new Set() };
     const l = porForn[f][cod];
+    if(g.tipo_item) l.tipos.add(g.tipo_item);
     l.qtd    += Number(g.qtd||0);
     l.valor  += Number(g.qtd||0) * custoGarantia(g);
     if(g.ts < l.maisAntiga) l.maisAntiga = g.ts;
@@ -10753,9 +11595,10 @@ function renderGarantiasCaixa(filtrado){
     };
   });
 
-  alvo.innerHTML = `
+  alvo.innerHTML = avisoFora + `
     <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
       Conte as peças da caixa e digite o que encontrou na coluna <strong>Físico</strong>. Deixe em branco o que não for conferir.
+      <br>A conferência ignora os filtros de data e de status — a caixa física não tem esse recorte.
     </div>` + CAIXA_GRUPOS.map((g,idx)=>{
     const alerta = g.dias >= 60 ? '#dc2626' : (g.dias >= 30 ? '#d97706' : 'var(--muted)');
     return `
@@ -10783,7 +11626,7 @@ function renderGarantiasCaixa(filtrado){
         </tr></thead>
         <tbody>${g.linhas.map((l,j)=>`
           <tr style="border-bottom:1px solid var(--border)">
-            <td style="padding:7px"><strong>${esc(l.codigo)}</strong></td>
+            <td style="padding:7px"><strong>${esc(l.codigo)}</strong>${l.tipos.size>1?' <span class="badge" style="background:#fef3c7;color:#b45309;font-size:10px" title="Este código existe como produto E como insumo — são itens físicos diferentes somados na mesma linha">MISTO</span>':''}</td>
             <td style="padding:7px">${esc(l.nome)}</td>
             <td style="padding:7px;text-align:center"><strong>${l.qtd}</strong></td>
             <td style="padding:7px;text-align:center">
@@ -11110,6 +11953,9 @@ async function abrirSeparacaoPedido(pedidoId){
   const p = snap.val();
   if(!p) return;
   pedidoSeparacaoAtual = { id: pedidoId, ...p };
+  // Carrega as garantias para avisar a expedicao antes de comecar a separar.
+  // Falha de leitura nao pode impedir a separacao: no pior caso o aviso nao aparece.
+  try { await carregarGarantiasClientes(); } catch(e){ console.warn('Alerta de garantia não carregado:', e); }
 
   // Marcar como "Em Separação" no primeiro acesso
   if(p.status === 'AP'){
@@ -11124,6 +11970,15 @@ async function abrirSeparacaoPedido(pedidoId){
 function renderModalSeparacao(){
   const p = pedidoSeparacaoAtual;
   const itens = p.itens || [];
+  const gPendSep = garantiasAguardandoEnvio(p.cliente_codigo);
+  const avisoGarantiaSep = gPendSep.length ? `
+    <div style="background:#fef3c7;border:2px solid #d97706;border-radius:8px;padding:12px 14px;margin-bottom:12px">
+      <div style="font-weight:700;color:#92400e;font-size:14px">⚠️ ESSE CLIENTE POSSUI GARANTIA PARA SER ENVIADA</div>
+      <div style="color:#92400e;margin-top:4px;font-size:13px">
+        ${gPendSep.map(g=>`<div>• Garantia #${g.numero} — ${(g.itens||[]).map(i=>`${i.qtd}x ${esc(i.codigo)} ${esc(i.nome)}`).join(', ')}</div>`).join('')}
+      </div>
+      <div style="color:#92400e;margin-top:6px;font-size:12px">Separe a garantia junto com este pedido.</div>
+    </div>` : '';
 
   const linhasItens = itens.map((item, idx) => {
     const produto = PRODUTOS_DB.find(x=>x.codigo===item.codigo);
@@ -11168,6 +12023,7 @@ function renderModalSeparacao(){
 
   document.getElementById('separacao-conteudo').innerHTML = `
     <div class="modal-title">Pedido #${p.numero} — ${esc(p.cliente_nome)}</div>
+    ${avisoGarantiaSep}
     <div style="font-size:13px;color:var(--muted);margin-bottom:16px">${p.cliente_cidade||''}/${p.cliente_uf||''} · ${itens.length} itens</div>
     <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:18px">
       ${linhasItens}
@@ -11319,6 +12175,11 @@ async function irParaBipagem(){
 function renderModalBipagem(){
   const p = pedidoSeparacaoAtual;
   const itens = p.itens || [];
+  const gPendBip = garantiasAguardandoEnvio(p.cliente_codigo);
+  const avisoGarantiaBip = gPendBip.length ? `
+    <div style="background:#fef3c7;border:2px solid #d97706;border-radius:8px;padding:10px 14px;margin-bottom:10px">
+      <div style="font-weight:700;color:#92400e;font-size:13px">⚠️ ESSE CLIENTE POSSUI GARANTIA PARA SER ENVIADA</div>
+    </div>` : '';
   const totalUnidades = itens.reduce((s,i)=>s+Number(i.qtd),0);
   const totalBipado = itens.reduce((s,i)=>s+Number(i.qtd_bipada||0),0);
 
@@ -11346,6 +12207,7 @@ function renderModalBipagem(){
 
   document.getElementById('separacao-conteudo').innerHTML = `
     <div class="modal-title">📷 Bipagem Final — Pedido #${p.numero}</div>
+    ${avisoGarantiaBip}
     <div style="font-size:13px;color:var(--muted);margin-bottom:16px">Confira <strong>cada unidade física, uma a uma</strong>. Esta conferência não pode ser editada manualmente — só pelo coletor.</div>
 
     ${itemAtual ? `
@@ -11511,7 +12373,16 @@ async function finalizarPedidoBipado(){
 
     fecharModal('modal-separacao');
     await renderSeparacao();
-    abrirModalEtiqueta(p.id);
+
+    // Se o cliente tem garantia liberada, pergunta antes da etiqueta se foi embalada.
+    // Rele do banco: a producao pode ter liberado enquanto o pedido era bipado.
+    await carregarGarantiasClientes(true);
+    const gPendEnvio = garantiasAguardandoEnvio(p.cliente_codigo);
+    if(gPendEnvio.length){
+      abrirConfirmacaoEnvioGarantia(gPendEnvio, { id:p.id, numero:p.numero, cliente_nome:p.cliente_nome });
+    } else {
+      abrirModalEtiqueta(p.id);
+    }
 
   } catch(e){ toast('Erro ao finalizar bipagem: '+e.message,'error'); }
 }
