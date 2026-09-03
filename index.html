@@ -5594,15 +5594,6 @@ function campanhaCongeladaPara(p){
 // aplicado, o piso é o menor entre os dois: se o preço promocional está ACIMA do
 // mínimo do cadastro, o desconto geral ainda pode descer até o mínimo; se o
 // promocional já é o mais baixo, ele vira o piso e não desce mais.
-// Comparação de preço contra o piso SEMPRE em centavos.
-// O preço mínimo do cadastro é gravado já arredondado ao centavo (preço x 0,97,
-// por exemplo). Quando esse arredondamento sobe, o mínimo fica até meio centavo
-// ACIMA do preço com o desconto cheio, e a trava barrava um desconto que na
-// prática é o desconto liberado. Comparando os dois lados já arredondados ao
-// centavo — que é como o valor sai na nota — o 3% passa sem abrir margem real.
-function emCentavos(v){ return Math.round((Number(v)||0) * 100); }
-function abaixoDoPiso(preco, piso){ return emCentavos(preco) < emCentavos(piso); }
-
 function pisoItem(item){
   // Preço fechado: o promocional é o piso, não desce nem por desconto de item
   if(item && item.promo_ativa && item.promo_sem_desconto && Number(item.promo_preco) > 0)
@@ -6150,13 +6141,13 @@ function atualizarItemStaging(){
 
   // Mesma trava de sempre: vendedor comum não passa do preço mínimo, nem por preço nem por desconto
   if(!usuarioLogado?.admin && itemEmEstagio.preco_minimo > 0){
-    if(abaixoDoPiso(preco, itemEmEstagio.preco_minimo)){
+    if(preco < itemEmEstagio.preco_minimo){
       alert(`Preço mínimo: ${fmtMoeda(itemEmEstagio.preco_minimo)}`);
       preco = itemEmEstagio.preco_minimo;
       document.getElementById('staging-preco').value = preco.toFixed(2);
     }
     const precoComDesc = preco * (1-desc/100);
-    if(abaixoDoPiso(precoComDesc, itemEmEstagio.preco_minimo)){
+    if(precoComDesc < itemEmEstagio.preco_minimo){
       if(modo === 'R$'){
         const rsMax = Math.max(0, Math.round((preco - itemEmEstagio.preco_minimo)*100)/100);
         alert(`Desconto máximo permitido: ${fmtMoeda(rsMax)} por unidade (preço mínimo: ${fmtMoeda(itemEmEstagio.preco_minimo)})`);
@@ -6165,7 +6156,7 @@ function atualizarItemStaging(){
       } else {
         const descMax = Math.max(0, ((preco - itemEmEstagio.preco_minimo) / preco * 100));
         alert(`Desconto máximo permitido: ${descMax.toFixed(1)}% (preço mínimo: ${fmtMoeda(itemEmEstagio.preco_minimo)})`);
-        desc = Math.floor(descMax*10)/10;
+        desc = descMax;
         document.getElementById('staging-desc').value = desc.toFixed(1);
       }
     }
@@ -6326,7 +6317,7 @@ function atualizarPreco(idx,val){
   const v=parseFloat(val)||0;
   const item=pedidoAtual.itens[idx];
   const pisoPreco = pisoItem(item);
-  if(abaixoDoPiso(v, pisoPreco) && !usuarioLogado?.admin){
+  if(v<pisoPreco && !usuarioLogado?.admin){
     alert(`Preço mínimo: ${fmtMoeda(pisoPreco)}`);
     renderItens();
     return;
@@ -6392,7 +6383,7 @@ function validarPedidoPrecosMinimos(){
     const precoComDescItem = item.preco * (1-(item.desconto_item||0)/100);
     // Item de preço fechado fica fora do desconto geral, então o preço dele não muda
     const precoFinal = itemPrecoFechado(item) ? precoComDescItem : precoComDescItem * mult;
-    if(abaixoDoPiso(precoFinal, piso)){ // comparação em centavos
+    if(precoFinal < piso - 0.001){ // pequena tolerância pra arredondamento
       return { item, precoFinal, piso };
     }
   }
@@ -6417,7 +6408,7 @@ function atualizarTotais(){
     const dv = Math.max(0, parseFloat(dvEl?.value)||0);
     const subG = calcBasesDesconto().desc;
     if((dg > 0 || dv > 0) && subG > 0){
-      let multMin = 0, itemCritico = null, pcdCritico = 0, pisoCritico = 0;
+      let multMin = 0, itemCritico = null;
       for(const it of pedidoAtual.itens){
         if(itemPrecoFechado(it)) continue; // fora do desconto geral, não limita nada
         const pisoIt = pisoItem(it);
@@ -6425,17 +6416,17 @@ function atualizarTotais(){
         const pcd = it.preco * (1-(it.desconto_item||0)/100);
         if(pcd <= 0) continue;
         const m = pisoIt / pcd;
-        if(m > multMin){ multMin = m; itemCritico = it; pcdCritico = pcd; pisoCritico = pisoIt; }
+        if(m > multMin){ multMin = m; itemCritico = it; }
       }
       const multEfetivo = (1 - dg/100) - dv/subG;
-      if(itemCritico && abaixoDoPiso(pcdCritico * multEfetivo, pisoCritico)){
+      if(itemCritico && multEfetivo < multMin - 0.0000001){
         if(ultimoCampoDesc === 'valor'){
           const dvMax = Math.max(0, subG*((1 - dg/100) - multMin));
-          dvEl.value = (Math.floor(dvMax*100)/100).toFixed(2);
+          dvEl.value = dvMax.toFixed(2);
           alert(`Desconto em R$ máximo permitido: ${fmtMoeda(dvMax)}\n\n"${itemCritico.nome}" ficaria abaixo do preço mínimo de ${fmtMoeda(pisoItem(itemCritico))}.`);
         } else {
           const dgMax = Math.max(0, (1 - multMin - dv/subG) * 100);
-          dgEl.value = (Math.floor(dgMax*10)/10).toFixed(1);
+          dgEl.value = dgMax.toFixed(1);
           alert(`Desconto geral máximo permitido: ${dgMax.toFixed(1)}%\n\n"${itemCritico.nome}" ficaria abaixo do preço mínimo de ${fmtMoeda(pisoItem(itemCritico))}.`);
         }
       }
@@ -10965,8 +10956,8 @@ function renderAnaliseGCli(){
   const a = analiseGCli; if(!a) return;
   const g = a.garantia;
   const ro = a.somenteLeitura;
-  const optsForn = '<option value="">Selecione o fornecedor</option>' +
-    FORNECEDORES_DB.map(f=>`<option value="${esc(f.nome)}">${esc(f.nome)}</option>`).join('');
+  const optsForn = (sel, vazio) => `<option value="">${vazio}</option>` +
+    FORNECEDORES_DB.map(f=>`<option value="${esc(f.nome)}"${f.nome===sel?' selected':''}>${esc(f.nome)}</option>`).join('');
 
   document.getElementById('analise-gcli-conteudo').innerHTML = `
     <div style="background:var(--bg);border-radius:8px;padding:12px 14px;margin-bottom:14px">
@@ -11006,11 +10997,16 @@ function renderAnaliseGCli(){
           <div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:10px">
             <div style="font-size:12px;font-weight:700;margin-bottom:6px">Peças trocadas</div>
             ${it.insumos.map((ins,j)=>`
-              <div style="display:flex;gap:8px;align-items:center;font-size:13px;padding:3px 0">
-                <div style="flex:1"><strong>${esc(ins.codigo)}</strong> ${esc(ins.nome)}</div>
-                <div>${ins.qtd} un</div>
+              <div style="display:flex;gap:8px;align-items:center;font-size:13px;padding:5px 0;border-bottom:1px dashed var(--border);flex-wrap:wrap">
+                <div style="flex:1;min-width:150px"><strong>${esc(ins.codigo)}</strong> ${esc(ins.nome)}</div>
+                <div style="width:46px;text-align:center">${ins.qtd} un</div>
+                <select ${ro?'disabled':''} onchange="setInsumoAnaliseCampo(${idx},${j},'fornecedor',this.value)"
+                  style="min-width:170px;padding:4px;border:1px solid var(--border);border-radius:6px;font-size:12px">
+                  ${optsForn(ins.fornecedor||'', 'Não enviar para a caixa')}
+                </select>
                 ${ro?'':`<button class="btn btn-outline btn-sm" onclick="removerInsumoAnalise(${idx},${j})">×</button>`}
               </div>`).join('') || '<div style="font-size:12px;color:var(--muted)">Nenhuma peça lançada ainda.</div>'}
+            <div style="font-size:11px;color:var(--muted);margin-top:6px">Cada peça vai para a caixa do seu próprio fornecedor. Deixe "Não enviar" nas que não voltam para fornecedor nenhum.</div>
             ${ro?'':`
             <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
               <input type="text" id="analise-ins-${idx}" list="analise-insumos-list" placeholder="Código do insumo"
@@ -11027,15 +11023,17 @@ function renderAnaliseGCli(){
               onchange="setAnaliseCampo(${idx},'baixa_estoque',this.checked)">
             Dar baixa no estoque da peça nova que saiu
           </label>
+        ` : ''}
+        ${it.resolucao==='troca_produto' ? `
           <label style="display:block;font-size:13px;margin-bottom:5px">
             <input type="checkbox" ${it.gerar_garantia_fornecedor?'checked':''} ${ro?'disabled':''}
               onchange="setAnaliseCampo(${idx},'gerar_garantia_fornecedor',this.checked)">
-            Mandar a peça defeituosa para a caixa do fornecedor
+            Mandar o produto defeituoso para a caixa do fornecedor
           </label>
           ${it.gerar_garantia_fornecedor ? `
             <select ${ro?'disabled':''} onchange="setAnaliseCampo(${idx},'fornecedor',this.value)"
               style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:6px">
-              ${optsForn.replace(`value="${esc(it.fornecedor||'')}"`, `value="${esc(it.fornecedor||'')}" selected`)}
+              ${optsForn(it.fornecedor||'', 'Selecione o fornecedor')}
             </select>` : ''}
         ` : ''}
 
@@ -11063,6 +11061,13 @@ function setAnaliseCampo(idx, campo, valor){
   if(campo === 'resolucao' || campo === 'gerar_garantia_fornecedor') renderAnaliseGCli();
 }
 
+// O fornecedor mora na PECA, nao no produto: um produto e montado com pecas de
+// fornecedores diferentes, e numa mesma garantia cada peca pode voltar para um lugar.
+function setInsumoAnaliseCampo(idx, j, campo, valor){
+  if(!analiseGCli) return;
+  analiseGCli.itens[idx].insumos[j][campo] = valor;
+}
+
 function adicionarInsumoAnalise(idx){
   const cod = (document.getElementById('analise-ins-'+idx)?.value||'').trim();
   const qtd = Number(document.getElementById('analise-insqtd-'+idx)?.value) || 0;
@@ -11071,7 +11076,7 @@ function adicionarInsumoAnalise(idx){
   const ins = INSUMOS_DB.find(x=>x.codigo === cod) || PRODUTOS_DB.find(x=>x.codigo === cod);
   if(!ins){ toast(`"${cod}" não encontrado no cadastro`,'error'); return; }
   const tipo = INSUMOS_DB.find(x=>x.codigo === cod) ? 'insumo' : 'produto';
-  analiseGCli.itens[idx].insumos.push({ codigo: ins.codigo, nome: ins.nome, qtd, tipo });
+  analiseGCli.itens[idx].insumos.push({ codigo: ins.codigo, nome: ins.nome, qtd, tipo, fornecedor: '' });
   renderAnaliseGCli();
 }
 
@@ -11091,8 +11096,8 @@ async function salvarAnaliseGCli(finalizar){
     if(semResolucao.length){ toast('Informe o que foi feito em todos os itens antes de finalizar','error'); return; }
     const semInsumo = a.itens.filter(i=>i.resolucao==='troca_insumo' && !i.insumos.length);
     if(semInsumo.length){ toast('Lance ao menos uma peça trocada nos itens marcados como troca de peça','error'); return; }
-    const semForn = a.itens.filter(i=>i.gerar_garantia_fornecedor && (i.resolucao==='troca_insumo'||i.resolucao==='troca_produto') && !i.fornecedor);
-    if(semForn.length){ toast('Escolha o fornecedor dos itens que vão para a caixa','error'); return; }
+    const semForn = a.itens.filter(i=>i.resolucao==='troca_produto' && i.gerar_garantia_fornecedor && !i.fornecedor);
+    if(semForn.length){ toast('Escolha o fornecedor dos produtos que vão para a caixa','error'); return; }
     if(!confirm('Finalizar a análise e liberar esta garantia para envio?')) return;
   }
 
@@ -11151,9 +11156,16 @@ async function salvarAnaliseGCli(finalizar){
           }
         }
 
-        // Pecas DEFEITUOSAS que vao para a caixa do fornecedor
-        if(it.gerar_garantia_fornecedor && it.fornecedor){
-          for(const pc of pecas){
+        // Pecas DEFEITUOSAS que vao para a caixa. Na troca de pecas, cada uma leva o
+        // fornecedor escolhido na propria linha; peca sem fornecedor nao gera registro.
+        // Na troca do produto inteiro, vale o fornecedor do item.
+        const paraCaixa = it.resolucao === 'troca_produto'
+          ? (it.gerar_garantia_fornecedor && it.fornecedor
+              ? pecas.map(pc=>({ ...pc, fornecedor: it.fornecedor })) : [])
+          : pecas.filter(pc=>pc.fornecedor);
+
+        if(paraCaixa.length){
+          for(const pc of paraCaixa){
             if(!pc.qtd) continue;
             const cad = pc.tipo === 'insumo'
               ? INSUMOS_DB.find(x=>x.codigo===pc.codigo)
@@ -11164,7 +11176,7 @@ async function salvarAnaliseGCli(finalizar){
               tipo_item: pc.tipo,
               baixa_estoque: false, // a peca defeituosa voltou do cliente, nao saiu do estoque
               custo_unit: Number(cad?.preco_custo) || 0,
-              fornecedor: it.fornecedor,
+              fornecedor: pc.fornecedor,
               qtd: pc.qtd,
               motivo: `Defeito em garantia de cliente #${a.garantia.numero}`,
               obs: it.obs || '',
