@@ -5594,6 +5594,15 @@ function campanhaCongeladaPara(p){
 // aplicado, o piso é o menor entre os dois: se o preço promocional está ACIMA do
 // mínimo do cadastro, o desconto geral ainda pode descer até o mínimo; se o
 // promocional já é o mais baixo, ele vira o piso e não desce mais.
+// Comparação de preço contra o piso SEMPRE em centavos.
+// O preço mínimo do cadastro é gravado já arredondado ao centavo (preço x 0,97,
+// por exemplo). Quando esse arredondamento sobe, o mínimo fica até meio centavo
+// ACIMA do preço com o desconto cheio, e a trava barrava um desconto que na
+// prática é o desconto liberado. Comparando os dois lados já arredondados ao
+// centavo — que é como o valor sai na nota — o 3% passa sem abrir margem real.
+function emCentavos(v){ return Math.round((Number(v)||0) * 100); }
+function abaixoDoPiso(preco, piso){ return emCentavos(preco) < emCentavos(piso); }
+
 function pisoItem(item){
   // Preço fechado: o promocional é o piso, não desce nem por desconto de item
   if(item && item.promo_ativa && item.promo_sem_desconto && Number(item.promo_preco) > 0)
@@ -6141,13 +6150,13 @@ function atualizarItemStaging(){
 
   // Mesma trava de sempre: vendedor comum não passa do preço mínimo, nem por preço nem por desconto
   if(!usuarioLogado?.admin && itemEmEstagio.preco_minimo > 0){
-    if(preco < itemEmEstagio.preco_minimo){
+    if(abaixoDoPiso(preco, itemEmEstagio.preco_minimo)){
       alert(`Preço mínimo: ${fmtMoeda(itemEmEstagio.preco_minimo)}`);
       preco = itemEmEstagio.preco_minimo;
       document.getElementById('staging-preco').value = preco.toFixed(2);
     }
     const precoComDesc = preco * (1-desc/100);
-    if(precoComDesc < itemEmEstagio.preco_minimo){
+    if(abaixoDoPiso(precoComDesc, itemEmEstagio.preco_minimo)){
       if(modo === 'R$'){
         const rsMax = Math.max(0, Math.round((preco - itemEmEstagio.preco_minimo)*100)/100);
         alert(`Desconto máximo permitido: ${fmtMoeda(rsMax)} por unidade (preço mínimo: ${fmtMoeda(itemEmEstagio.preco_minimo)})`);
@@ -6156,7 +6165,7 @@ function atualizarItemStaging(){
       } else {
         const descMax = Math.max(0, ((preco - itemEmEstagio.preco_minimo) / preco * 100));
         alert(`Desconto máximo permitido: ${descMax.toFixed(1)}% (preço mínimo: ${fmtMoeda(itemEmEstagio.preco_minimo)})`);
-        desc = descMax;
+        desc = Math.floor(descMax*10)/10;
         document.getElementById('staging-desc').value = desc.toFixed(1);
       }
     }
@@ -6317,7 +6326,7 @@ function atualizarPreco(idx,val){
   const v=parseFloat(val)||0;
   const item=pedidoAtual.itens[idx];
   const pisoPreco = pisoItem(item);
-  if(v<pisoPreco && !usuarioLogado?.admin){
+  if(abaixoDoPiso(v, pisoPreco) && !usuarioLogado?.admin){
     alert(`Preço mínimo: ${fmtMoeda(pisoPreco)}`);
     renderItens();
     return;
@@ -6383,7 +6392,7 @@ function validarPedidoPrecosMinimos(){
     const precoComDescItem = item.preco * (1-(item.desconto_item||0)/100);
     // Item de preço fechado fica fora do desconto geral, então o preço dele não muda
     const precoFinal = itemPrecoFechado(item) ? precoComDescItem : precoComDescItem * mult;
-    if(precoFinal < piso - 0.001){ // pequena tolerância pra arredondamento
+    if(abaixoDoPiso(precoFinal, piso)){ // comparação em centavos
       return { item, precoFinal, piso };
     }
   }
@@ -6408,7 +6417,7 @@ function atualizarTotais(){
     const dv = Math.max(0, parseFloat(dvEl?.value)||0);
     const subG = calcBasesDesconto().desc;
     if((dg > 0 || dv > 0) && subG > 0){
-      let multMin = 0, itemCritico = null;
+      let multMin = 0, itemCritico = null, pcdCritico = 0, pisoCritico = 0;
       for(const it of pedidoAtual.itens){
         if(itemPrecoFechado(it)) continue; // fora do desconto geral, não limita nada
         const pisoIt = pisoItem(it);
@@ -6416,17 +6425,17 @@ function atualizarTotais(){
         const pcd = it.preco * (1-(it.desconto_item||0)/100);
         if(pcd <= 0) continue;
         const m = pisoIt / pcd;
-        if(m > multMin){ multMin = m; itemCritico = it; }
+        if(m > multMin){ multMin = m; itemCritico = it; pcdCritico = pcd; pisoCritico = pisoIt; }
       }
       const multEfetivo = (1 - dg/100) - dv/subG;
-      if(itemCritico && multEfetivo < multMin - 0.0000001){
+      if(itemCritico && abaixoDoPiso(pcdCritico * multEfetivo, pisoCritico)){
         if(ultimoCampoDesc === 'valor'){
           const dvMax = Math.max(0, subG*((1 - dg/100) - multMin));
-          dvEl.value = dvMax.toFixed(2);
+          dvEl.value = (Math.floor(dvMax*100)/100).toFixed(2);
           alert(`Desconto em R$ máximo permitido: ${fmtMoeda(dvMax)}\n\n"${itemCritico.nome}" ficaria abaixo do preço mínimo de ${fmtMoeda(pisoItem(itemCritico))}.`);
         } else {
           const dgMax = Math.max(0, (1 - multMin - dv/subG) * 100);
-          dgEl.value = dgMax.toFixed(1);
+          dgEl.value = (Math.floor(dgMax*10)/10).toFixed(1);
           alert(`Desconto geral máximo permitido: ${dgMax.toFixed(1)}%\n\n"${itemCritico.nome}" ficaria abaixo do preço mínimo de ${fmtMoeda(pisoItem(itemCritico))}.`);
         }
       }
