@@ -1273,7 +1273,7 @@ tbody td{padding:11px 16px;font-size:14px}
       <div class="section-header">
         <div class="section-title">🤝 Garantias de Clientes</div>
         <div class="search-box">
-          <button class="btn btn-primary" onclick="abrirNovaGarantiaCliente()">+ Nova Garantia</button>
+          <button class="btn btn-primary" id="btn-nova-gcli" onclick="abrirNovaGarantiaCliente()">+ Nova Garantia</button>
         </div>
       </div>
       <div class="dashboard-cards" id="gcli-resumo" style="margin-bottom:16px"></div>
@@ -1289,7 +1289,8 @@ tbody td{padding:11px 16px;font-size:14px}
           <div class="filtro-group">
             <label>Status</label>
             <select id="gcli-f-status" onchange="paginaGCli=1;renderGarantiasClientes()">
-              <option value="">Todos</option>
+              <option value="">Todas (exceto canceladas)</option>
+              <option value="__todas">Todas, incluindo canceladas</option>
               <option value="aberta">Aberta — aguardando produção</option>
               <option value="em_analise">Em análise</option>
               <option value="aguardando_envio">Aguardando envio</option>
@@ -2530,6 +2531,8 @@ function podeVer(modulo){
     // Manutenção Preventiva anda junto com Produção: quem já vê o módulo de Produção
     // enxerga Manutenção automaticamente, sem precisar marcar a permissão separada.
     if(modulo==='manutencao' && usuarioLogado.permissoes?.producao?.ver) return true;
+    // Garantias de Clientes anda junto com Produção: é a produção que faz a análise.
+    if(modulo==='garantias_clientes' && usuarioLogado.permissoes?.producao?.ver) return true;
     return !!usuarioLogado.permissoes?.[modulo]?.ver;
   }
   return MODULOS_VENDEDOR_PADRAO.includes(modulo);
@@ -2554,10 +2557,16 @@ function temPermissaoEditar(modulo){
   // Vendedor comum (sem tipo especial): pode cadastrar clientes novos — a restrição de só
   // ver/gerenciar os próprios clientes continua valendo separadamente, via vejaTudoDoModulo().
   if(modulo==='clientes') return true;
-  // Vendedor comum lanca garantia em nome do cliente. A ANALISE (o que foi trocado) fica
-  // restrita a producao/admin por podeAnalisarGarantiaCliente(), nao por esta funcao.
-  if(modulo==='garantias_clientes') return true;
   return false;
+}
+
+// LANCAR garantia: vendedor e producao. Expedicao so envia, nao abre.
+// Editar/cancelar o que ja existe NAO passa por aqui — isso e de producao/admin.
+function podeLancarGarantiaCliente(){
+  if(!usuarioLogado) return false;
+  if(usuarioLogado.admin) return true;
+  if(ehExpedicao()) return false;
+  return podeVer('garantias_clientes');
 }
 
 // Quem pode fazer a analise tecnica da garantia: conferir as pecas que chegaram e lancar
@@ -2565,8 +2574,12 @@ function temPermissaoEditar(modulo){
 function podeAnalisarGarantiaCliente(){
   if(!usuarioLogado) return false;
   if(usuarioLogado.admin) return true;
+  // So producao (ou admin) analisa. Antes, marcar "editar" em Garantias de Clientes —
+  // coisa natural de fazer achando que libera o vendedor a LANCAR garantia — transformava
+  // o vendedor em analista e ainda o fazia enxergar as garantias de todos os clientes.
+  // Lancar garantia nao depende dessa marcacao: temPermissaoEditar ja libera para todos.
   if(usuarioLogado.tipo === 'personalizado'){
-    return !!(usuarioLogado.permissoes?.producao?.editar || usuarioLogado.permissoes?.garantias_clientes?.editar);
+    return !!usuarioLogado.permissoes?.producao?.editar;
   }
   return false;
 }
@@ -3183,7 +3196,12 @@ function showTab(tab, el){
     renderOrcamentos();
   }
   if(tab==='clientes') renderClientes();
-  if(tab==='garantias_clientes'){ paginaGCli = 1; renderGarantiasClientes(true); }
+  if(tab==='garantias_clientes'){
+    const btnNovaG = document.getElementById('btn-nova-gcli');
+    if(btnNovaG) btnNovaG.style.display = podeLancarGarantiaCliente() ? '' : 'none';
+    paginaGCli = 1;
+    renderGarantiasClientes(true);
+  }
   if(tab==='produtos') renderProdutos();
   if(tab==='vendedores') renderVendedores();
   if(tab==='relatorios'){ inicializarRelatorios(); }
@@ -10639,13 +10657,20 @@ async function renderGarantiasClientes(forcar){
   const fStatus  = document.getElementById('gcli-f-status')?.value || '';
 
   let lista = GCLI_CACHE;
-  // Vendedor comum so enxerga as garantias dos proprios clientes
-  if(!vejaTudoDoModulo('garantias_clientes') && !podeAnalisarGarantiaCliente()){
+  // A visibilidade das garantias segue a visibilidade dos CLIENTES, nao a do proprio
+  // modulo: nao faz sentido enxergar a garantia de um cliente que voce nao pode abrir.
+  // Expedicao e producao veem tudo porque precisam para trabalhar.
+  const veTodasGarantias = vejaTudoDoModulo('clientes') || ehExpedicao() || podeAnalisarGarantiaCliente();
+  if(!veTodasGarantias){
     lista = lista.filter(g => g.vendedor_id === usuarioLogado.id);
   }
   const filtrado = lista.filter(g=>{
     if(fCliente && !(g.cliente_nome||'').toLowerCase().includes(fCliente)) return false;
-    if(fStatus && (g.status||'aberta') !== fStatus) return false;
+    const st = g.status || 'aberta';
+    // Sem status escolhido, as canceladas ficam de fora: sao ruido na rotina. Para ve-las,
+    // escolha "Cancelada" ou "Todas, incluindo canceladas".
+    if(!fStatus && st === 'cancelada') return false;
+    if(fStatus && fStatus !== '__todas' && st !== fStatus) return false;
     return true;
   });
 
@@ -10672,7 +10697,7 @@ async function renderGarantiasClientes(forcar){
     const itens = g.itens || [];
     const totPecas = itens.reduce((sm,i)=>sm+Number(i.qtd||0),0);
     const podeAnalisar = podeAnalisarGarantiaCliente() && (g.status==='aberta' || g.status==='em_analise');
-    const podeCancelar = temPermissaoEditar('garantias_clientes') && g.status!=='finalizada' && g.status!=='cancelada';
+    const podeCancelar = podeAnalisarGarantiaCliente() && g.status!=='finalizada' && g.status!=='cancelada';
     return `
     <div class="pedido-card" style="margin-bottom:12px">
       <div class="pedido-card-header" style="align-items:center">
@@ -10746,7 +10771,7 @@ async function injetarAlertaGarantiaPedido(clienteCodigo){
 
 // ── Abertura pelo vendedor ───────────────────────────────
 async function abrirNovaGarantiaCliente(){
-  if(!temPermissaoEditar('garantias_clientes')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  if(!podeLancarGarantiaCliente()){ toast('Acesso restrito — você não pode abrir garantias','error'); return; }
   // Quem abre a garantia pode nao ter passado pelas abas que carregam esses cadastros
   if(!CLIENTES_DB.length) await carregarClientesFirebase();
   if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
@@ -10837,7 +10862,7 @@ async function proximoNumeroGCli(){
 }
 
 async function salvarNovaGarantiaCliente(){
-  if(!temPermissaoEditar('garantias_clientes')){ toast('Acesso restrito','error'); return; }
+  if(!podeLancarGarantiaCliente()){ toast('Acesso restrito — você não pode abrir garantias','error'); return; }
   if(salvandoGCli){ toast('Salvando, aguarde...','error'); return; }
   if(!novaGCli?.cliente){ toast('Selecione o cliente','error'); return; }
   if(!novaGCli.itens.length){ toast('Adicione ao menos um produto','error'); return; }
@@ -10875,7 +10900,8 @@ async function salvarNovaGarantiaCliente(){
 }
 
 async function cancelarGarantiaCliente(id){
-  if(!temPermissaoEditar('garantias_clientes')){ toast('Acesso restrito','error'); return; }
+  // Cancelar mexe em garantia ja aberta — e da producao/admin, nao do vendedor
+  if(!podeAnalisarGarantiaCliente()){ toast('Acesso restrito — só produção ou administrador cancela garantia','error'); return; }
   const g = GCLI_CACHE.find(x=>x.id===id); if(!g) return;
   // Se a analise ja rodou, houve baixa de estoque e possivelmente registro na caixa do
   // fornecedor. Cancelar NAO desfaz nada disso — a mensagem precisa dizer com todas as letras.
