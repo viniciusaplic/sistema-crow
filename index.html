@@ -10959,6 +10959,12 @@ function renderAnaliseGCli(){
   const optsForn = (sel, vazio) => `<option value="">${vazio}</option>` +
     FORNECEDORES_DB.map(f=>`<option value="${esc(f.nome)}"${f.nome===sel?' selected':''}>${esc(f.nome)}</option>`).join('');
 
+  // Select da peca trocada: comeca em branco, obriga escolha
+  const optsFornPeca = (sel) =>
+    `<option value="" disabled${sel?'':' selected'}>— escolha o fornecedor —</option>` +
+    `<option value="__nao"${sel==='__nao'?' selected':''}>Não enviar para a caixa</option>` +
+    FORNECEDORES_DB.map(f=>`<option value="${esc(f.nome)}"${f.nome===sel?' selected':''}>${esc(f.nome)}</option>`).join('');
+
   document.getElementById('analise-gcli-conteudo').innerHTML = `
     <div style="background:var(--bg);border-radius:8px;padding:12px 14px;margin-bottom:14px">
       <div style="font-weight:700">Garantia #${g.numero} · ${esc(g.cliente_nome||'')}</div>
@@ -11001,12 +11007,12 @@ function renderAnaliseGCli(){
                 <div style="flex:1;min-width:150px"><strong>${esc(ins.codigo)}</strong> ${esc(ins.nome)}</div>
                 <div style="width:46px;text-align:center">${ins.qtd} un</div>
                 <select ${ro?'disabled':''} onchange="setInsumoAnaliseCampo(${idx},${j},'fornecedor',this.value)"
-                  style="min-width:170px;padding:4px;border:1px solid var(--border);border-radius:6px;font-size:12px">
-                  ${optsForn(ins.fornecedor||'', 'Não enviar para a caixa')}
+                  style="min-width:180px;padding:4px;border-radius:6px;font-size:12px;border:${ins.fornecedor?'1px solid var(--border)':'2px solid #dc2626'};background:${ins.fornecedor?'#fff':'#fef2f2'}">
+                  ${optsFornPeca(ins.fornecedor||'')}
                 </select>
                 ${ro?'':`<button class="btn btn-outline btn-sm" onclick="removerInsumoAnalise(${idx},${j})">×</button>`}
               </div>`).join('') || '<div style="font-size:12px;color:var(--muted)">Nenhuma peça lançada ainda.</div>'}
-            <div style="font-size:11px;color:var(--muted);margin-top:6px">Cada peça vai para a caixa do seu próprio fornecedor. Deixe "Não enviar" nas que não voltam para fornecedor nenhum.</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:6px">Cada peça vai para a caixa do seu próprio fornecedor. O campo é obrigatório: escolha o fornecedor ou marque "Não enviar para a caixa".</div>
             ${ro?'':`
             <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
               <input type="text" id="analise-ins-${idx}" list="analise-insumos-list" placeholder="Código do insumo"
@@ -11098,6 +11104,17 @@ async function salvarAnaliseGCli(finalizar){
     if(semInsumo.length){ toast('Lance ao menos uma peça trocada nos itens marcados como troca de peça','error'); return; }
     const semForn = a.itens.filter(i=>i.resolucao==='troca_produto' && i.gerar_garantia_fornecedor && !i.fornecedor);
     if(semForn.length){ toast('Escolha o fornecedor dos produtos que vão para a caixa','error'); return; }
+    // Peca trocada sem escolha de fornecedor trava a finalizacao, com o codigo na mensagem
+    const pecasSemForn = [];
+    a.itens.forEach(i=>{
+      if(i.resolucao !== 'troca_insumo') return;
+      i.insumos.forEach(pc=>{ if(!pc.fornecedor) pecasSemForn.push(pc.codigo); });
+    });
+    if(pecasSemForn.length){
+      toast('Falta escolher o fornecedor da(s) peça(s): ' + pecasSemForn.join(', ')
+        + '. Se a peça não volta para fornecedor, marque "Não enviar para a caixa".', 'error');
+      return;
+    }
     if(!confirm('Finalizar a análise e liberar esta garantia para envio?')) return;
   }
 
@@ -11162,7 +11179,7 @@ async function salvarAnaliseGCli(finalizar){
         const paraCaixa = it.resolucao === 'troca_produto'
           ? (it.gerar_garantia_fornecedor && it.fornecedor
               ? pecas.map(pc=>({ ...pc, fornecedor: it.fornecedor })) : [])
-          : pecas.filter(pc=>pc.fornecedor);
+          : pecas.filter(pc=>pc.fornecedor && pc.fornecedor !== '__nao');
 
         if(paraCaixa.length){
           for(const pc of paraCaixa){
