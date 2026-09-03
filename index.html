@@ -9854,13 +9854,25 @@ async function salvarPedidoCompra(){
     compraAtual.id = key;
   }
 
+  // Saindo de um status que já aplicou estoque -> devolve tudo ANTES de gravar o novo
+  // status. Se o usuário cancelar o estorno, nada é gravado.
+  if(compraAtual.id && statusSeguraEstoqueCompra(statusAnterior) && !statusSeguraEstoqueCompra(novoStatus)){
+    const okEstorno = await estornarEntradaEstoqueCompra(key, compraAtual);
+    if(!okEstorno){ compraAtual.status = statusAnterior; return; }
+  }
+
   const totalGeral = compraAtual.itens.reduce((s,i)=>s+i.custoTotalItem,0) - (compraAtual.desconto||0);
 
   // Se for edição, preserva o histórico de status já existente (não sobrescreve com undefined)
   let historicoExistente = null;
+  let estoqueAplicadoExistente = null;
   if(compraAtual.id){
     const snapAtual = await db.ref('pedidos_compra/'+key+'/historico_status').once('value');
     historicoExistente = snapAtual.val();
+    // set() substitui o nó inteiro: sem reler aqui, os marcadores de entrada já lançada
+    // seriam apagados a cada edição e o próximo recebimento duplicaria o estoque.
+    const snapAplic = await db.ref('pedidos_compra/'+key+'/estoque_aplicado').once('value');
+    estoqueAplicadoExistente = snapAplic.val();
   }
 
   await db.ref('pedidos_compra/'+key).set({
@@ -9872,11 +9884,12 @@ async function salvarPedidoCompra(){
     total: totalGeral, ts_criacao: compraAtual.ts_criacao || agoraTs(),
     criado_por: usuarioLogado.nome,
     historico_status: historicoExistente || null,
+    estoque_aplicado: estoqueAplicadoExistente || null,
     origem: compraAtual.origem || null
   });
 
-  // Se está sendo marcado como "recebido" agora (e não estava antes), dá entrada no estoque
-  if(novoStatus === 'recebido' && statusAnterior !== 'recebido'){
+  // Passou a segurar estoque agora (e não segurava antes): dá entrada.
+  if(statusSeguraEstoqueCompra(novoStatus) && !statusSeguraEstoqueCompra(statusAnterior)){
     await darEntradaEstoqueCompra(key, compraAtual, statusAnterior);
   }
 
@@ -9913,7 +9926,11 @@ async function darEntradaEstoqueCompra(compraId, compra, statusAnterior){
         + '\n\nOK = lançar de novo (só se a entrada anterior não tiver acontecido)'
         + '\nCancelar = não lançar (recomendado)');
       if(!ok){
-        await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado').set({ legado:true, ts:agoraTs() });
+        // Grava marcador item a item, não só uma flag: a flag sozinha calava o aviso mas
+        // deixava os itens livres, e o ciclo Recebido->Trânsito->Recebido lançava tudo de novo.
+        const marcadores = { legado:true, ts:agoraTs() };
+        compra.itens.forEach((it, i)=>{ marcadores[chaveItemCompra(it, i)] = { qtd:it.qtd, ts:agoraTs(), legado:true }; });
+        await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado').set(marcadores);
         toast('Entrada não repetida — compra marcada como já aplicada','success');
         return;
       }
@@ -9959,6 +9976,97 @@ async function darEntradaEstoqueCompra(compraId, compra, statusAnterior){
     toast('⚠ Insumo(s) não encontrados no cadastro, NÃO lançados: ' + naoLocalizados.join(' · ')
       + '. Cadastre o insumo e lance a entrada manualmente.', 'error');
   }
+}
+
+// Status em que a mercadoria já está contada no estoque. Entrar em um deles lança a
+// entrada; sair de todos eles estorna.
+function statusSeguraEstoqueCompra(status){
+  return status === 'recebido' || status === 'concluido';
+}
+
+// Devolve ao estoque tudo o que esta compra lançou e limpa os marcadores, para que um novo
+// recebimento entre limpo. Retorna false quando o usuário cancela — nesse caso o chamador
+// NÃO deve mudar o status.
+async function estornarEntradaEstoqueCompra(compraId, compra){
+  // Sempre do banco, nunca do cache: outra aba pode ter recebido/estornado no meio tempo.
+  const snapAplicado = await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado').once('value');
+  const aplicados = snapAplicado.val() || {};
+  const snapItens = await db.ref('pedidos_compra/'+compraId+'/itens').once('value');
+  const itens = snapItens.val() || compra.itens || [];
+
+  const marcadores = Object.keys(aplicados).filter(k => k !== 'legado' && k !== 'ts');
+
+  // Compras recebidas antes do controle automático não têm registro do que entrou.
+  // Estornar pelas quantidades atuais seria chute — a compra pode ter sido editada depois.
+  if(!marcadores.length){
+    const seguir = confirm('⚠ Esta compra de "' + (compra.fornecedor||'') + '" não tem registro item a item do que entrou no estoque.'
+      + '\n(recebimento anterior ao controle automático de entradas)'
+      + '\n\nO status pode mudar, mas NENHUM estoque será estornado automaticamente.'
+      + '\nSe a entrada realmente aconteceu, ajuste as quantidades manualmente.'
+      + '\n\nOK = mudar o status assim mesmo\nCancelar = não mexer em nada');
+    if(!seguir) return false;
+    await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado').remove();
+    return true;
+  }
+
+  // A quantidade do estorno vem do marcador (o que realmente entrou), não da lista atual.
+  // O item só é identificado se a linha da compra ainda for a mesma que gerou o marcador.
+  const paraEstornar = [], semCasamento = [];
+  for(const chave of marcadores){
+    const qtd = Number(aplicados[chave] && aplicados[chave].qtd) || 0;
+    const idx = parseInt(String(chave).split('_')[0], 10);
+    const item = itens[idx];
+    if(!item || qtd <= 0 || chaveItemCompra(item, idx) !== chave){ semCasamento.push(chave); continue; }
+    paraEstornar.push({ chave, item, qtd });
+  }
+
+  if(!paraEstornar.length && semCasamento.length){
+    const seguir = confirm('⚠ Os itens lançados no recebimento não batem mais com os itens desta compra'
+      + '\n(a compra foi editada depois de recebida).'
+      + '\n\nNENHUM estoque será estornado automaticamente — ajuste manualmente.'
+      + '\n\nOK = mudar o status assim mesmo\nCancelar = não mexer em nada');
+    if(!seguir) return false;
+    await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado').remove();
+    return true;
+  }
+
+  let msg = 'Devolver ao estoque (estornar) a entrada da compra de "' + (compra.fornecedor||'') + '"?\n\n'
+    + paraEstornar.map(x => '• ' + (x.item.codigo||'') + ' — ' + (x.item.nome||'') + '  →  -' + x.qtd).join('\n');
+  if(semCasamento.length){
+    msg += '\n\n⚠ ' + semCasamento.length + ' lançamento(s) não puderam ser identificados (compra editada após o recebimento) e NÃO serão estornados.';
+  }
+  msg += '\n\nOK = estornar e mudar o status\nCancelar = não mexer em nada';
+  if(!confirm(msg)) return false;
+
+  let estornados = 0;
+  const naoLocalizados = [];
+  const motivo = 'Estorno de recebimento — Compra ' + (compra.nf ? 'NF '+compra.nf+' ' : '') + '— ' + (compra.fornecedor||'');
+
+  for(const x of paraEstornar){
+    if(x.item.tipo === 'insumo'){
+      const insumo = INSUMOS_DB.find(i=>i.codigo===x.item.codigo);
+      const chaveIns = await resolverChaveInsumo(x.item.codigo, insumo && insumo.key);
+      if(!chaveIns){ naoLocalizados.push(x.item.codigo + ' — ' + (x.item.nome||'')); continue; }
+      await movimentarEstoque('insumo', chaveIns, { codigo:x.item.codigo, nome:x.item.nome,
+        delta:-x.qtd, motivo, origemTipo:'compra', origemId:compraId });
+    } else {
+      await movimentarEstoque('produto', x.item.codigo, { codigo:x.item.codigo, nome:x.item.nome,
+        delta:-x.qtd, motivo, origemTipo:'compra', origemId:compraId });
+    }
+    // Apaga o marcador logo apos devolver: se cair aqui, o estorno retoma de onde parou.
+    await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado/'+x.chave).remove();
+    estornados++;
+  }
+
+  // Zera o que sobrou (flags e nao identificados) para o proximo recebimento entrar limpo.
+  await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado').remove();
+
+  toast('✓ Estoque estornado: ' + estornados + ' item(ns) devolvido(s)','success');
+  if(naoLocalizados.length){
+    toast('⚠ Insumo(s) não encontrados no cadastro, NÃO estornados: ' + naoLocalizados.join(' · ')
+      + '. Ajuste a quantidade manualmente.', 'error');
+  }
+  return true;
 }
 
 const CATEGORIAS_ITEM = ['Embalagens', 'Itens de Montagem', 'Produto Acabado', 'Produto Montado'];
@@ -10384,11 +10492,20 @@ async function alterarStatusManualCompra(id, novoStatus){
   const c = COMPRAS_CACHE.find(x=>x.id===id);
   const statusAnterior = c?.status;
 
-  if(novoStatus === 'recebido' && statusAnterior !== 'recebido'){
-    if(!confirm(`Marcar como "Recebido"?\n\nIsso vai dar entrada automática no estoque de ${c.itens.length} item(ns).`)) return;
+  const tinhaEstoque = statusSeguraEstoqueCompra(statusAnterior);
+  const teraEstoque  = statusSeguraEstoqueCompra(novoStatus);
+
+  if(teraEstoque && !tinhaEstoque){
+    if(!confirm(`Marcar como "${statusInfoCompra(novoStatus).label}"?\n\nIsso vai dar entrada automática no estoque de ${c.itens.length} item(ns).`)) return;
     // Entrada primeiro: se cair no meio, o status não avança e o recebimento pode ser
     // refeito sem duplicar os itens que já entraram.
     await darEntradaEstoqueCompra(id, c, statusAnterior);
+    await db.ref('pedidos_compra/'+id+'/status').set(novoStatus);
+    await registrarHistoricoStatusCompra(id, statusAnterior, novoStatus);
+  } else if(tinhaEstoque && !teraEstoque){
+    // Estorno primeiro: se o usuário cancelar, o status não muda.
+    const okEstorno = await estornarEntradaEstoqueCompra(id, c);
+    if(!okEstorno) return;
     await db.ref('pedidos_compra/'+id+'/status').set(novoStatus);
     await registrarHistoricoStatusCompra(id, statusAnterior, novoStatus);
   } else {
@@ -10415,6 +10532,13 @@ async function avancarStatusCompra(id, novoStatus){
   if(!temPermissaoEditar('compras')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const c = COMPRAS_CACHE.find(x=>x.id===id);
   const statusAnterior = c?.status;
+
+  // Saiu de um status que segurava estoque: devolve antes de mudar.
+  if(statusSeguraEstoqueCompra(statusAnterior) && !statusSeguraEstoqueCompra(novoStatus)){
+    const okEstorno = await estornarEntradaEstoqueCompra(id, c);
+    if(!okEstorno) return;
+  }
+
   await db.ref('pedidos_compra/'+id+'/status').set(novoStatus);
   await registrarHistoricoStatusCompra(id, statusAnterior, novoStatus);
   fecharModal('modal-compra-detalhe');
