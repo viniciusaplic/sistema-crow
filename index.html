@@ -8177,13 +8177,13 @@ function imprimirEtiquetasProdutoEmLote(codigo, tipo, quantidade){
       @page { size: 50mm 30mm; margin: 0; }
       body { margin: 0; font-family: Arial, sans-serif; }
       .etq {
-        width: 44mm; height: 28mm; box-sizing: border-box; padding: 1mm;
+        width: 50mm; height: 28mm; box-sizing: border-box; padding: 1mm 2mm;
         display: flex; flex-direction: column; align-items: center; justify-content: center;
         overflow: hidden; page-break-after: always;
       }
       .etq:last-child { page-break-after: auto; }
-      .nome { width: 100%; font-size: 10px; font-weight: 700; line-height: 1.1; text-align: center; overflow: hidden; margin-bottom: 0.5mm; }
-      .linha-inferior { width: 100%; display: flex; align-items: center; flex-shrink: 0; }
+      .nome { width: 100%; font-size: 10px; font-weight: 700; line-height: 1.1; text-align: center; overflow: hidden; margin-bottom: 0.5mm; word-wrap: break-word; overflow-wrap: break-word; }
+      .linha-inferior { width: 100%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
       .barcode-wrap { width: 30mm; flex-shrink: 0; overflow: hidden; }
       .codigo-lateral { width: 10mm; flex-shrink: 0; font-size: 10px; font-weight: 900; white-space: nowrap; text-align: right; padding-left: 1mm; }
     </style>
