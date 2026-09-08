@@ -5594,6 +5594,15 @@ function campanhaCongeladaPara(p){
 // aplicado, o piso é o menor entre os dois: se o preço promocional está ACIMA do
 // mínimo do cadastro, o desconto geral ainda pode descer até o mínimo; se o
 // promocional já é o mais baixo, ele vira o piso e não desce mais.
+// Comparação de preço contra o piso SEMPRE em centavos.
+// O preço mínimo do cadastro é gravado já arredondado ao centavo (preço x 0,97,
+// por exemplo). Quando esse arredondamento sobe, o mínimo fica até meio centavo
+// ACIMA do preço com o desconto cheio, e a trava barrava um desconto que na
+// prática é o desconto liberado. Comparando os dois lados já arredondados ao
+// centavo — que é como o valor sai na nota — o 3% passa sem abrir margem real.
+function emCentavos(v){ return Math.round((Number(v)||0) * 100); }
+function abaixoDoPiso(preco, piso){ return emCentavos(preco) < emCentavos(piso); }
+
 function pisoItem(item){
   // Preço fechado: o promocional é o piso, não desce nem por desconto de item
   if(item && item.promo_ativa && item.promo_sem_desconto && Number(item.promo_preco) > 0)
@@ -6141,13 +6150,13 @@ function atualizarItemStaging(){
 
   // Mesma trava de sempre: vendedor comum não passa do preço mínimo, nem por preço nem por desconto
   if(!usuarioLogado?.admin && itemEmEstagio.preco_minimo > 0){
-    if(preco < itemEmEstagio.preco_minimo){
+    if(abaixoDoPiso(preco, itemEmEstagio.preco_minimo)){
       alert(`Preço mínimo: ${fmtMoeda(itemEmEstagio.preco_minimo)}`);
       preco = itemEmEstagio.preco_minimo;
       document.getElementById('staging-preco').value = preco.toFixed(2);
     }
     const precoComDesc = preco * (1-desc/100);
-    if(precoComDesc < itemEmEstagio.preco_minimo){
+    if(abaixoDoPiso(precoComDesc, itemEmEstagio.preco_minimo)){
       if(modo === 'R$'){
         const rsMax = Math.max(0, Math.round((preco - itemEmEstagio.preco_minimo)*100)/100);
         alert(`Desconto máximo permitido: ${fmtMoeda(rsMax)} por unidade (preço mínimo: ${fmtMoeda(itemEmEstagio.preco_minimo)})`);
@@ -6156,7 +6165,7 @@ function atualizarItemStaging(){
       } else {
         const descMax = Math.max(0, ((preco - itemEmEstagio.preco_minimo) / preco * 100));
         alert(`Desconto máximo permitido: ${descMax.toFixed(1)}% (preço mínimo: ${fmtMoeda(itemEmEstagio.preco_minimo)})`);
-        desc = descMax;
+        desc = Math.floor(descMax*10)/10;
         document.getElementById('staging-desc').value = desc.toFixed(1);
       }
     }
@@ -6317,7 +6326,7 @@ function atualizarPreco(idx,val){
   const v=parseFloat(val)||0;
   const item=pedidoAtual.itens[idx];
   const pisoPreco = pisoItem(item);
-  if(v<pisoPreco && !usuarioLogado?.admin){
+  if(abaixoDoPiso(v, pisoPreco) && !usuarioLogado?.admin){
     alert(`Preço mínimo: ${fmtMoeda(pisoPreco)}`);
     renderItens();
     return;
@@ -6383,7 +6392,7 @@ function validarPedidoPrecosMinimos(){
     const precoComDescItem = item.preco * (1-(item.desconto_item||0)/100);
     // Item de preço fechado fica fora do desconto geral, então o preço dele não muda
     const precoFinal = itemPrecoFechado(item) ? precoComDescItem : precoComDescItem * mult;
-    if(precoFinal < piso - 0.001){ // pequena tolerância pra arredondamento
+    if(abaixoDoPiso(precoFinal, piso)){ // comparação em centavos
       return { item, precoFinal, piso };
     }
   }
@@ -6408,7 +6417,7 @@ function atualizarTotais(){
     const dv = Math.max(0, parseFloat(dvEl?.value)||0);
     const subG = calcBasesDesconto().desc;
     if((dg > 0 || dv > 0) && subG > 0){
-      let multMin = 0, itemCritico = null;
+      let multMin = 0, itemCritico = null, pcdCritico = 0, pisoCritico = 0;
       for(const it of pedidoAtual.itens){
         if(itemPrecoFechado(it)) continue; // fora do desconto geral, não limita nada
         const pisoIt = pisoItem(it);
@@ -6416,17 +6425,17 @@ function atualizarTotais(){
         const pcd = it.preco * (1-(it.desconto_item||0)/100);
         if(pcd <= 0) continue;
         const m = pisoIt / pcd;
-        if(m > multMin){ multMin = m; itemCritico = it; }
+        if(m > multMin){ multMin = m; itemCritico = it; pcdCritico = pcd; pisoCritico = pisoIt; }
       }
       const multEfetivo = (1 - dg/100) - dv/subG;
-      if(itemCritico && multEfetivo < multMin - 0.0000001){
+      if(itemCritico && abaixoDoPiso(pcdCritico * multEfetivo, pisoCritico)){
         if(ultimoCampoDesc === 'valor'){
           const dvMax = Math.max(0, subG*((1 - dg/100) - multMin));
-          dvEl.value = dvMax.toFixed(2);
+          dvEl.value = (Math.floor(dvMax*100)/100).toFixed(2);
           alert(`Desconto em R$ máximo permitido: ${fmtMoeda(dvMax)}\n\n"${itemCritico.nome}" ficaria abaixo do preço mínimo de ${fmtMoeda(pisoItem(itemCritico))}.`);
         } else {
           const dgMax = Math.max(0, (1 - multMin - dv/subG) * 100);
-          dgEl.value = dgMax.toFixed(1);
+          dgEl.value = (Math.floor(dgMax*10)/10).toFixed(1);
           alert(`Desconto geral máximo permitido: ${dgMax.toFixed(1)}%\n\n"${itemCritico.nome}" ficaria abaixo do preço mínimo de ${fmtMoeda(pisoItem(itemCritico))}.`);
         }
       }
@@ -9854,25 +9863,13 @@ async function salvarPedidoCompra(){
     compraAtual.id = key;
   }
 
-  // Saindo de um status que já aplicou estoque -> devolve tudo ANTES de gravar o novo
-  // status. Se o usuário cancelar o estorno, nada é gravado.
-  if(compraAtual.id && statusSeguraEstoqueCompra(statusAnterior) && !statusSeguraEstoqueCompra(novoStatus)){
-    const okEstorno = await estornarEntradaEstoqueCompra(key, compraAtual);
-    if(!okEstorno){ compraAtual.status = statusAnterior; return; }
-  }
-
   const totalGeral = compraAtual.itens.reduce((s,i)=>s+i.custoTotalItem,0) - (compraAtual.desconto||0);
 
   // Se for edição, preserva o histórico de status já existente (não sobrescreve com undefined)
   let historicoExistente = null;
-  let estoqueAplicadoExistente = null;
   if(compraAtual.id){
     const snapAtual = await db.ref('pedidos_compra/'+key+'/historico_status').once('value');
     historicoExistente = snapAtual.val();
-    // set() substitui o nó inteiro: sem reler aqui, os marcadores de entrada já lançada
-    // seriam apagados a cada edição e o próximo recebimento duplicaria o estoque.
-    const snapAplic = await db.ref('pedidos_compra/'+key+'/estoque_aplicado').once('value');
-    estoqueAplicadoExistente = snapAplic.val();
   }
 
   await db.ref('pedidos_compra/'+key).set({
@@ -9884,12 +9881,11 @@ async function salvarPedidoCompra(){
     total: totalGeral, ts_criacao: compraAtual.ts_criacao || agoraTs(),
     criado_por: usuarioLogado.nome,
     historico_status: historicoExistente || null,
-    estoque_aplicado: estoqueAplicadoExistente || null,
     origem: compraAtual.origem || null
   });
 
-  // Passou a segurar estoque agora (e não segurava antes): dá entrada.
-  if(statusSeguraEstoqueCompra(novoStatus) && !statusSeguraEstoqueCompra(statusAnterior)){
+  // Se está sendo marcado como "recebido" agora (e não estava antes), dá entrada no estoque
+  if(novoStatus === 'recebido' && statusAnterior !== 'recebido'){
     await darEntradaEstoqueCompra(key, compraAtual, statusAnterior);
   }
 
@@ -9926,11 +9922,7 @@ async function darEntradaEstoqueCompra(compraId, compra, statusAnterior){
         + '\n\nOK = lançar de novo (só se a entrada anterior não tiver acontecido)'
         + '\nCancelar = não lançar (recomendado)');
       if(!ok){
-        // Grava marcador item a item, não só uma flag: a flag sozinha calava o aviso mas
-        // deixava os itens livres, e o ciclo Recebido->Trânsito->Recebido lançava tudo de novo.
-        const marcadores = { legado:true, ts:agoraTs() };
-        compra.itens.forEach((it, i)=>{ marcadores[chaveItemCompra(it, i)] = { qtd:it.qtd, ts:agoraTs(), legado:true }; });
-        await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado').set(marcadores);
+        await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado').set({ legado:true, ts:agoraTs() });
         toast('Entrada não repetida — compra marcada como já aplicada','success');
         return;
       }
@@ -9976,97 +9968,6 @@ async function darEntradaEstoqueCompra(compraId, compra, statusAnterior){
     toast('⚠ Insumo(s) não encontrados no cadastro, NÃO lançados: ' + naoLocalizados.join(' · ')
       + '. Cadastre o insumo e lance a entrada manualmente.', 'error');
   }
-}
-
-// Status em que a mercadoria já está contada no estoque. Entrar em um deles lança a
-// entrada; sair de todos eles estorna.
-function statusSeguraEstoqueCompra(status){
-  return status === 'recebido' || status === 'concluido';
-}
-
-// Devolve ao estoque tudo o que esta compra lançou e limpa os marcadores, para que um novo
-// recebimento entre limpo. Retorna false quando o usuário cancela — nesse caso o chamador
-// NÃO deve mudar o status.
-async function estornarEntradaEstoqueCompra(compraId, compra){
-  // Sempre do banco, nunca do cache: outra aba pode ter recebido/estornado no meio tempo.
-  const snapAplicado = await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado').once('value');
-  const aplicados = snapAplicado.val() || {};
-  const snapItens = await db.ref('pedidos_compra/'+compraId+'/itens').once('value');
-  const itens = snapItens.val() || compra.itens || [];
-
-  const marcadores = Object.keys(aplicados).filter(k => k !== 'legado' && k !== 'ts');
-
-  // Compras recebidas antes do controle automático não têm registro do que entrou.
-  // Estornar pelas quantidades atuais seria chute — a compra pode ter sido editada depois.
-  if(!marcadores.length){
-    const seguir = confirm('⚠ Esta compra de "' + (compra.fornecedor||'') + '" não tem registro item a item do que entrou no estoque.'
-      + '\n(recebimento anterior ao controle automático de entradas)'
-      + '\n\nO status pode mudar, mas NENHUM estoque será estornado automaticamente.'
-      + '\nSe a entrada realmente aconteceu, ajuste as quantidades manualmente.'
-      + '\n\nOK = mudar o status assim mesmo\nCancelar = não mexer em nada');
-    if(!seguir) return false;
-    await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado').remove();
-    return true;
-  }
-
-  // A quantidade do estorno vem do marcador (o que realmente entrou), não da lista atual.
-  // O item só é identificado se a linha da compra ainda for a mesma que gerou o marcador.
-  const paraEstornar = [], semCasamento = [];
-  for(const chave of marcadores){
-    const qtd = Number(aplicados[chave] && aplicados[chave].qtd) || 0;
-    const idx = parseInt(String(chave).split('_')[0], 10);
-    const item = itens[idx];
-    if(!item || qtd <= 0 || chaveItemCompra(item, idx) !== chave){ semCasamento.push(chave); continue; }
-    paraEstornar.push({ chave, item, qtd });
-  }
-
-  if(!paraEstornar.length && semCasamento.length){
-    const seguir = confirm('⚠ Os itens lançados no recebimento não batem mais com os itens desta compra'
-      + '\n(a compra foi editada depois de recebida).'
-      + '\n\nNENHUM estoque será estornado automaticamente — ajuste manualmente.'
-      + '\n\nOK = mudar o status assim mesmo\nCancelar = não mexer em nada');
-    if(!seguir) return false;
-    await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado').remove();
-    return true;
-  }
-
-  let msg = 'Devolver ao estoque (estornar) a entrada da compra de "' + (compra.fornecedor||'') + '"?\n\n'
-    + paraEstornar.map(x => '• ' + (x.item.codigo||'') + ' — ' + (x.item.nome||'') + '  →  -' + x.qtd).join('\n');
-  if(semCasamento.length){
-    msg += '\n\n⚠ ' + semCasamento.length + ' lançamento(s) não puderam ser identificados (compra editada após o recebimento) e NÃO serão estornados.';
-  }
-  msg += '\n\nOK = estornar e mudar o status\nCancelar = não mexer em nada';
-  if(!confirm(msg)) return false;
-
-  let estornados = 0;
-  const naoLocalizados = [];
-  const motivo = 'Estorno de recebimento — Compra ' + (compra.nf ? 'NF '+compra.nf+' ' : '') + '— ' + (compra.fornecedor||'');
-
-  for(const x of paraEstornar){
-    if(x.item.tipo === 'insumo'){
-      const insumo = INSUMOS_DB.find(i=>i.codigo===x.item.codigo);
-      const chaveIns = await resolverChaveInsumo(x.item.codigo, insumo && insumo.key);
-      if(!chaveIns){ naoLocalizados.push(x.item.codigo + ' — ' + (x.item.nome||'')); continue; }
-      await movimentarEstoque('insumo', chaveIns, { codigo:x.item.codigo, nome:x.item.nome,
-        delta:-x.qtd, motivo, origemTipo:'compra', origemId:compraId });
-    } else {
-      await movimentarEstoque('produto', x.item.codigo, { codigo:x.item.codigo, nome:x.item.nome,
-        delta:-x.qtd, motivo, origemTipo:'compra', origemId:compraId });
-    }
-    // Apaga o marcador logo apos devolver: se cair aqui, o estorno retoma de onde parou.
-    await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado/'+x.chave).remove();
-    estornados++;
-  }
-
-  // Zera o que sobrou (flags e nao identificados) para o proximo recebimento entrar limpo.
-  await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado').remove();
-
-  toast('✓ Estoque estornado: ' + estornados + ' item(ns) devolvido(s)','success');
-  if(naoLocalizados.length){
-    toast('⚠ Insumo(s) não encontrados no cadastro, NÃO estornados: ' + naoLocalizados.join(' · ')
-      + '. Ajuste a quantidade manualmente.', 'error');
-  }
-  return true;
 }
 
 const CATEGORIAS_ITEM = ['Embalagens', 'Itens de Montagem', 'Produto Acabado', 'Produto Montado'];
@@ -10492,20 +10393,11 @@ async function alterarStatusManualCompra(id, novoStatus){
   const c = COMPRAS_CACHE.find(x=>x.id===id);
   const statusAnterior = c?.status;
 
-  const tinhaEstoque = statusSeguraEstoqueCompra(statusAnterior);
-  const teraEstoque  = statusSeguraEstoqueCompra(novoStatus);
-
-  if(teraEstoque && !tinhaEstoque){
-    if(!confirm(`Marcar como "${statusInfoCompra(novoStatus).label}"?\n\nIsso vai dar entrada automática no estoque de ${c.itens.length} item(ns).`)) return;
+  if(novoStatus === 'recebido' && statusAnterior !== 'recebido'){
+    if(!confirm(`Marcar como "Recebido"?\n\nIsso vai dar entrada automática no estoque de ${c.itens.length} item(ns).`)) return;
     // Entrada primeiro: se cair no meio, o status não avança e o recebimento pode ser
     // refeito sem duplicar os itens que já entraram.
     await darEntradaEstoqueCompra(id, c, statusAnterior);
-    await db.ref('pedidos_compra/'+id+'/status').set(novoStatus);
-    await registrarHistoricoStatusCompra(id, statusAnterior, novoStatus);
-  } else if(tinhaEstoque && !teraEstoque){
-    // Estorno primeiro: se o usuário cancelar, o status não muda.
-    const okEstorno = await estornarEntradaEstoqueCompra(id, c);
-    if(!okEstorno) return;
     await db.ref('pedidos_compra/'+id+'/status').set(novoStatus);
     await registrarHistoricoStatusCompra(id, statusAnterior, novoStatus);
   } else {
@@ -10532,13 +10424,6 @@ async function avancarStatusCompra(id, novoStatus){
   if(!temPermissaoEditar('compras')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const c = COMPRAS_CACHE.find(x=>x.id===id);
   const statusAnterior = c?.status;
-
-  // Saiu de um status que segurava estoque: devolve antes de mudar.
-  if(statusSeguraEstoqueCompra(statusAnterior) && !statusSeguraEstoqueCompra(novoStatus)){
-    const okEstorno = await estornarEntradaEstoqueCompra(id, c);
-    if(!okEstorno) return;
-  }
-
   await db.ref('pedidos_compra/'+id+'/status').set(novoStatus);
   await registrarHistoricoStatusCompra(id, statusAnterior, novoStatus);
   fecharModal('modal-compra-detalhe');
@@ -11080,14 +10965,8 @@ function renderAnaliseGCli(){
   const a = analiseGCli; if(!a) return;
   const g = a.garantia;
   const ro = a.somenteLeitura;
-  const optsForn = (sel, vazio) => `<option value="">${vazio}</option>` +
-    FORNECEDORES_DB.map(f=>`<option value="${esc(f.nome)}"${f.nome===sel?' selected':''}>${esc(f.nome)}</option>`).join('');
-
-  // Select da peca trocada: comeca em branco, obriga escolha
-  const optsFornPeca = (sel) =>
-    `<option value="" disabled${sel?'':' selected'}>— escolha o fornecedor —</option>` +
-    `<option value="__nao"${sel==='__nao'?' selected':''}>Não enviar para a caixa</option>` +
-    FORNECEDORES_DB.map(f=>`<option value="${esc(f.nome)}"${f.nome===sel?' selected':''}>${esc(f.nome)}</option>`).join('');
+  const optsForn = '<option value="">Selecione o fornecedor</option>' +
+    FORNECEDORES_DB.map(f=>`<option value="${esc(f.nome)}">${esc(f.nome)}</option>`).join('');
 
   document.getElementById('analise-gcli-conteudo').innerHTML = `
     <div style="background:var(--bg);border-radius:8px;padding:12px 14px;margin-bottom:14px">
@@ -11127,16 +11006,11 @@ function renderAnaliseGCli(){
           <div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:10px">
             <div style="font-size:12px;font-weight:700;margin-bottom:6px">Peças trocadas</div>
             ${it.insumos.map((ins,j)=>`
-              <div style="display:flex;gap:8px;align-items:center;font-size:13px;padding:5px 0;border-bottom:1px dashed var(--border);flex-wrap:wrap">
-                <div style="flex:1;min-width:150px"><strong>${esc(ins.codigo)}</strong> ${esc(ins.nome)}</div>
-                <div style="width:46px;text-align:center">${ins.qtd} un</div>
-                <select ${ro?'disabled':''} onchange="setInsumoAnaliseCampo(${idx},${j},'fornecedor',this.value)"
-                  style="min-width:180px;padding:4px;border-radius:6px;font-size:12px;border:${ins.fornecedor?'1px solid var(--border)':'2px solid #dc2626'};background:${ins.fornecedor?'#fff':'#fef2f2'}">
-                  ${optsFornPeca(ins.fornecedor||'')}
-                </select>
+              <div style="display:flex;gap:8px;align-items:center;font-size:13px;padding:3px 0">
+                <div style="flex:1"><strong>${esc(ins.codigo)}</strong> ${esc(ins.nome)}</div>
+                <div>${ins.qtd} un</div>
                 ${ro?'':`<button class="btn btn-outline btn-sm" onclick="removerInsumoAnalise(${idx},${j})">×</button>`}
               </div>`).join('') || '<div style="font-size:12px;color:var(--muted)">Nenhuma peça lançada ainda.</div>'}
-            <div style="font-size:11px;color:var(--muted);margin-top:6px">Cada peça vai para a caixa do seu próprio fornecedor. O campo é obrigatório: escolha o fornecedor ou marque "Não enviar para a caixa".</div>
             ${ro?'':`
             <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
               <input type="text" id="analise-ins-${idx}" list="analise-insumos-list" placeholder="Código do insumo"
@@ -11153,17 +11027,15 @@ function renderAnaliseGCli(){
               onchange="setAnaliseCampo(${idx},'baixa_estoque',this.checked)">
             Dar baixa no estoque da peça nova que saiu
           </label>
-        ` : ''}
-        ${it.resolucao==='troca_produto' ? `
           <label style="display:block;font-size:13px;margin-bottom:5px">
             <input type="checkbox" ${it.gerar_garantia_fornecedor?'checked':''} ${ro?'disabled':''}
               onchange="setAnaliseCampo(${idx},'gerar_garantia_fornecedor',this.checked)">
-            Mandar o produto defeituoso para a caixa do fornecedor
+            Mandar a peça defeituosa para a caixa do fornecedor
           </label>
           ${it.gerar_garantia_fornecedor ? `
             <select ${ro?'disabled':''} onchange="setAnaliseCampo(${idx},'fornecedor',this.value)"
               style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:6px">
-              ${optsForn(it.fornecedor||'', 'Selecione o fornecedor')}
+              ${optsForn.replace(`value="${esc(it.fornecedor||'')}"`, `value="${esc(it.fornecedor||'')}" selected`)}
             </select>` : ''}
         ` : ''}
 
@@ -11191,13 +11063,6 @@ function setAnaliseCampo(idx, campo, valor){
   if(campo === 'resolucao' || campo === 'gerar_garantia_fornecedor') renderAnaliseGCli();
 }
 
-// O fornecedor mora na PECA, nao no produto: um produto e montado com pecas de
-// fornecedores diferentes, e numa mesma garantia cada peca pode voltar para um lugar.
-function setInsumoAnaliseCampo(idx, j, campo, valor){
-  if(!analiseGCli) return;
-  analiseGCli.itens[idx].insumos[j][campo] = valor;
-}
-
 function adicionarInsumoAnalise(idx){
   const cod = (document.getElementById('analise-ins-'+idx)?.value||'').trim();
   const qtd = Number(document.getElementById('analise-insqtd-'+idx)?.value) || 0;
@@ -11206,7 +11071,7 @@ function adicionarInsumoAnalise(idx){
   const ins = INSUMOS_DB.find(x=>x.codigo === cod) || PRODUTOS_DB.find(x=>x.codigo === cod);
   if(!ins){ toast(`"${cod}" não encontrado no cadastro`,'error'); return; }
   const tipo = INSUMOS_DB.find(x=>x.codigo === cod) ? 'insumo' : 'produto';
-  analiseGCli.itens[idx].insumos.push({ codigo: ins.codigo, nome: ins.nome, qtd, tipo, fornecedor: '' });
+  analiseGCli.itens[idx].insumos.push({ codigo: ins.codigo, nome: ins.nome, qtd, tipo });
   renderAnaliseGCli();
 }
 
@@ -11226,19 +11091,8 @@ async function salvarAnaliseGCli(finalizar){
     if(semResolucao.length){ toast('Informe o que foi feito em todos os itens antes de finalizar','error'); return; }
     const semInsumo = a.itens.filter(i=>i.resolucao==='troca_insumo' && !i.insumos.length);
     if(semInsumo.length){ toast('Lance ao menos uma peça trocada nos itens marcados como troca de peça','error'); return; }
-    const semForn = a.itens.filter(i=>i.resolucao==='troca_produto' && i.gerar_garantia_fornecedor && !i.fornecedor);
-    if(semForn.length){ toast('Escolha o fornecedor dos produtos que vão para a caixa','error'); return; }
-    // Peca trocada sem escolha de fornecedor trava a finalizacao, com o codigo na mensagem
-    const pecasSemForn = [];
-    a.itens.forEach(i=>{
-      if(i.resolucao !== 'troca_insumo') return;
-      i.insumos.forEach(pc=>{ if(!pc.fornecedor) pecasSemForn.push(pc.codigo); });
-    });
-    if(pecasSemForn.length){
-      toast('Falta escolher o fornecedor da(s) peça(s): ' + pecasSemForn.join(', ')
-        + '. Se a peça não volta para fornecedor, marque "Não enviar para a caixa".', 'error');
-      return;
-    }
+    const semForn = a.itens.filter(i=>i.gerar_garantia_fornecedor && (i.resolucao==='troca_insumo'||i.resolucao==='troca_produto') && !i.fornecedor);
+    if(semForn.length){ toast('Escolha o fornecedor dos itens que vão para a caixa','error'); return; }
     if(!confirm('Finalizar a análise e liberar esta garantia para envio?')) return;
   }
 
@@ -11297,16 +11151,9 @@ async function salvarAnaliseGCli(finalizar){
           }
         }
 
-        // Pecas DEFEITUOSAS que vao para a caixa. Na troca de pecas, cada uma leva o
-        // fornecedor escolhido na propria linha; peca sem fornecedor nao gera registro.
-        // Na troca do produto inteiro, vale o fornecedor do item.
-        const paraCaixa = it.resolucao === 'troca_produto'
-          ? (it.gerar_garantia_fornecedor && it.fornecedor
-              ? pecas.map(pc=>({ ...pc, fornecedor: it.fornecedor })) : [])
-          : pecas.filter(pc=>pc.fornecedor && pc.fornecedor !== '__nao');
-
-        if(paraCaixa.length){
-          for(const pc of paraCaixa){
+        // Pecas DEFEITUOSAS que vao para a caixa do fornecedor
+        if(it.gerar_garantia_fornecedor && it.fornecedor){
+          for(const pc of pecas){
             if(!pc.qtd) continue;
             const cad = pc.tipo === 'insumo'
               ? INSUMOS_DB.find(x=>x.codigo===pc.codigo)
@@ -11317,7 +11164,7 @@ async function salvarAnaliseGCli(finalizar){
               tipo_item: pc.tipo,
               baixa_estoque: false, // a peca defeituosa voltou do cliente, nao saiu do estoque
               custo_unit: Number(cad?.preco_custo) || 0,
-              fornecedor: pc.fornecedor,
+              fornecedor: it.fornecedor,
               qtd: pc.qtd,
               motivo: `Defeito em garantia de cliente #${a.garantia.numero}`,
               obs: it.obs || '',
