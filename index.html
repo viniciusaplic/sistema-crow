@@ -5256,7 +5256,7 @@ async function carregarCondicoesPagamento(){
   try {
     const snap = await db.ref('configuracoes/condicoes_pagamento').once('value');
     const salvas = snap.val();
-    if(Array.isArray(salvas) && salvas.length) CONDICOES = ordenarCondicoes(salvas);
+    if(Array.isArray(salvas) && salvas.length) CONDICOES = salvas;
   } catch(e){ /* mantém a lista padrão se der erro */ }
   condicoesCarregadas = true;
   renderConfigCondicoes();
@@ -5283,7 +5283,7 @@ async function adicionarCondicaoPagamento(){
   if(!valido){ toast('Formato inválido. Use AVISTA, "N DIAS" ou números separados por "/" (ex: 30/45/60)','error'); return; }
   if(CONDICOES.includes(valor)){ toast('Esse prazo já existe','error'); return; }
 
-  CONDICOES = ordenarCondicoes(CONDICOES.concat([valor]));
+  CONDICOES.push(valor);
   await db.ref('configuracoes/condicoes_pagamento').set(CONDICOES);
   input.value = '';
   renderConfigCondicoes();
@@ -5594,15 +5594,6 @@ function campanhaCongeladaPara(p){
 // aplicado, o piso é o menor entre os dois: se o preço promocional está ACIMA do
 // mínimo do cadastro, o desconto geral ainda pode descer até o mínimo; se o
 // promocional já é o mais baixo, ele vira o piso e não desce mais.
-// Comparação de preço contra o piso SEMPRE em centavos.
-// O preço mínimo do cadastro é gravado já arredondado ao centavo (preço x 0,97,
-// por exemplo). Quando esse arredondamento sobe, o mínimo fica até meio centavo
-// ACIMA do preço com o desconto cheio, e a trava barrava um desconto que na
-// prática é o desconto liberado. Comparando os dois lados já arredondados ao
-// centavo — que é como o valor sai na nota — o 3% passa sem abrir margem real.
-function emCentavos(v){ return Math.round((Number(v)||0) * 100); }
-function abaixoDoPiso(preco, piso){ return emCentavos(preco) < emCentavos(piso); }
-
 function pisoItem(item){
   // Preço fechado: o promocional é o piso, não desce nem por desconto de item
   if(item && item.promo_ativa && item.promo_sem_desconto && Number(item.promo_preco) > 0)
@@ -6150,13 +6141,13 @@ function atualizarItemStaging(){
 
   // Mesma trava de sempre: vendedor comum não passa do preço mínimo, nem por preço nem por desconto
   if(!usuarioLogado?.admin && itemEmEstagio.preco_minimo > 0){
-    if(abaixoDoPiso(preco, itemEmEstagio.preco_minimo)){
+    if(preco < itemEmEstagio.preco_minimo){
       alert(`Preço mínimo: ${fmtMoeda(itemEmEstagio.preco_minimo)}`);
       preco = itemEmEstagio.preco_minimo;
       document.getElementById('staging-preco').value = preco.toFixed(2);
     }
     const precoComDesc = preco * (1-desc/100);
-    if(abaixoDoPiso(precoComDesc, itemEmEstagio.preco_minimo)){
+    if(precoComDesc < itemEmEstagio.preco_minimo){
       if(modo === 'R$'){
         const rsMax = Math.max(0, Math.round((preco - itemEmEstagio.preco_minimo)*100)/100);
         alert(`Desconto máximo permitido: ${fmtMoeda(rsMax)} por unidade (preço mínimo: ${fmtMoeda(itemEmEstagio.preco_minimo)})`);
@@ -6165,7 +6156,7 @@ function atualizarItemStaging(){
       } else {
         const descMax = Math.max(0, ((preco - itemEmEstagio.preco_minimo) / preco * 100));
         alert(`Desconto máximo permitido: ${descMax.toFixed(1)}% (preço mínimo: ${fmtMoeda(itemEmEstagio.preco_minimo)})`);
-        desc = Math.floor(descMax*10)/10;
+        desc = descMax;
         document.getElementById('staging-desc').value = desc.toFixed(1);
       }
     }
@@ -6326,7 +6317,7 @@ function atualizarPreco(idx,val){
   const v=parseFloat(val)||0;
   const item=pedidoAtual.itens[idx];
   const pisoPreco = pisoItem(item);
-  if(abaixoDoPiso(v, pisoPreco) && !usuarioLogado?.admin){
+  if(v<pisoPreco && !usuarioLogado?.admin){
     alert(`Preço mínimo: ${fmtMoeda(pisoPreco)}`);
     renderItens();
     return;
@@ -6392,7 +6383,7 @@ function validarPedidoPrecosMinimos(){
     const precoComDescItem = item.preco * (1-(item.desconto_item||0)/100);
     // Item de preço fechado fica fora do desconto geral, então o preço dele não muda
     const precoFinal = itemPrecoFechado(item) ? precoComDescItem : precoComDescItem * mult;
-    if(abaixoDoPiso(precoFinal, piso)){ // comparação em centavos
+    if(precoFinal < piso - 0.001){ // pequena tolerância pra arredondamento
       return { item, precoFinal, piso };
     }
   }
@@ -6417,7 +6408,7 @@ function atualizarTotais(){
     const dv = Math.max(0, parseFloat(dvEl?.value)||0);
     const subG = calcBasesDesconto().desc;
     if((dg > 0 || dv > 0) && subG > 0){
-      let multMin = 0, itemCritico = null, pcdCritico = 0, pisoCritico = 0;
+      let multMin = 0, itemCritico = null;
       for(const it of pedidoAtual.itens){
         if(itemPrecoFechado(it)) continue; // fora do desconto geral, não limita nada
         const pisoIt = pisoItem(it);
@@ -6425,17 +6416,17 @@ function atualizarTotais(){
         const pcd = it.preco * (1-(it.desconto_item||0)/100);
         if(pcd <= 0) continue;
         const m = pisoIt / pcd;
-        if(m > multMin){ multMin = m; itemCritico = it; pcdCritico = pcd; pisoCritico = pisoIt; }
+        if(m > multMin){ multMin = m; itemCritico = it; }
       }
       const multEfetivo = (1 - dg/100) - dv/subG;
-      if(itemCritico && abaixoDoPiso(pcdCritico * multEfetivo, pisoCritico)){
+      if(itemCritico && multEfetivo < multMin - 0.0000001){
         if(ultimoCampoDesc === 'valor'){
           const dvMax = Math.max(0, subG*((1 - dg/100) - multMin));
-          dvEl.value = (Math.floor(dvMax*100)/100).toFixed(2);
+          dvEl.value = dvMax.toFixed(2);
           alert(`Desconto em R$ máximo permitido: ${fmtMoeda(dvMax)}\n\n"${itemCritico.nome}" ficaria abaixo do preço mínimo de ${fmtMoeda(pisoItem(itemCritico))}.`);
         } else {
           const dgMax = Math.max(0, (1 - multMin - dv/subG) * 100);
-          dgEl.value = (Math.floor(dgMax*10)/10).toFixed(1);
+          dgEl.value = dgMax.toFixed(1);
           alert(`Desconto geral máximo permitido: ${dgMax.toFixed(1)}%\n\n"${itemCritico.nome}" ficaria abaixo do preço mínimo de ${fmtMoeda(pisoItem(itemCritico))}.`);
         }
       }
@@ -6466,30 +6457,9 @@ function atualizarTotais(){
 }
 
 let CONDICOES = ['AVISTA','5 DIAS','7 DIAS','10 DIAS','15 DIAS','30 DIAS',
-  '30/45','30/60','30/45/60','30/45/60/75','30/60/90','30/45/60/75/90',
-  '30/45/60/75/90/105','30/60/90/120'];
+  '30/45','30/45/60','30/45/60/75','30/45/60/75/90','30/45/60/75/90/105',
+  '30/60','30/60/90','30/60/90/120'];
 let condicoesCarregadas = false;
-
-// Ordena os prazos de pagamento do menor para o maior. Criterio: ultimo
-// vencimento (o prazo total), depois numero de parcelas, depois a primeira
-// parcela. Assim 30 DIAS < 30/45 < 30/60 < 30/45/60 < 30/60/90 < 30/60/90/120.
-// CONDICOES fica sempre ordenado (inclusive o que vai pro Firebase), porque o
-// remover usa o indice da lista renderizada — render e array precisam bater.
-function chaveCondicao(c){
-  const t = String(c||'').trim().toUpperCase();
-  if(t === 'AVISTA') return [0,0,0];
-  const m = t.match(/^(\d+)\s*DIAS?$/);
-  if(m) return [Number(m[1]), 1, Number(m[1])];
-  const nums = t.split('/').map(n=>Number(n)).filter(n=>!isNaN(n));
-  if(nums.length) return [Math.max.apply(null,nums), nums.length, nums[0]];
-  return [999999, 99, 999999]; // formato desconhecido vai pro fim da lista
-}
-function ordenarCondicoes(lista){
-  return (lista||[]).slice().sort((a,b)=>{
-    const ka = chaveCondicao(a), kb = chaveCondicao(b);
-    return (ka[0]-kb[0]) || (ka[1]-kb[1]) || (ka[2]-kb[2]) || String(a).localeCompare(String(b));
-  });
-}
 
 async function atualizarCondicoes(){
   if(!condicoesCarregadas) await carregarCondicoesPagamento();
@@ -7266,7 +7236,7 @@ async function abrirModalInsumo(key=null){
     document.getElementById('modal-insumo-titulo').textContent = 'Editar Insumo';
     document.getElementById('insumo-key').value = key;
     document.getElementById('insumo-codigo').value = i.codigo||'';
-    document.getElementById('insumo-codigo').disabled = false; // codigo editavel (renomeia com migracao de receitas)
+    document.getElementById('insumo-codigo').disabled = true;
     document.getElementById('insumo-nome').value = i.nome||'';
     document.getElementById('insumo-unidade').value = i.unidade||'UN';
     document.getElementById('insumo-estoque').value = i.estoque_atual||0;
@@ -7302,28 +7272,7 @@ async function salvarInsumo(){
   if(!codigo || !nome){ toast('Código e descrição são obrigatórios','error'); return; }
 
   const keyExistente = document.getElementById('insumo-key').value;
-  const insumoAtual = keyExistente ? INSUMOS_DB.find(i=>i.key===keyExistente) : null;
-  const codigoAntigo = (insumoAtual?.codigo||'').toUpperCase();
-
-  // Key ocupada por outro item (acontece quando algum insumo já foi renomeado e o
-  // node antigo ins_<codigo> continua vivo): gravar por cima apagaria o outro cadastro.
-  let key = keyExistente;
-  if(!key){
-    key = 'ins_' + codigo;
-    const nodeOcupado = await db.ref('insumos/'+key).once('value');
-    if(nodeOcupado.exists()) key = 'ins_' + codigo + '_' + Date.now();
-  }
-
-  // Renomeando um insumo existente: mesmas checagens de conflito da criação
-  const renomeou = !!keyExistente && codigoAntigo && codigo !== codigoAntigo;
-  if(renomeou){
-    const erroCodigo = validarNovoCodigoInsumo(codigoAntigo, codigo, key);
-    if(erroCodigo){ toast('\u274c ' + erroCodigo, 'error'); return; }
-    if(!confirm(`Alterar o c\u00f3digo do insumo de "${codigoAntigo}" para "${codigo}"?\n\n`
-      + `\u2713 A composi\u00e7\u00e3o (receitas) dos produtos ser\u00e1 atualizada automaticamente.\n`
-      + `\u2713 O saldo em estoque \u00e9 preservado.\n`
-      + `\u2022 Movimenta\u00e7\u00f5es e compras j\u00e1 registradas mant\u00eam o c\u00f3digo antigo no hist\u00f3rico.`)) return;
-  }
+  const key = keyExistente || 'ins_' + codigo;
 
   // Bloquear duplicidade: só ao CRIAR (sem key existente), verificar se o código já está em uso
   if(!keyExistente){
@@ -7363,15 +7312,11 @@ async function salvarInsumo(){
     }
   }
   await db.ref('insumos/'+key).set(dados);
-  let receitasTocadas = 0;
-  if(renomeou) receitasTocadas = await migrarCodigoInsumoNasReceitas(codigoAntigo, codigo);
   fecharModal('modal-insumo');
   INSUMOS_DB = []; // força recarregar
   await carregarInsumosFirebase();
   renderProdutos();
-  toast(renomeou
-    ? `✓ Código alterado de "${codigoAntigo}" para "${codigo}"${receitasTocadas?` — ${receitasTocadas} receita(s) atualizada(s)`:''}`
-    : `✓ Insumo ${codigo} salvo${dados.inativo?' (inativo)':''}!`,'success');
+  toast(`✓ Insumo ${codigo} salvo${dados.inativo?' (inativo)':''}!`,'success');
 }
 
 async function removerInsumo(key){
@@ -8223,13 +8168,13 @@ function imprimirEtiquetasProdutoEmLote(codigo, tipo, quantidade){
       @page { size: 50mm 30mm; margin: 0; }
       body { margin: 0; font-family: Arial, sans-serif; }
       .etq {
-        width: 50mm; height: 28mm; box-sizing: border-box; padding: 1mm 2mm;
+        width: 44mm; height: 28mm; box-sizing: border-box; padding: 1mm;
         display: flex; flex-direction: column; align-items: center; justify-content: center;
         overflow: hidden; page-break-after: always;
       }
       .etq:last-child { page-break-after: auto; }
-      .nome { width: 100%; font-size: 10px; font-weight: 700; line-height: 1.1; text-align: center; overflow: hidden; margin-bottom: 0.5mm; word-wrap: break-word; overflow-wrap: break-word; }
-      .linha-inferior { width: 100%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+      .nome { width: 100%; font-size: 10px; font-weight: 700; line-height: 1.1; text-align: center; overflow: hidden; margin-bottom: 0.5mm; }
+      .linha-inferior { width: 100%; display: flex; align-items: center; flex-shrink: 0; }
       .barcode-wrap { width: 30mm; flex-shrink: 0; overflow: hidden; }
       .codigo-lateral { width: 10mm; flex-shrink: 0; font-size: 10px; font-weight: 900; white-space: nowrap; text-align: right; padding-left: 1mm; }
     </style>
@@ -8680,8 +8625,7 @@ async function renderMovimentosEstoque(){
   let movimentos = Object.keys(dados).map(key=>({ key, ...dados[key] }));
 
   movimentos = movimentos.filter(m=>{
-    // Codigo EXATO: digitar "145" nao pode trazer "MO145" / "1450" junto.
-    if(fCodigo && (m.codigo||'').toString().trim().toLowerCase() !== fCodigo) return false;
+    if(fCodigo && !m.codigo.toLowerCase().includes(fCodigo)) return false;
     if(fTipo && m.tipo !== fTipo) return false;
     if(fDataIni && m.ts < new Date(fDataIni).getTime()) return false;
     if(fDataFim && m.ts > new Date(fDataFim).getTime()+86399999) return false; // até o fim do dia
@@ -8720,9 +8664,20 @@ async function renderMovimentosEstoque(){
     } else if(insumoExato){
       saldoAtualHtml = Number(insumoExato.estoque_atual||0).toLocaleString('pt-BR') + ' <span class="badge" style="background:#ede9fe;color:#7c3aed;font-size:10px">INSUMO</span>';
     } else {
-      // Sem cadastro com esse codigo exato. Nao somar itens parecidos por substring:
-      // a lista abaixo tambem so mostra o codigo exato, os dois tem que bater.
-      saldoAtualHtml = '<span style="color:var(--muted);font-size:16px">item não encontrado</span>';
+      // Sem match exato — cai pro comportamento antigo (busca parcial), só em produtos vendáveis
+      const produtosFiltrados = PRODUTOS_DB.filter(p=>(p.codigo||'').toLowerCase().includes(fCodigo));
+      const insumosFiltrados = INSUMOS_DB.filter(i=>(i.codigo||'').toLowerCase().includes(fCodigo));
+      const totalItens = produtosFiltrados.length + insumosFiltrados.length;
+      if(totalItens===1){
+        const item = produtosFiltrados[0] || insumosFiltrados[0];
+        const valor = produtosFiltrados[0] ? item.quantidade : item.estoque_atual;
+        saldoAtualHtml = Number(valor||0).toLocaleString('pt-BR');
+      } else if(totalItens>1){
+        const soma = produtosFiltrados.reduce((s,p)=>s+Number(p.quantidade||0),0) + insumosFiltrados.reduce((s,i)=>s+Number(i.estoque_atual||0),0);
+        saldoAtualHtml = `${soma.toLocaleString('pt-BR')} <span style="font-size:11px;color:var(--muted)">(${totalItens} itens)</span>`;
+      } else {
+        saldoAtualHtml = '<span style="color:var(--muted);font-size:16px">item não encontrado</span>';
+      }
     }
   }
 
@@ -10756,6 +10711,7 @@ async function renderGarantiasClientes(forcar){
           <span class="badge" style="background:${si.bg};color:${si.cor}">${si.label}</span>
           ${podeAnalisar ? `<button class="btn btn-primary btn-sm" onclick="abrirAnaliseGarantiaCliente('${g.id}')">🔧 Analisar</button>` : ''}
           ${g.analise ? `<button class="btn btn-outline btn-sm" onclick="abrirAnaliseGarantiaCliente('${g.id}')">Ver análise</button>` : ''}
+          ${g.status==='aguardando_envio' && podeMarcarEnviada() ? `<button class="btn btn-primary btn-sm" onclick="marcarGarantiaEnviadaManual('${g.id}')">📦 Já foi enviada</button>` : ''}
           ${podeCancelar ? `<button class="btn btn-outline btn-sm" onclick="cancelarGarantiaCliente('${g.id}')">Cancelar</button>` : ''}
         </div>
       </div>
@@ -10764,7 +10720,9 @@ async function renderGarantiasClientes(forcar){
       </div>
       ${g.obs ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">📝 ${esc(g.obs)}</div>` : ''}
       ${g.status==='aguardando_envio' ? `<div style="margin-top:8px;background:#dbeafe;color:#1e40af;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:600">✓ Liberada pela produção — enviar junto com o próximo pedido deste cliente</div>` : ''}
-      ${g.status==='finalizada' && g.pedido_numero ? `<div style="margin-top:8px;font-size:12px;color:var(--muted)">Enviada com o pedido #${g.pedido_numero} em ${g.finalizada_em?new Date(g.finalizada_em).toLocaleDateString('pt-BR'):'—'}</div>` : ''}
+      ${g.status==='finalizada' ? `<div style="margin-top:8px;font-size:12px;color:var(--muted)">
+        Enviada${g.pedido_numero?` com o pedido #${g.pedido_numero}`:''} em ${g.finalizada_em?new Date(g.finalizada_em).toLocaleDateString('pt-BR'):'—'}
+        por ${esc(g.finalizada_por||'—')}${g.finalizada_manual?' · baixa manual':''}</div>` : ''}
     </div>`;
   }).join('');
 
@@ -10944,6 +10902,50 @@ async function salvarNovaGarantiaCliente(){
   }
 }
 
+// Quem pode dar a baixa manual: expedicao (que embalou), producao e admin.
+function podeMarcarEnviada(){
+  if(!usuarioLogado) return false;
+  if(usuarioLogado.admin) return true;
+  if(ehExpedicao()) return true;
+  return podeAnalisarGarantiaCliente();
+}
+
+// A pergunta da bipagem e o caminho normal, mas ela passa UMA vez. Se a pessoa respondeu
+// "nao", atualizou a pagina antes de responder, ou o pedido saiu por outro caminho, a
+// garantia ficava presa em "Aguardando Envio" para sempre — sem nenhuma saida, porque
+// cancelar registraria como cancelada uma garantia que na verdade foi entregue.
+async function marcarGarantiaEnviadaManual(id){
+  if(!podeMarcarEnviada()){ toast('Acesso restrito — sem permissão para dar baixa na garantia','error'); return; }
+  const g = GCLI_CACHE.find(x=>x.id===id); if(!g) return;
+  if(g.status !== 'aguardando_envio'){ toast('Esta garantia não está aguardando envio','error'); return; }
+
+  const num = prompt(`Garantia #${g.numero} de ${g.cliente_nome}\n\nCom qual pedido ela foi enviada?\n(deixe em branco se não souber o número)`, '');
+  if(num === null) return;   // cancelou o prompt
+  const pedidoNum = num.trim() ? Number(num.trim()) : null;
+  if(num.trim() && !pedidoNum){ toast('Número de pedido inválido','error'); return; }
+  if(!confirm(`Confirmar que a garantia #${g.numero} já foi enviada ao cliente?`)) return;
+
+  try {
+    // Mesma trava da confirmacao pela bipagem: so a primeira execucao finaliza
+    const res = await db.ref('garantias_clientes/'+id+'/status').transaction(atual => {
+      if(atual !== 'aguardando_envio') return;
+      return 'finalizada';
+    });
+    if(!res.committed){ toast('Esta garantia já foi finalizada — nada foi alterado','error'); await renderGarantiasClientes(true); return; }
+    await db.ref('garantias_clientes/'+id).update({
+      finalizada_em: agoraTs(),
+      finalizada_por: usuarioLogado?.nome || '',
+      finalizada_manual: true,
+      pedido_numero: pedidoNum
+    });
+    invalidarCacheNo('garantias_clientes');
+    toast(`✓ Garantia #${g.numero} marcada como enviada — o alerta do cliente foi removido`,'success');
+    await renderGarantiasClientes(true);
+  } catch(e){
+    toast('Erro ao dar baixa na garantia: ' + (e?.message||e), 'error');
+  }
+}
+
 async function cancelarGarantiaCliente(id){
   // Cancelar mexe em garantia ja aberta — e da producao/admin, nao do vendedor
   if(!podeAnalisarGarantiaCliente()){ toast('Acesso restrito — só produção ou administrador cancela garantia','error'); return; }
@@ -11001,8 +11003,14 @@ function renderAnaliseGCli(){
   const a = analiseGCli; if(!a) return;
   const g = a.garantia;
   const ro = a.somenteLeitura;
-  const optsForn = '<option value="">Selecione o fornecedor</option>' +
-    FORNECEDORES_DB.map(f=>`<option value="${esc(f.nome)}">${esc(f.nome)}</option>`).join('');
+  const optsForn = (sel, vazio) => `<option value="">${vazio}</option>` +
+    FORNECEDORES_DB.map(f=>`<option value="${esc(f.nome)}"${f.nome===sel?' selected':''}>${esc(f.nome)}</option>`).join('');
+
+  // Select da peca trocada: comeca em branco, obriga escolha
+  const optsFornPeca = (sel) =>
+    `<option value="" disabled${sel?'':' selected'}>— escolha o fornecedor —</option>` +
+    `<option value="__nao"${sel==='__nao'?' selected':''}>Não enviar para a caixa</option>` +
+    FORNECEDORES_DB.map(f=>`<option value="${esc(f.nome)}"${f.nome===sel?' selected':''}>${esc(f.nome)}</option>`).join('');
 
   document.getElementById('analise-gcli-conteudo').innerHTML = `
     <div style="background:var(--bg);border-radius:8px;padding:12px 14px;margin-bottom:14px">
@@ -11042,11 +11050,16 @@ function renderAnaliseGCli(){
           <div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:10px">
             <div style="font-size:12px;font-weight:700;margin-bottom:6px">Peças trocadas</div>
             ${it.insumos.map((ins,j)=>`
-              <div style="display:flex;gap:8px;align-items:center;font-size:13px;padding:3px 0">
-                <div style="flex:1"><strong>${esc(ins.codigo)}</strong> ${esc(ins.nome)}</div>
-                <div>${ins.qtd} un</div>
+              <div style="display:flex;gap:8px;align-items:center;font-size:13px;padding:5px 0;border-bottom:1px dashed var(--border);flex-wrap:wrap">
+                <div style="flex:1;min-width:150px"><strong>${esc(ins.codigo)}</strong> ${esc(ins.nome)}</div>
+                <div style="width:46px;text-align:center">${ins.qtd} un</div>
+                <select ${ro?'disabled':''} onchange="setInsumoAnaliseCampo(${idx},${j},'fornecedor',this.value)"
+                  style="min-width:180px;padding:4px;border-radius:6px;font-size:12px;border:${ins.fornecedor?'1px solid var(--border)':'2px solid #dc2626'};background:${ins.fornecedor?'#fff':'#fef2f2'}">
+                  ${optsFornPeca(ins.fornecedor||'')}
+                </select>
                 ${ro?'':`<button class="btn btn-outline btn-sm" onclick="removerInsumoAnalise(${idx},${j})">×</button>`}
               </div>`).join('') || '<div style="font-size:12px;color:var(--muted)">Nenhuma peça lançada ainda.</div>'}
+            <div style="font-size:11px;color:var(--muted);margin-top:6px">Cada peça vai para a caixa do seu próprio fornecedor. O campo é obrigatório: escolha o fornecedor ou marque "Não enviar para a caixa".</div>
             ${ro?'':`
             <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
               <input type="text" id="analise-ins-${idx}" list="analise-insumos-list" placeholder="Código do insumo"
@@ -11063,15 +11076,17 @@ function renderAnaliseGCli(){
               onchange="setAnaliseCampo(${idx},'baixa_estoque',this.checked)">
             Dar baixa no estoque da peça nova que saiu
           </label>
+        ` : ''}
+        ${it.resolucao==='troca_produto' ? `
           <label style="display:block;font-size:13px;margin-bottom:5px">
             <input type="checkbox" ${it.gerar_garantia_fornecedor?'checked':''} ${ro?'disabled':''}
               onchange="setAnaliseCampo(${idx},'gerar_garantia_fornecedor',this.checked)">
-            Mandar a peça defeituosa para a caixa do fornecedor
+            Mandar o produto defeituoso para a caixa do fornecedor
           </label>
           ${it.gerar_garantia_fornecedor ? `
             <select ${ro?'disabled':''} onchange="setAnaliseCampo(${idx},'fornecedor',this.value)"
               style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:6px">
-              ${optsForn.replace(`value="${esc(it.fornecedor||'')}"`, `value="${esc(it.fornecedor||'')}" selected`)}
+              ${optsForn(it.fornecedor||'', 'Selecione o fornecedor')}
             </select>` : ''}
         ` : ''}
 
@@ -11099,6 +11114,13 @@ function setAnaliseCampo(idx, campo, valor){
   if(campo === 'resolucao' || campo === 'gerar_garantia_fornecedor') renderAnaliseGCli();
 }
 
+// O fornecedor mora na PECA, nao no produto: um produto e montado com pecas de
+// fornecedores diferentes, e numa mesma garantia cada peca pode voltar para um lugar.
+function setInsumoAnaliseCampo(idx, j, campo, valor){
+  if(!analiseGCli) return;
+  analiseGCli.itens[idx].insumos[j][campo] = valor;
+}
+
 function adicionarInsumoAnalise(idx){
   const cod = (document.getElementById('analise-ins-'+idx)?.value||'').trim();
   const qtd = Number(document.getElementById('analise-insqtd-'+idx)?.value) || 0;
@@ -11107,7 +11129,7 @@ function adicionarInsumoAnalise(idx){
   const ins = INSUMOS_DB.find(x=>x.codigo === cod) || PRODUTOS_DB.find(x=>x.codigo === cod);
   if(!ins){ toast(`"${cod}" não encontrado no cadastro`,'error'); return; }
   const tipo = INSUMOS_DB.find(x=>x.codigo === cod) ? 'insumo' : 'produto';
-  analiseGCli.itens[idx].insumos.push({ codigo: ins.codigo, nome: ins.nome, qtd, tipo });
+  analiseGCli.itens[idx].insumos.push({ codigo: ins.codigo, nome: ins.nome, qtd, tipo, fornecedor: '' });
   renderAnaliseGCli();
 }
 
@@ -11127,8 +11149,19 @@ async function salvarAnaliseGCli(finalizar){
     if(semResolucao.length){ toast('Informe o que foi feito em todos os itens antes de finalizar','error'); return; }
     const semInsumo = a.itens.filter(i=>i.resolucao==='troca_insumo' && !i.insumos.length);
     if(semInsumo.length){ toast('Lance ao menos uma peça trocada nos itens marcados como troca de peça','error'); return; }
-    const semForn = a.itens.filter(i=>i.gerar_garantia_fornecedor && (i.resolucao==='troca_insumo'||i.resolucao==='troca_produto') && !i.fornecedor);
-    if(semForn.length){ toast('Escolha o fornecedor dos itens que vão para a caixa','error'); return; }
+    const semForn = a.itens.filter(i=>i.resolucao==='troca_produto' && i.gerar_garantia_fornecedor && !i.fornecedor);
+    if(semForn.length){ toast('Escolha o fornecedor dos produtos que vão para a caixa','error'); return; }
+    // Peca trocada sem escolha de fornecedor trava a finalizacao, com o codigo na mensagem
+    const pecasSemForn = [];
+    a.itens.forEach(i=>{
+      if(i.resolucao !== 'troca_insumo') return;
+      i.insumos.forEach(pc=>{ if(!pc.fornecedor) pecasSemForn.push(pc.codigo); });
+    });
+    if(pecasSemForn.length){
+      toast('Falta escolher o fornecedor da(s) peça(s): ' + pecasSemForn.join(', ')
+        + '. Se a peça não volta para fornecedor, marque "Não enviar para a caixa".', 'error');
+      return;
+    }
     if(!confirm('Finalizar a análise e liberar esta garantia para envio?')) return;
   }
 
@@ -11187,9 +11220,16 @@ async function salvarAnaliseGCli(finalizar){
           }
         }
 
-        // Pecas DEFEITUOSAS que vao para a caixa do fornecedor
-        if(it.gerar_garantia_fornecedor && it.fornecedor){
-          for(const pc of pecas){
+        // Pecas DEFEITUOSAS que vao para a caixa. Na troca de pecas, cada uma leva o
+        // fornecedor escolhido na propria linha; peca sem fornecedor nao gera registro.
+        // Na troca do produto inteiro, vale o fornecedor do item.
+        const paraCaixa = it.resolucao === 'troca_produto'
+          ? (it.gerar_garantia_fornecedor && it.fornecedor
+              ? pecas.map(pc=>({ ...pc, fornecedor: it.fornecedor })) : [])
+          : pecas.filter(pc=>pc.fornecedor && pc.fornecedor !== '__nao');
+
+        if(paraCaixa.length){
+          for(const pc of paraCaixa){
             if(!pc.qtd) continue;
             const cad = pc.tipo === 'insumo'
               ? INSUMOS_DB.find(x=>x.codigo===pc.codigo)
@@ -11200,7 +11240,7 @@ async function salvarAnaliseGCli(finalizar){
               tipo_item: pc.tipo,
               baixa_estoque: false, // a peca defeituosa voltou do cliente, nao saiu do estoque
               custo_unit: Number(cad?.preco_custo) || 0,
-              fornecedor: it.fornecedor,
+              fornecedor: pc.fornecedor,
               qtd: pc.qtd,
               motivo: `Defeito em garantia de cliente #${a.garantia.numero}`,
               obs: it.obs || '',
@@ -13465,7 +13505,7 @@ function renderModalProduto(codigo){
       if(!FORNECEDORES_DB.length) carregarFornecedoresFirebase();
       corpo = `
         <div class="form-row">
-          <div class="form-group"><label>Código</label><input type="text" id="pd-codigo" value="${p.codigo}" placeholder="ex: MO145"></div>
+          <div class="form-group"><label>Código</label><input type="text" id="pd-codigo" value="${p.codigo}" disabled></div>
           <div class="form-group"><label>Unidade</label>
             <select id="pd-unidade">
               <option value="UN" ${p.unidade==='UN'?'selected':''}>UN</option>
@@ -13883,41 +13923,8 @@ async function salvarEdicaoProduto(codigoAntigo){
   toast('✓ Produto atualizado!','success');
 }
 
-
-// ── Renomear o código de um INSUMO ──
-// A CHAVE do node (insumos/ins_XXX) NAO muda. Documentos antigos (compras em aberto,
-// OPs, estornos) guardam ora a key, ora o código antigo; resolverChaveInsumo() tenta
-// os dois, então manter a key faz todos continuarem apontando para o item certo.
-// Só o campo `codigo` e as receitas (composição) são migrados.
-function validarNovoCodigoInsumo(codigoAntigo, novoCodigo, keyAtual){
-  if(!novoCodigo) return 'Código não pode ficar vazio';
-  if(novoCodigo === (codigoAntigo||'').toUpperCase()) return null;
-  const dupIns = INSUMOS_DB.find(x => (x.codigo||'').toUpperCase() === novoCodigo && x.key !== keyAtual);
-  if(dupIns) return `O código "${novoCodigo}" já está cadastrado no insumo "${dupIns.nome}".`;
-  const dupProd = PRODUTOS_DB.find(x => (x.codigo||'').toUpperCase() === novoCodigo);
-  if(dupProd) return `O código "${novoCodigo}" já está em uso pelo PRODUTO "${dupProd.nome}". Código repetido entre produto e insumo embaralha o histórico de estoque.`;
-  return null;
-}
-
-async function migrarCodigoInsumoNasReceitas(codigoAntigo, novoCodigo){
-  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
-  const alvo = (codigoAntigo||'').toUpperCase();
-  const updates = {};
-  let receitasTocadas = 0;
-  for(const prodCod in RECEITAS_DB){
-    const itens = (RECEITAS_DB[prodCod] && RECEITAS_DB[prodCod].itens) || [];
-    let mudou = false;
-    itens.forEach(it => { if((it.codigo||'').toUpperCase() === alvo){ it.codigo = novoCodigo; mudou = true; } });
-    if(mudou){ updates['receitas/'+prodCod+'/itens'] = itens; receitasTocadas++; }
-  }
-  if(receitasTocadas) await db.ref().update(updates);
-  invalidarCacheNo('receitas');
-  return receitasTocadas;
-}
-
 async function salvarEdicaoInsumo(codigo){
   if(!temPermissaoEditar('produtos')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
-  const novoCodigo = (document.getElementById('pd-codigo')?.value||'').trim().toUpperCase();
   const nome = document.getElementById('pd-nome').value.trim();
   const unidade = document.getElementById('pd-unidade').value;
   const estoque_atual = Number(document.getElementById('pd-estoque').value) || 0;
@@ -13938,41 +13945,25 @@ async function salvarEdicaoInsumo(codigo){
   const insumo = INSUMOS_DB.find(x=>x.codigo===codigo);
   const key = insumo?.key || ('ins_'+codigo);
 
-  const erroCodigo = validarNovoCodigoInsumo(codigo, novoCodigo, key);
-  if(erroCodigo){ toast('\u274c ' + erroCodigo, 'error'); return; }
-  const renomeou = novoCodigo !== (codigo||'').toUpperCase();
-  if(renomeou){
-    if(!confirm(`Alterar o c\u00f3digo do insumo de "${codigo}" para "${novoCodigo}"?\n\n`
-      + `\u2713 A composi\u00e7\u00e3o (receitas) dos produtos ser\u00e1 atualizada automaticamente.\n`
-      + `\u2713 O saldo em estoque \u00e9 preservado.\n`
-      + `\u2022 Movimenta\u00e7\u00f5es e compras j\u00e1 registradas mant\u00eam o c\u00f3digo antigo no hist\u00f3rico.`)) return;
-  }
-
   // O saldo NÃO vai junto no update do cadastro. O número do formulário foi lido quando
   // o modal abriu e pode estar velho: regravá-lo apagaria em silêncio qualquer entrada
   // ou baixa feita no intervalo. Só gravamos saldo na criação, ou quando o valor foi
   // deliberadamente alterado — e aí passa por balanço, deixando rastro no histórico.
   const cadastro = { nome, unidade, estoque_minimo, fornecedor, preco_custo, localizacao, gtin, categoria };
-  if(renomeou) cadastro.codigo = novoCodigo;
   if(!insumo) cadastro.estoque_atual = Number(estoque_atual||0);
 
   await db.ref('insumos/'+key).update(cadastro);
   if(insumo) Object.assign(insumo, cadastro);
 
-  let receitasTocadas = 0;
-  if(renomeou) receitasTocadas = await migrarCodigoInsumoNasReceitas(codigo, novoCodigo);
-
   if(insumo && Number(estoque_atual||0) !== Number(insumo.estoque_atual||0)){
-    await balancearEstoque('insumo', key, { codigo:novoCodigo, nome, valor:Number(estoque_atual||0), omitirSeZero:true,
+    await balancearEstoque('insumo', key, { codigo, nome, valor:Number(estoque_atual||0), omitirSeZero:true,
       motivoFn: (de, para) => `Balanço: ${de} → ${para} — ajuste manual pelo cadastro do insumo` });
   }
 
   produtoDetalheModo = 'ver';
-  renderModalProduto(novoCodigo);
+  renderModalProduto(codigo);
   renderProdutos();
-  toast(renomeou
-    ? `✓ Código alterado de "${codigo}" para "${novoCodigo}"${receitasTocadas?` — ${receitasTocadas} receita(s) atualizada(s)`:''}`
-    : '✓ Insumo atualizado!','success');
+  toast('✓ Insumo atualizado!','success');
 }
 
 // ── Cadastro de novo insumo (botão "+ Novo Insumo" na aba Produtos) ──
