@@ -7245,7 +7245,7 @@ async function abrirModalInsumo(key=null){
     document.getElementById('modal-insumo-titulo').textContent = 'Editar Insumo';
     document.getElementById('insumo-key').value = key;
     document.getElementById('insumo-codigo').value = i.codigo||'';
-    document.getElementById('insumo-codigo').disabled = true;
+    document.getElementById('insumo-codigo').disabled = false; // codigo editavel (renomeia com migracao de receitas)
     document.getElementById('insumo-nome').value = i.nome||'';
     document.getElementById('insumo-unidade').value = i.unidade||'UN';
     document.getElementById('insumo-estoque').value = i.estoque_atual||0;
@@ -7281,7 +7281,28 @@ async function salvarInsumo(){
   if(!codigo || !nome){ toast('Código e descrição são obrigatórios','error'); return; }
 
   const keyExistente = document.getElementById('insumo-key').value;
-  const key = keyExistente || 'ins_' + codigo;
+  const insumoAtual = keyExistente ? INSUMOS_DB.find(i=>i.key===keyExistente) : null;
+  const codigoAntigo = (insumoAtual?.codigo||'').toUpperCase();
+
+  // Key ocupada por outro item (acontece quando algum insumo já foi renomeado e o
+  // node antigo ins_<codigo> continua vivo): gravar por cima apagaria o outro cadastro.
+  let key = keyExistente;
+  if(!key){
+    key = 'ins_' + codigo;
+    const nodeOcupado = await db.ref('insumos/'+key).once('value');
+    if(nodeOcupado.exists()) key = 'ins_' + codigo + '_' + Date.now();
+  }
+
+  // Renomeando um insumo existente: mesmas checagens de conflito da criação
+  const renomeou = !!keyExistente && codigoAntigo && codigo !== codigoAntigo;
+  if(renomeou){
+    const erroCodigo = validarNovoCodigoInsumo(codigoAntigo, codigo, key);
+    if(erroCodigo){ toast('\u274c ' + erroCodigo, 'error'); return; }
+    if(!confirm(`Alterar o c\u00f3digo do insumo de "${codigoAntigo}" para "${codigo}"?\n\n`
+      + `\u2713 A composi\u00e7\u00e3o (receitas) dos produtos ser\u00e1 atualizada automaticamente.\n`
+      + `\u2713 O saldo em estoque \u00e9 preservado.\n`
+      + `\u2022 Movimenta\u00e7\u00f5es e compras j\u00e1 registradas mant\u00eam o c\u00f3digo antigo no hist\u00f3rico.`)) return;
+  }
 
   // Bloquear duplicidade: só ao CRIAR (sem key existente), verificar se o código já está em uso
   if(!keyExistente){
@@ -7321,11 +7342,15 @@ async function salvarInsumo(){
     }
   }
   await db.ref('insumos/'+key).set(dados);
+  let receitasTocadas = 0;
+  if(renomeou) receitasTocadas = await migrarCodigoInsumoNasReceitas(codigoAntigo, codigo);
   fecharModal('modal-insumo');
   INSUMOS_DB = []; // força recarregar
   await carregarInsumosFirebase();
   renderProdutos();
-  toast(`✓ Insumo ${codigo} salvo${dados.inativo?' (inativo)':''}!`,'success');
+  toast(renomeou
+    ? `✓ Código alterado de "${codigoAntigo}" para "${codigo}"${receitasTocadas?` — ${receitasTocadas} receita(s) atualizada(s)`:''}`
+    : `✓ Insumo ${codigo} salvo${dados.inativo?' (inativo)':''}!`,'success');
 }
 
 async function removerInsumo(key){
@@ -13419,7 +13444,7 @@ function renderModalProduto(codigo){
       if(!FORNECEDORES_DB.length) carregarFornecedoresFirebase();
       corpo = `
         <div class="form-row">
-          <div class="form-group"><label>Código</label><input type="text" id="pd-codigo" value="${p.codigo}" disabled></div>
+          <div class="form-group"><label>Código</label><input type="text" id="pd-codigo" value="${p.codigo}" placeholder="ex: MO145"></div>
           <div class="form-group"><label>Unidade</label>
             <select id="pd-unidade">
               <option value="UN" ${p.unidade==='UN'?'selected':''}>UN</option>
@@ -13837,8 +13862,41 @@ async function salvarEdicaoProduto(codigoAntigo){
   toast('✓ Produto atualizado!','success');
 }
 
+
+// ── Renomear o código de um INSUMO ──
+// A CHAVE do node (insumos/ins_XXX) NAO muda. Documentos antigos (compras em aberto,
+// OPs, estornos) guardam ora a key, ora o código antigo; resolverChaveInsumo() tenta
+// os dois, então manter a key faz todos continuarem apontando para o item certo.
+// Só o campo `codigo` e as receitas (composição) são migrados.
+function validarNovoCodigoInsumo(codigoAntigo, novoCodigo, keyAtual){
+  if(!novoCodigo) return 'Código não pode ficar vazio';
+  if(novoCodigo === (codigoAntigo||'').toUpperCase()) return null;
+  const dupIns = INSUMOS_DB.find(x => (x.codigo||'').toUpperCase() === novoCodigo && x.key !== keyAtual);
+  if(dupIns) return `O código "${novoCodigo}" já está cadastrado no insumo "${dupIns.nome}".`;
+  const dupProd = PRODUTOS_DB.find(x => (x.codigo||'').toUpperCase() === novoCodigo);
+  if(dupProd) return `O código "${novoCodigo}" já está em uso pelo PRODUTO "${dupProd.nome}". Código repetido entre produto e insumo embaralha o histórico de estoque.`;
+  return null;
+}
+
+async function migrarCodigoInsumoNasReceitas(codigoAntigo, novoCodigo){
+  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
+  const alvo = (codigoAntigo||'').toUpperCase();
+  const updates = {};
+  let receitasTocadas = 0;
+  for(const prodCod in RECEITAS_DB){
+    const itens = (RECEITAS_DB[prodCod] && RECEITAS_DB[prodCod].itens) || [];
+    let mudou = false;
+    itens.forEach(it => { if((it.codigo||'').toUpperCase() === alvo){ it.codigo = novoCodigo; mudou = true; } });
+    if(mudou){ updates['receitas/'+prodCod+'/itens'] = itens; receitasTocadas++; }
+  }
+  if(receitasTocadas) await db.ref().update(updates);
+  invalidarCacheNo('receitas');
+  return receitasTocadas;
+}
+
 async function salvarEdicaoInsumo(codigo){
   if(!temPermissaoEditar('produtos')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  const novoCodigo = (document.getElementById('pd-codigo')?.value||'').trim().toUpperCase();
   const nome = document.getElementById('pd-nome').value.trim();
   const unidade = document.getElementById('pd-unidade').value;
   const estoque_atual = Number(document.getElementById('pd-estoque').value) || 0;
@@ -13859,25 +13917,41 @@ async function salvarEdicaoInsumo(codigo){
   const insumo = INSUMOS_DB.find(x=>x.codigo===codigo);
   const key = insumo?.key || ('ins_'+codigo);
 
+  const erroCodigo = validarNovoCodigoInsumo(codigo, novoCodigo, key);
+  if(erroCodigo){ toast('\u274c ' + erroCodigo, 'error'); return; }
+  const renomeou = novoCodigo !== (codigo||'').toUpperCase();
+  if(renomeou){
+    if(!confirm(`Alterar o c\u00f3digo do insumo de "${codigo}" para "${novoCodigo}"?\n\n`
+      + `\u2713 A composi\u00e7\u00e3o (receitas) dos produtos ser\u00e1 atualizada automaticamente.\n`
+      + `\u2713 O saldo em estoque \u00e9 preservado.\n`
+      + `\u2022 Movimenta\u00e7\u00f5es e compras j\u00e1 registradas mant\u00eam o c\u00f3digo antigo no hist\u00f3rico.`)) return;
+  }
+
   // O saldo NÃO vai junto no update do cadastro. O número do formulário foi lido quando
   // o modal abriu e pode estar velho: regravá-lo apagaria em silêncio qualquer entrada
   // ou baixa feita no intervalo. Só gravamos saldo na criação, ou quando o valor foi
   // deliberadamente alterado — e aí passa por balanço, deixando rastro no histórico.
   const cadastro = { nome, unidade, estoque_minimo, fornecedor, preco_custo, localizacao, gtin, categoria };
+  if(renomeou) cadastro.codigo = novoCodigo;
   if(!insumo) cadastro.estoque_atual = Number(estoque_atual||0);
 
   await db.ref('insumos/'+key).update(cadastro);
   if(insumo) Object.assign(insumo, cadastro);
 
+  let receitasTocadas = 0;
+  if(renomeou) receitasTocadas = await migrarCodigoInsumoNasReceitas(codigo, novoCodigo);
+
   if(insumo && Number(estoque_atual||0) !== Number(insumo.estoque_atual||0)){
-    await balancearEstoque('insumo', key, { codigo, nome, valor:Number(estoque_atual||0), omitirSeZero:true,
+    await balancearEstoque('insumo', key, { codigo:novoCodigo, nome, valor:Number(estoque_atual||0), omitirSeZero:true,
       motivoFn: (de, para) => `Balanço: ${de} → ${para} — ajuste manual pelo cadastro do insumo` });
   }
 
   produtoDetalheModo = 'ver';
-  renderModalProduto(codigo);
+  renderModalProduto(novoCodigo);
   renderProdutos();
-  toast('✓ Insumo atualizado!','success');
+  toast(renomeou
+    ? `✓ Código alterado de "${codigo}" para "${novoCodigo}"${receitasTocadas?` — ${receitasTocadas} receita(s) atualizada(s)`:''}`
+    : '✓ Insumo atualizado!','success');
 }
 
 // ── Cadastro de novo insumo (botão "+ Novo Insumo" na aba Produtos) ──
