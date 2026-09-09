@@ -5256,7 +5256,7 @@ async function carregarCondicoesPagamento(){
   try {
     const snap = await db.ref('configuracoes/condicoes_pagamento').once('value');
     const salvas = snap.val();
-    if(Array.isArray(salvas) && salvas.length) CONDICOES = salvas;
+    if(Array.isArray(salvas) && salvas.length) CONDICOES = ordenarCondicoes(salvas);
   } catch(e){ /* mantém a lista padrão se der erro */ }
   condicoesCarregadas = true;
   renderConfigCondicoes();
@@ -5283,7 +5283,7 @@ async function adicionarCondicaoPagamento(){
   if(!valido){ toast('Formato inválido. Use AVISTA, "N DIAS" ou números separados por "/" (ex: 30/45/60)','error'); return; }
   if(CONDICOES.includes(valor)){ toast('Esse prazo já existe','error'); return; }
 
-  CONDICOES.push(valor);
+  CONDICOES = ordenarCondicoes(CONDICOES.concat([valor]));
   await db.ref('configuracoes/condicoes_pagamento').set(CONDICOES);
   input.value = '';
   renderConfigCondicoes();
@@ -6466,9 +6466,30 @@ function atualizarTotais(){
 }
 
 let CONDICOES = ['AVISTA','5 DIAS','7 DIAS','10 DIAS','15 DIAS','30 DIAS',
-  '30/45','30/45/60','30/45/60/75','30/45/60/75/90','30/45/60/75/90/105',
-  '30/60','30/60/90','30/60/90/120'];
+  '30/45','30/60','30/45/60','30/45/60/75','30/60/90','30/45/60/75/90',
+  '30/45/60/75/90/105','30/60/90/120'];
 let condicoesCarregadas = false;
+
+// Ordena os prazos de pagamento do menor para o maior. Criterio: ultimo
+// vencimento (o prazo total), depois numero de parcelas, depois a primeira
+// parcela. Assim 30 DIAS < 30/45 < 30/60 < 30/45/60 < 30/60/90 < 30/60/90/120.
+// CONDICOES fica sempre ordenado (inclusive o que vai pro Firebase), porque o
+// remover usa o indice da lista renderizada — render e array precisam bater.
+function chaveCondicao(c){
+  const t = String(c||'').trim().toUpperCase();
+  if(t === 'AVISTA') return [0,0,0];
+  const m = t.match(/^(\d+)\s*DIAS?$/);
+  if(m) return [Number(m[1]), 1, Number(m[1])];
+  const nums = t.split('/').map(n=>Number(n)).filter(n=>!isNaN(n));
+  if(nums.length) return [Math.max.apply(null,nums), nums.length, nums[0]];
+  return [999999, 99, 999999]; // formato desconhecido vai pro fim da lista
+}
+function ordenarCondicoes(lista){
+  return (lista||[]).slice().sort((a,b)=>{
+    const ka = chaveCondicao(a), kb = chaveCondicao(b);
+    return (ka[0]-kb[0]) || (ka[1]-kb[1]) || (ka[2]-kb[2]) || String(a).localeCompare(String(b));
+  });
+}
 
 async function atualizarCondicoes(){
   if(!condicoesCarregadas) await carregarCondicoesPagamento();
