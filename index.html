@@ -8634,7 +8634,8 @@ async function renderMovimentosEstoque(){
   let movimentos = Object.keys(dados).map(key=>({ key, ...dados[key] }));
 
   movimentos = movimentos.filter(m=>{
-    if(fCodigo && !m.codigo.toLowerCase().includes(fCodigo)) return false;
+    // Codigo EXATO: digitar "145" nao pode trazer "MO145" / "1450" junto.
+    if(fCodigo && (m.codigo||'').toString().trim().toLowerCase() !== fCodigo) return false;
     if(fTipo && m.tipo !== fTipo) return false;
     if(fDataIni && m.ts < new Date(fDataIni).getTime()) return false;
     if(fDataFim && m.ts > new Date(fDataFim).getTime()+86399999) return false; // até o fim do dia
@@ -8673,20 +8674,9 @@ async function renderMovimentosEstoque(){
     } else if(insumoExato){
       saldoAtualHtml = Number(insumoExato.estoque_atual||0).toLocaleString('pt-BR') + ' <span class="badge" style="background:#ede9fe;color:#7c3aed;font-size:10px">INSUMO</span>';
     } else {
-      // Sem match exato — cai pro comportamento antigo (busca parcial), só em produtos vendáveis
-      const produtosFiltrados = PRODUTOS_DB.filter(p=>(p.codigo||'').toLowerCase().includes(fCodigo));
-      const insumosFiltrados = INSUMOS_DB.filter(i=>(i.codigo||'').toLowerCase().includes(fCodigo));
-      const totalItens = produtosFiltrados.length + insumosFiltrados.length;
-      if(totalItens===1){
-        const item = produtosFiltrados[0] || insumosFiltrados[0];
-        const valor = produtosFiltrados[0] ? item.quantidade : item.estoque_atual;
-        saldoAtualHtml = Number(valor||0).toLocaleString('pt-BR');
-      } else if(totalItens>1){
-        const soma = produtosFiltrados.reduce((s,p)=>s+Number(p.quantidade||0),0) + insumosFiltrados.reduce((s,i)=>s+Number(i.estoque_atual||0),0);
-        saldoAtualHtml = `${soma.toLocaleString('pt-BR')} <span style="font-size:11px;color:var(--muted)">(${totalItens} itens)</span>`;
-      } else {
-        saldoAtualHtml = '<span style="color:var(--muted);font-size:16px">item não encontrado</span>';
-      }
+      // Sem cadastro com esse codigo exato. Nao somar itens parecidos por substring:
+      // a lista abaixo tambem so mostra o codigo exato, os dois tem que bater.
+      saldoAtualHtml = '<span style="color:var(--muted);font-size:16px">item não encontrado</span>';
     }
   }
 
