@@ -4820,11 +4820,8 @@ async function cancelarBipagemPedido(id){
   // Trava atomica: a virada CC -> AP acontece dentro de transaction(), entao so a
   // PRIMEIRA execucao passa daqui. Duas abas, ou clique duplo, devolviam o estoque
   // duas vezes — o cancelamento nao tinha nenhuma protecao, ao contrario da bipagem.
-  const resStatus = await db.ref('pedidos/'+id+'/status').transaction(atual => {
-    if(atual !== 'CC') return;   // aborta a transaction sem gravar
-    return 'AP';
-  });
-  if(!resStatus.committed){
+  const resStatus = await transicaoStatus('pedidos/'+id+'/status', 'CC', 'AP');
+  if(!resStatus.ok){
     toast(`Pedido #${p.numero} já teve a bipagem cancelada — nada foi alterado`,'error');
     fecharModal('modal-ver-pedido');
     renderPedidos();
@@ -5463,7 +5460,6 @@ async function buscarProdutoPedido(){
   const clienteCod = pedidoAtual.cliente?.codigo;
   const historicoPrecos = (clienteCod && HISTORICO_PRECOS_CACHE[clienteCod]) || {};
 
-  const comprometidos = mapaInsumosComprometidos();
   lista.innerHTML = res.map(p=>{
     const estqFisico = Number(p.quantidade||0);
     const reservado = Number(p.reservado||0);
@@ -5474,11 +5470,21 @@ async function buscarProdutoPedido(){
     let capacidadeProducao = 0;
     let gargalhoTooltip = '';
     const receita = RECEITAS_DB[p.codigo];
-    const cp = calcCapacidadeProducao(p.codigo, comprometidos);
-    if(cp && cp.temInsumoReal){
-      capacidadeProducao = cp.capacidade;
-      const g = cp.gargalo;
-      if(g){ const tc = textoComprometido(g); gargalhoTooltip = `Gargalo: ${g.codigo} (${g.estoque} un${tc?', '+tc:''})`; }
+    const itensReceitaSemEmbalagem = (receita?.itens||[]).filter(ri => {
+      const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
+      return insumo?.categoria !== 'Embalagens';
+    });
+    if(itensReceitaSemEmbalagem.length){
+      let minCap = Infinity;
+      let gargalho = null;
+      for(const ri of itensReceitaSemEmbalagem){
+        const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
+        const estoqueInsumo = Number(insumo?.estoque_atual||0);
+        const cap = ri.qtd > 0 ? Math.floor(estoqueInsumo / ri.qtd) : Infinity;
+        if(cap < minCap){ minCap = cap; gargalho = { codigo: ri.codigo, nome: ri.nome, estoque: estoqueInsumo }; }
+      }
+      capacidadeProducao = minCap === Infinity ? 0 : minCap;
+      if(gargalho) gargalhoTooltip = `Gargalo: ${gargalho.codigo} (${gargalho.estoque} un)`;
     }
 
     const estqTotal = dispFisico + capacidadeProducao;
@@ -8386,6 +8392,23 @@ function sincronizarEstoqueMemoria(tipo, chave, valor){
 
 // Soma no saldo (delta negativo para subtrair). Retorna { anterior, novo } com os
 // valores REAIS do servidor — não o que a tela achava que estava lá.
+// O Firebase roda a funcao da transaction PRIMEIRO com o valor que estiver no cache local.
+// Se o no nunca foi lido nesta sessao, esse valor e null — e se a funcao abortar
+// (return undefined) nessa primeira passada, o Firebase encerra ali, SEM nem consultar o
+// servidor. Por isso todo "aborta se for diferente do esperado" falhava com
+// committed=false mesmo estando tudo certo no banco: o valor real nunca era consultado.
+// O once() abaixo resolve porque popula o cache com o valor do servidor antes.
+async function transicaoStatus(caminho, de, para){
+  const snap = await db.ref(caminho).once('value');
+  const atualServidor = snap.exists() ? snap.val() : null;
+  if(atualServidor !== de) return { ok:false, atual: atualServidor };
+  const res = await db.ref(caminho).transaction(v => {
+    if(v !== de) return;   // aqui o cache ja tem o valor real do servidor
+    return para;
+  });
+  return { ok: res.committed, atual: res.snapshot.val() };
+}
+
 async function aplicarDeltaEstoque(tipo, chave, delta){
   const d = Number(delta)||0;
   let anterior = 0;
@@ -10918,11 +10941,8 @@ async function marcarGarantiaEnviadaManual(id){
 
   try {
     // Mesma trava da confirmacao pela bipagem: so a primeira execucao finaliza
-    const res = await db.ref('garantias_clientes/'+id+'/status').transaction(atual => {
-      if(atual !== 'aguardando_envio') return;
-      return 'finalizada';
-    });
-    if(!res.committed){ toast('Esta garantia já foi finalizada — nada foi alterado','error'); await renderGarantiasClientes(true); return; }
+    const res = await transicaoStatus('garantias_clientes/'+id+'/status', 'aguardando_envio', 'finalizada');
+    if(!res.ok){ toast('Esta garantia já foi finalizada ou cancelada — nada foi alterado','error'); await renderGarantiasClientes(true); return; }
     await db.ref('garantias_clientes/'+id).update({
       finalizada_em: agoraTs(),
       finalizada_por: usuarioLogado?.nome || '',
@@ -11304,25 +11324,29 @@ async function responderEnvioGarantia(sim){
   }
   const marcadas = envioGCliPendentes.filter((g,idx)=>document.getElementById('envio-gcli-'+idx)?.checked);
   if(!marcadas.length){ toast('Marque ao menos uma garantia, ou escolha "Não foi embalada"','error'); return; }
+  const naoFinalizadas = [];
+  let finalizadas = 0;
 
   try {
     for(const g of marcadas){
       // Transaction para nao finalizar duas vezes se houver dois leitores no mesmo pedido
-      const res = await db.ref('garantias_clientes/'+g.id+'/status').transaction(atual => {
-        if(atual !== 'aguardando_envio') return;
-        return 'finalizada';
-      });
-      if(!res.committed) continue;
+      const res = await transicaoStatus('garantias_clientes/'+g.id+'/status', 'aguardando_envio', 'finalizada');
+      if(!res.ok){ naoFinalizadas.push(g.numero); continue; }
       await db.ref('garantias_clientes/'+g.id).update({
         finalizada_em: agoraTs(),
         finalizada_por: usuarioLogado?.nome || '',
         pedido_numero: pedido?.numero || null,
         pedido_id: pedido?.id || null
       });
+      finalizadas++;
     }
     invalidarCacheNo('garantias_clientes');
     fecharModal('modal-envio-gcli');
-    toast(`✓ ${marcadas.length} garantia(s) finalizada(s) e enviada(s) com o pedido`,'success');
+    // Antes a mensagem dizia "N finalizadas" contando o que foi MARCADO na tela, nao o que
+    // realmente gravou: falha silenciosa virava confirmacao de sucesso.
+    if(finalizadas) toast(`✓ ${finalizadas} garantia(s) finalizada(s) e enviada(s) com o pedido`,'success');
+    if(naoFinalizadas.length) toast('⚠ Não foi possível finalizar a(s) garantia(s) #' + naoFinalizadas.join(', #')
+      + ' — confira a aba Garantias de Clientes','error');
     await carregarGarantiasClientes(true);
   } catch(e){
     toast('Erro ao finalizar garantia: ' + (e?.message||e), 'error');
@@ -12174,11 +12198,22 @@ async function abrirGerarOPSeparacao(idx){
   // Calcular capacidade máxima de produção baseada no insumo mais escasso da receita —
   // embalagem/etiqueta não conta (ter saco/etiqueta sobrando não significa que dá pra produzir mais)
   const receita = RECEITAS_DB[item.codigo];
-  // Desconta insumo já comprometido com outros produtos negativos (ver calcCapacidadeProducao)
-  const cp = calcCapacidadeProducao(item.codigo);
-  const temInsumoReal = !!(cp && cp.temInsumoReal);
-  const capacidadeMaxima = cp ? cp.capacidadeBruta : Infinity;
-  const insumoLimitante = (cp && cp.gargalo) ? { ...cp.gargalo, nome: cp.gargalo.insumo?.nome || cp.gargalo.nome } : null;
+  let capacidadeMaxima = Infinity;
+  let insumoLimitante = null;
+  let temInsumoReal = false;
+  if(receita && receita.itens){
+    receita.itens.forEach(ri => {
+      const insumo = INSUMOS_DB.find(x=>x.codigo===ri.codigo);
+      if(insumo?.categoria === 'Embalagens') return; // não é gargalo de produção
+      temInsumoReal = true;
+      const estoqueInsumo = insumo ? Number(insumo.estoque_atual||0) : 0;
+      const maxPorEsteInsumo = ri.qtd > 0 ? Math.floor(estoqueInsumo / ri.qtd) : Infinity;
+      if(maxPorEsteInsumo < capacidadeMaxima){
+        capacidadeMaxima = maxPorEsteInsumo;
+        insumoLimitante = insumo;
+      }
+    });
+  }
   const temReceita = !!(receita && receita.itens && receita.itens.length);
   const capacidadeFinal = (temReceita && temInsumoReal) ? Math.max(0, capacidadeMaxima) : null;
   const sugestao = capacidadeFinal !== null ? Math.min(totalNecessarioGeral, capacidadeFinal) : totalNecessarioGeral;
@@ -12197,7 +12232,7 @@ async function abrirGerarOPSeparacao(idx){
       <div style="background:var(--bg);border-radius:10px;padding:14px;margin-bottom:16px">
         <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:6px">📋 Capacidade máxima de produção</div>
         <div style="font-size:22px;font-weight:700;font-family:'DM Sans',sans-serif;color:${capacidadeFinal < totalNecessarioGeral ? '#dc2626' : 'var(--success)'}">${capacidadeFinal} unidades</div>
-        ${insumoLimitante ? `<div style="font-size:12px;color:var(--muted);margin-top:4px">Limitado pelo insumo: <strong>${insumoLimitante.codigo} — ${esc(insumoLimitante.nome)}</strong> (estoque: ${insumoLimitante.estoque}${insumoLimitante.comprometido ? ', '+textoComprometido(insumoLimitante) : ''})</div>` : ''}
+        ${insumoLimitante ? `<div style="font-size:12px;color:var(--muted);margin-top:4px">Limitado pelo insumo: <strong>${insumoLimitante.codigo} — ${esc(insumoLimitante.nome)}</strong> (estoque: ${insumoLimitante.estoque_atual})</div>` : ''}
         ${capacidadeFinal < totalNecessarioGeral ? `<div style="color:#dc2626;font-size:12px;margin-top:6px">⚠️ Não há insumo suficiente para atender toda a demanda. Considere comprar mais insumo.</div>` : ''}
       </div>
     ` : temReceita ? `<div style="background:#fef3c7;color:#92400e;padding:10px;border-radius:8px;font-size:13px;margin-bottom:16px">⚠️ A receita deste item só tem embalagem/etiqueta cadastrada — sem insumo de produção real pra calcular a capacidade. Confirme manualmente quanto dá pra produzir.</div>`
@@ -13037,58 +13072,6 @@ async function toggleInativoCliente(codigo){
   toast(novoStatus ? '✓ Cliente inativado' : '✓ Cliente reativado','success');
 }
 
-// ══ CAPACIDADE DE PRODUÇÃO COMPARTILHADA ══
-// Produto montado com disponível negativo já "deve" produção: essas unidades vão sair do
-// estoque dos insumos da receita. Este mapa diz quanto de cada insumo já está comprometido
-// e com qual produto. Usa só dados em memória — nenhuma leitura extra no Firebase.
-function mapaInsumosComprometidos(){
-  const mapa = {};
-  for(const p of PRODUTOS_DB){
-    if(p.inativo) continue;
-    const receita = RECEITAS_DB[p.codigo];
-    if(!receita || !receita.itens || !receita.itens.length) continue;
-    const disp = Number(p.quantidade||0) - Number(p.reservado||0);
-    if(disp >= 0) continue;
-    for(const ri of receita.itens){
-      const q = Number(ri.qtd||0);
-      if(q <= 0) continue;
-      if(!mapa[ri.codigo]) mapa[ri.codigo] = [];
-      mapa[ri.codigo].push({ codigo: p.codigo, qtd: -disp * q });
-    }
-  }
-  return mapa;
-}
-
-// Capacidade de produção de UM produto pelo insumo gargalo, descontando o insumo já
-// comprometido com OUTROS produtos negativos. O déficit do próprio produto não é descontado
-// porque já aparece no físico negativo dele (senão contaria duas vezes).
-// Embalagem/etiqueta não conta como gargalo. Retorna null se o produto não tem receita.
-function calcCapacidadeProducao(codigo, comprometidos){
-  const receita = RECEITAS_DB[codigo];
-  if(!receita || !receita.itens || !receita.itens.length) return null;
-  if(!comprometidos) comprometidos = mapaInsumosComprometidos();
-  let minCap = Infinity, gargalo = null, temInsumoReal = false;
-  for(const ri of receita.itens){
-    const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
-    if(insumo?.categoria === 'Embalagens') continue;
-    temInsumoReal = true;
-    const estoque = Number(insumo?.estoque_atual||0);
-    const outros = (comprometidos[ri.codigo]||[]).filter(c=>c.codigo!==codigo);
-    const comprometido = outros.reduce((t,c)=>t+c.qtd, 0);
-    const cap = ri.qtd > 0 ? Math.max(0, Math.floor((estoque - comprometido) / ri.qtd)) : Infinity;
-    if(cap < minCap){ minCap = cap; gargalo = { codigo: ri.codigo, nome: ri.nome, insumo, estoque, comprometido, outros, qtdReceita: ri.qtd }; }
-  }
-  return { temInsumoReal, capacidade: minCap === Infinity ? 0 : minCap, capacidadeBruta: minCap, gargalo };
-}
-
-// Texto curto pro tooltip: "12 comprometida(s) com 7443B"
-function textoComprometido(g){
-  if(!g || !g.comprometido) return '';
-  const cods = g.outros.map(c=>c.codigo);
-  const lista = cods.slice(0,3).join(', ') + (cods.length > 3 ? ` +${cods.length-3}` : '');
-  return `${g.comprometido} comprometida(s) com ${esc(lista)}`;
-}
-
 // ══ PRODUTOS ══
 // Gera o texto do tooltip do campo estoque na listagem de produtos —
 // para vendáveis com receita, inclui a capacidade de produção e o gargalho
@@ -13338,7 +13321,6 @@ async function renderProdutos(){
 
   const total=filtrado.length, inicio=(paginaProdutos-1)*POR_PAGINA;
   produtosFiltradosAtual = filtrado; // usado pela reativação em massa
-  const comprometidos = mapaInsumosComprometidos();
   const pagina=filtrado.slice(inicio,inicio+POR_PAGINA);
   const linhas = pagina.map(p=>{
     const estq=Number(p.quantidade||0);
@@ -13351,12 +13333,23 @@ async function renderProdutos(){
     let capacidadeProducao = null;
     let gargalhoInfo = '';
     if(p._tipo==='vendavel'){
-      const cp = calcCapacidadeProducao(p.codigo, comprometidos);
-      if(cp){
-        capacidadeProducao = cp.capacidade;
-        const g = cp.gargalo;
-        if(g){ const tc = textoComprometido(g); gargalhoInfo = `Gargalo: ${g.codigo} — ${esc(g.nome)} (${g.estoque} un em estoque${tc?', '+tc:''}, usa ${g.qtdReceita}/un)`; }
-        else if(!cp.temInsumoReal) gargalhoInfo = 'Receita contém só embalagem/etiqueta — sem insumo de produção real cadastrado';
+      const receita = RECEITAS_DB[p.codigo];
+      const itensReceitaSemEmbalagem = (receita?.itens||[]).filter(ri => {
+        const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
+        return insumo?.categoria !== 'Embalagens';
+      });
+      if(receita?.itens?.length){
+        let minCap = Infinity;
+        let gargalho = null;
+        for(const ri of itensReceitaSemEmbalagem){
+          const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
+          const estoqueInsumo = Number(insumo?.estoque_atual||0);
+          const cap = ri.qtd > 0 ? Math.floor(estoqueInsumo / ri.qtd) : Infinity;
+          if(cap < minCap){ minCap = cap; gargalho = { nome: ri.nome, codigo: ri.codigo, estoque: estoqueInsumo, qtdReceita: ri.qtd }; }
+        }
+        capacidadeProducao = minCap === Infinity ? 0 : minCap;
+        if(gargalho) gargalhoInfo = `Gargalo: ${gargalho.codigo} — ${esc(gargalho.nome)} (${gargalho.estoque} un em estoque, usa ${gargalho.qtdReceita}/un)`;
+        else if(!itensReceitaSemEmbalagem.length) gargalhoInfo = 'Receita contém só embalagem/etiqueta — sem insumo de produção real cadastrado';
       }
     }
 
@@ -16944,7 +16937,6 @@ async function relSugestaoJornal(pedidos, el){
     return;
   }
 
-  const comprometidos = mapaInsumosComprometidos();
   const lista = Object.values(vendas).map(v=>{
     const prod = PRODUTOS_DB.find(p=>p.codigo===v.codigo);
     const dispFisico = prod ? Number(prod.quantidade||0)-Number(prod.reservado||0) : 0;
@@ -16955,13 +16947,20 @@ async function relSugestaoJornal(pedidos, el){
     let capacidadeProducao = 0;
     let insumoEmTransito = false;
     const receita = RECEITAS_DB[v.codigo];
-    const cp = calcCapacidadeProducao(v.codigo, comprometidos);
-    if(cp && cp.temInsumoReal){
-      capacidadeProducao = cp.capacidade;
-      insumoEmTransito = receita.itens.some(ri=>{
+    const itensReceitaSemEmbalagem = (receita?.itens||[]).filter(ri=>{
+      const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
+      return insumo?.categoria !== 'Embalagens';
+    });
+    if(itensReceitaSemEmbalagem.length){
+      let minCap = Infinity;
+      for(const ri of itensReceitaSemEmbalagem){
         const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
-        return insumo?.categoria !== 'Embalagens' && codigosEmTransito.has(ri.codigo);
-      });
+        const estoqueInsumo = Number(insumo?.estoque_atual||0);
+        const cap = ri.qtd > 0 ? Math.floor(estoqueInsumo / ri.qtd) : Infinity;
+        if(cap < minCap) minCap = cap;
+        if(codigosEmTransito.has(ri.codigo)) insumoEmTransito = true;
+      }
+      capacidadeProducao = minCap === Infinity ? 0 : minCap;
     }
 
     const disponivel = dispFisico + capacidadeProducao;
