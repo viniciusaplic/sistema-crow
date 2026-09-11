@@ -13925,6 +13925,8 @@ async function salvarEdicaoProduto(codigoAntigo){
   const etiqueta_unica_por_lote = document.getElementById('pd-etiqueta-unica')?.checked || false;
 
   if(!novoCodigo){ toast('Código não pode ficar vazio','error'); return; }
+  // Produto sem nome é descartado no carregamento e some do sistema inteiro
+  if(!nome){ toast('Nome não pode ficar vazio','error'); return; }
 
   if(gtin){
     const gtinDuplicado = PRODUTOS_DB.find(x=>x.gtin && x.gtin===gtin && x.codigo!==codigoAntigo);
@@ -14113,7 +14115,23 @@ async function salvarNovoProdutoVendavel(codigoTemp){
     // Confere no banco também: a lista em memória pode estar desatualizada se outra pessoa
     // cadastrou esse código depois que esta tela foi carregada
     const snapExiste = await db.ref('produtos/'+novoCodigo).once('value');
-    if(snapExiste.exists()){ toast(`Código "${novoCodigo}" já existe no banco — ${snapExiste.val()?.nome||''}. Aperte F5 para atualizar a lista.`,'error'); return; }
+    let registroIncompleto = null;
+    if(snapExiste.exists()){
+      const ex = snapExiste.val() || {};
+      const nomeEx = String(ex.nome||'').trim();
+      if(nomeEx){
+        toast(`Código "${novoCodigo}" já existe no banco — ${nomeEx}${ex.inativo ? ' (está INATIVO: mude o filtro de situação para Inativos/Todos para ver)' : ''}. Aperte F5 para atualizar a lista.`,'error');
+        return;
+      }
+      // Registro sem nome: existe no banco, mas o carregamento de produtos descarta item sem
+      // nome — fica invisível em todo o sistema e ainda bloqueava o recadastro. Completa ele.
+      const okCompletar = await confirmCustom(
+        `O código <strong>${esc(novoCodigo)}</strong> já existe no banco, mas está <strong>sem nome</strong> — por isso não aparece em lugar nenhum do sistema.\n\nCompletar esse cadastro com os dados desta tela?` +
+        (ex.quantidade != null ? `\n\nO estoque que já está gravado nele (${Number(ex.quantidade||0).toLocaleString('pt-BR')}) será mantido.` : ''),
+        'Completar cadastro');
+      if(!okCompletar) return;
+      registroIncompleto = ex;
+    }
 
     const produto = {
       codigo:novoCodigo, nome,
@@ -14129,12 +14147,22 @@ async function salvarNovoProdutoVendavel(codigoTemp){
       ts_cadastro: agoraTs(), pendente_w3: true, novo: true,
       inativo: !!document.getElementById('pd-inativo-criacao')?.checked
     };
-    await db.ref('produtos/'+novoCodigo).set(produto);
+    let produtoFinal = produto;
+    if(registroIncompleto){
+      // update (não set): preserva o que já existe no registro (fornecedores, reservas etc.).
+      // O saldo já gravado não é sobrescrito — pode ter vindo de movimentação com histórico.
+      const upd = { ...produto };
+      if(registroIncompleto.quantidade != null) delete upd.quantidade;
+      await db.ref('produtos/'+novoCodigo).update(upd);
+      produtoFinal = { ...registroIncompleto, ...upd, codigo:novoCodigo };
+    } else {
+      await db.ref('produtos/'+novoCodigo).set(produto);
+    }
     PRODUTOS_DB = PRODUTOS_DB.filter(p=>!(p._temp && p.codigo===codigoTemp));
-    PRODUTOS_DB.unshift(produto);
+    PRODUTOS_DB.unshift(produtoFinal);
     produtoDetalheModo = 'ver';
     fecharModal('modal-produto-detalhe');
-    toast(`✓ Produto "${nome}" cadastrado${produto.inativo?' (inativo)':''} — código ${novoCodigo}`,'success');
+    toast(`✓ Produto "${nome}" ${registroIncompleto?'completado':'cadastrado'}${produto.inativo?' (inativo)':''} — código ${novoCodigo}`,'success');
     renderProdutos();
   } catch(e){
     toast('Erro ao criar produto: '+(e?.message||e),'error');
