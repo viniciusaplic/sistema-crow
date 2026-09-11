@@ -3128,6 +3128,21 @@ async function carregarProdutosFirebase(){
       ...dados[chave],
       codigo: chave  // garante que o código é sempre a chave real do Firebase
     })).filter(p => p.nome && p.codigo && p.codigo !== 'reservado');
+    // "_temp" marca o RASCUNHO de produto novo, que só existe na memória da tela. Um clone
+    // feito a partir desse rascunho levou a marca para o banco (caso do 9872B): o item
+    // abria como "Novo Produto", dizia que já existia e sumia ao abrir "+ Novo Produto".
+    // Registro vindo do banco nunca é rascunho — tira a marca e limpa o banco (só grava
+    // se encontrar algum registro com ela; normalmente não escreve nada).
+    const limpezaMarcas = {};
+    lista.forEach(p => {
+      ['_temp','_titulo_novo','_tipo'].forEach(campo => {
+        if(campo in p){ delete p[campo]; limpezaMarcas['produtos/'+p.codigo+'/'+campo] = null; }
+      });
+    });
+    if(Object.keys(limpezaMarcas).length){
+      console.warn('[CROW] Limpando marcas internas gravadas por engano em produtos:', Object.keys(limpezaMarcas));
+      db.ref().update(limpezaMarcas).catch(e => console.warn('[CROW] limpeza de marcas falhou:', e));
+    }
     if(lista.length > 0){
       PRODUTOS_DB = lista;
       console.log('✓ Produtos carregados do Firebase: ' + PRODUTOS_DB.length);
@@ -13879,6 +13894,13 @@ async function clonarItem(codigoOrigem, tipo){
     }
     const clone = { ...original, codigo: codigoLimpo, quantidade: 0, fornecedores: original.fornecedores ? [...original.fornecedores] : [] };
     delete clone.gtin; // EAN não pode ser duplicado - deixa vazio para preencher depois
+    // Marcas internas da tela não vão para o banco (o _temp de um rascunho clonado fazia o
+    // item novo abrir como "não cadastrado" para sempre)
+    delete clone._temp; delete clone._titulo_novo; delete clone._tipo;
+    // Reserva é do ORIGINAL (pedidos em aberto dele) — o clone nasce sem nenhuma
+    delete clone.reservado;
+    // Item novo entra no topo da lista, não na posição do original
+    clone.ts_cadastro = agoraTs();
     await db.ref('produtos/'+codigoLimpo).set(clone);
     PRODUTOS_DB.push(clone);
 
@@ -13972,6 +13994,7 @@ async function salvarEdicaoProduto(codigoAntigo){
     const snapAntigo = await db.ref('produtos/'+codigoAntigo).once('value');
     // O saldo copiado é o do SERVIDOR, não o do formulário
     const dadosCompletos = { ...(snapAntigo.val()||{}), ...dadosAtualizados, codigo: novoCodigo };
+    delete dadosCompletos._temp; delete dadosCompletos._titulo_novo; delete dadosCompletos._tipo;
     const saldoServidor = Number(snapAntigo.val()?.quantidade||0);
     dadosCompletos.quantidade = saldoServidor;
     await db.ref('produtos/'+novoCodigo).set(dadosCompletos);
