@@ -4883,6 +4883,8 @@ async function editarPedido(id){
     isOrcamento: ehOrcamento,
     editando: true,
     numero: p.numero,
+    vendedor_id_original: p.vendedor_id || null,
+    vendedor_nome_original: p.vendedor_nome || '',
     credito_aplicado: p.credito_aplicado || 0,
     // Disponível = o que o cliente tem HOJE + o que já estava aplicado neste pedido
     // (já que aquele valor já "saiu" do saldo do cliente — se ele quiser reduzir, o
@@ -4892,9 +4894,12 @@ async function editarPedido(id){
   document.getElementById('modal-pedido-titulo').textContent = (ehOrcamento?'Editar Orçamento #':'Editar Pedido #')+p.numero;
   document.getElementById('btn-salvar-orcamento').style.display = ehOrcamento ? 'inline-flex' : 'none';
   document.getElementById('pedido-busca-cliente').value = p.cliente_nome;
-  // Cliente só pode ser trocado se o pedido ainda não avançou (Aguard. Aprovação ou Orçamento) —
-  // depois de separação/aprovação, trocar cliente teria implicações fiscais/estoque.
-  const podeTrocarCliente = ehOrcamento || p.status === 'AA';
+  // Cliente pode ser trocado por quem edita enquanto o pedido está em Orçamento/Aguard. Aprovação.
+  // Depois disso (Aprovado, Em Separação, Concluído/bipado) só o ADMIN troca — é correção de
+  // pedido lançado no cliente errado. Estoque não muda (reserva/baixa não dependem do cliente);
+  // crédito do cliente antigo é devolvido e os avisos (W3, NF, etiqueta) aparecem ao salvar.
+  const podeTrocarCliente = ehOrcamento || p.status === 'AA' ||
+    (!!usuarioLogado?.admin && ['AP','EX','CC'].includes(p.status));
   const creditoHtmlEdicao = pedidoAtual.credito_disponivel > 0 ? `
     <div class="alerta" style="margin-top:8px;border:2px solid #16a34a;background:#f0fdf4;padding:12px 14px;border-radius:8px">
       <div style="font-weight:700;color:#166534">💰 Este cliente tem ${fmtMoeda(creditoAtualCliente)} de crédito disponível</div>
@@ -5392,6 +5397,11 @@ async function selecionarClientePedido(cod){
       </div>
     </div>` : '';
 
+  // Editando pedido existente: o vendedor continua o do pedido, a não ser que o admin escolha
+  // outro no seletor abaixo. Antes o seletor já vinha no vendedor do cliente novo, mas o
+  // salvar ignorava — a tela mostrava uma coisa e gravava outra.
+  const emEdicaoPedido = !!pedidoAtual.editando && ('vendedor_id_original' in pedidoAtual);
+  const vendSelecionado = emEdicaoPedido ? (pedidoAtual.vendedor_id_original || '') : c.vendedor_id;
   let vendedorHtml;
   if(usuarioLogado.admin){
     // Admin pode escolher livremente qual vendedor fica registrado no pedido, mesmo diferente do vendedor do cliente
@@ -5401,7 +5411,7 @@ async function selecionarClientePedido(cod){
       VENDEDORES_SELECT_CACHE = Object.values(usuarios).filter(u=>u.ativo!==false).sort((a,b)=>a.nome.localeCompare(b.nome));
     }
     const opcoes = VENDEDORES_SELECT_CACHE.map(u=>
-      `<option value="${u.id}" data-nome="${esc(u.nome)}" ${u.id===c.vendedor_id?'selected':''}>${esc(u.nome)}</option>`
+      `<option value="${u.id}" data-nome="${esc(u.nome)}" ${u.id===vendSelecionado?'selected':''}>${esc(u.nome)}</option>`
     ).join('');
     vendedorHtml = `
       <div style="font-size:12px;color:var(--muted);margin-top:6px">
@@ -5412,7 +5422,7 @@ async function selecionarClientePedido(cod){
         </select>
       </div>`;
   } else {
-    vendedorHtml = `<div style="font-size:12px;color:var(--muted);margin-top:4px">👤 Vendedor: <strong>${c.vendedor_nome || 'Sem vendedor vinculado'}</strong></div>`;
+    vendedorHtml = `<div style="font-size:12px;color:var(--muted);margin-top:4px">👤 Vendedor: <strong>${esc((emEdicaoPedido ? pedidoAtual.vendedor_nome_original : c.vendedor_nome) || 'Sem vendedor vinculado')}</strong></div>`;
   }
 
   document.getElementById('pedido-cliente-selecionado').innerHTML=
@@ -6585,6 +6595,8 @@ async function confirmarPedido(){
         // isso corrige pedidos presos que ficaram marcados "já debitado" numa tentativa
         // anterior que, na verdade, tinha falhado silenciosamente por outro bug já corrigido.
         creditoJaDebitadoDeste = Number(pedidoAtualDb?.credito_debitado_valor ?? (pedidoAtualDb?.credito_debitado ? pedidoAtualDb?.credito_aplicado : 0) ?? 0);
+        // Cliente trocado: esse valor saiu do saldo do cliente ANTIGO, não conta pro novo
+        if(pedidoAtualDb && pedidoAtualDb.cliente_codigo !== pedidoAtual.cliente.codigo) creditoJaDebitadoDeste = 0;
       }
       // O teto real é o saldo de hoje + o que já foi tirado deste pedido especificamente
       // (essa parte "volta" porque, se o valor aplicado diminuir, ela é devolvida)
@@ -6629,6 +6641,33 @@ async function confirmarPedido(){
       if(snapAntigo.exists()){ pedidoOriginal = snapAntigo.val(); itensAntigos = pedidoOriginal.itens || []; }
     }
 
+    // ── Troca de cliente num pedido que já existia (inclusive já bipado) ──
+    const clienteTrocado = !!(pedidoAtual.editando && pedidoOriginal && pedidoOriginal.cliente_codigo !== c.codigo);
+    let clienteAntigoKey = null;
+    if(clienteTrocado){
+      clienteAntigoKey = CLIENTES_DB.find(x=>x.codigo===pedidoOriginal.cliente_codigo)?._key || null;
+      const avisos = [];
+      if(pedidoOriginal.status === 'CC') avisos.push('• O pedido já foi bipado: reimprima a etiqueta de envio com o cliente novo.');
+      if(pedidoOriginal.faturado) avisos.push('• O pedido já está FATURADO: a nota fiscal foi emitida para o cliente antigo e não muda sozinha.');
+      if(pedidoOriginal.codigo_w3) avisos.push(`• O pedido veio do W3 (${esc(pedidoOriginal.codigo_w3)}): lá ele continua no cliente antigo.`);
+      const credAntigo = Number(pedidoOriginal.credito_debitado_valor ?? (pedidoOriginal.credito_debitado ? pedidoOriginal.credito_aplicado : 0) ?? 0);
+      if(credAntigo > 0) avisos.push(`• ${fmtMoeda(credAntigo)} de crédito aplicado volta para o saldo de ${esc(pedidoOriginal.cliente_nome||'')}.`);
+      if(pedidoOriginal.status === 'CC'){
+        // Garantia só é vinculada ao pedido depois da bipagem. Leitura com cache de 2 min.
+        try {
+          await carregarGarantiasClientes();
+          const gs = GCLI_CACHE.filter(g => g.pedido_id === pedidoAtual.id);
+          if(gs.length) avisos.push(`• Garantia(s) #${gs.map(g=>g.numero).join(', #')} do cliente antigo foram embaladas junto com este pedido.`);
+        } catch(e){ /* sem o aviso de garantia, segue */ }
+      }
+      if(avisos.length || ['AP','EX','CC'].includes(pedidoOriginal.status)){
+        const okTroca = await confirmCustom(
+          `Trocar o cliente do pedido #${pedidoOriginal.numero}?\n\nDe: <strong>${esc(pedidoOriginal.cliente_nome||'')}</strong>\nPara: <strong>${esc(c.nome)}</strong>\n\nO estoque não é alterado.` +
+          (avisos.length ? '\n\n' + avisos.join('\n') : ''), 'Trocar cliente');
+        if(!okTroca) return;
+      }
+    }
+
     // Se o registro original era um Orçamento, "Confirmar Pedido" precisa virar um PEDIDO de
     // verdade: número novo (orçamento e pedido usam contadores separados) e status inicial —
     // nunca herdar o status "Orçamento".
@@ -6648,6 +6687,12 @@ async function confirmarPedido(){
     if(pedidoAtual.editando && pedidoOriginal){
       vendedorIdFinal = pedidoOriginal.vendedor_id || null;
       vendedorNomeFinal = pedidoOriginal.vendedor_nome || '';
+      // Exceção: admin trocou o cliente e escolheu outro vendedor no seletor
+      const selVendEd = document.getElementById('pedido-vendedor-select');
+      if(clienteTrocado && usuarioLogado.admin && selVendEd){
+        vendedorIdFinal = selVendEd.value || null;
+        vendedorNomeFinal = selVendEd.value ? selVendEd.options[selVendEd.selectedIndex].dataset.nome : '';
+      }
     } else {
       // Busca o vendedor ATUAL do cliente direto no banco — não confia na cópia que já
       // estava na memória (CLIENTES_DB só é carregada uma vez por sessão; se alguém trocar
@@ -6679,6 +6724,8 @@ async function confirmarPedido(){
     if(pedidoAtual.editando && pedidoOriginal){
       const obsAtual = document.getElementById('pedido-obs').value;
       const mudancas = gerarResumoAlteracoesPedido(pedidoOriginal, pedidoAtual.itens, forma, condicao, obsAtual, dg, pedidoAtual.credito_aplicado);
+      if(clienteTrocado) mudancas.unshift(`👤 Cliente: ${esc(pedidoOriginal.cliente_nome||'—')} → ${esc(c.nome)}`);
+      if((pedidoOriginal.vendedor_id||null) !== (vendedorIdFinal||null)) mudancas.push(`Vendedor: ${esc(pedidoOriginal.vendedor_nome||'—')} → ${esc(vendedorNomeFinal||'—')}`);
       if(mudancas.length){
         historicoEdicoes = [...historicoEdicoes, {
           ts: agoraTs(),
@@ -6734,9 +6781,25 @@ async function confirmarPedido(){
     // por outro bug já corrigido, mas ainda assim marcou como "já debitado"). Guardando o
     // VALOR exato já debitado, o sistema sempre se autocorrige e também passa a ajustar
     // corretamente pra cima ou pra baixo quando alguém edita o valor de crédito depois.
-    const creditoJaDebitadoAntes = Number(
+    let creditoJaDebitadoAntes = Number(
       pedidoOriginal?.credito_debitado_valor ?? (pedidoOriginal?.credito_debitado ? pedidoOriginal?.credito_aplicado : 0) ?? 0
     );
+    // Cliente trocado: o crédito já debitado por este pedido saiu do saldo do cliente ANTIGO.
+    // Devolve pra ele e começa do zero no novo. Sem isso a diferença caía no cliente novo,
+    // que ganhava um crédito que não era dele.
+    if(clienteTrocado && creditoJaDebitadoAntes > 0){
+      if(clienteAntigoKey){
+        try {
+          await aplicarDeltaCredito(clienteAntigoKey, creditoJaDebitadoAntes);
+        } catch(e){
+          toast('Erro ao devolver o crédito do cliente antigo — nada foi salvo. Tente de novo.','error');
+          return;
+        }
+      } else {
+        toast(`⚠️ Cadastro de ${pedidoOriginal.cliente_nome} não encontrado — devolva ${fmtMoeda(creditoJaDebitadoAntes)} de crédito manualmente.`,'error');
+      }
+      creditoJaDebitadoAntes = 0;
+    }
     const deltaCredito = (pedidoAtual.credito_aplicado || 0) - creditoJaDebitadoAntes;
     if(deltaCredito !== 0 && c._key){
       try {
