@@ -14136,26 +14136,200 @@ async function toggleInativoInsumo(codigo){
   toast(novoStatus ? '✓ Insumo inativado' : '✓ Insumo reativado','success');
 }
 
+// ── Composição: busca de insumo com sugestões enquanto digita ──
+// Antes era um prompt() que exigia o código exato. Agora busca por parte do código OU do
+// nome (sem acento, vários termos: "etiq 50" acha "ETIQUETA 50X30"). Filtra só em memória
+// (INSUMOS_DB já carregado) — nenhuma leitura no Firebase por tecla digitada.
+let compBuscaCtx = null; // { codigoProduto, lista, idxAtivo, selecionado, jaNaReceita, salvando }
+
+function normBuscaComp(v){
+  return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+}
+
 async function adicionarItemComposicao(codigoProduto){
   if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
   if(!INSUMOS_DB.length) await carregarInsumosFirebase();
   if(!temPermissaoEditar('produtos')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
-  const codigoInsumo = prompt('Código do insumo a adicionar (ex: M0123):');
-  if(!codigoInsumo) return;
-  const insumo = INSUMOS_DB.find(i=>i.codigo.toUpperCase()===codigoInsumo.trim().toUpperCase());
-  if(!insumo){ toast('Insumo não encontrado. Verifique o código.','error'); return; }
-  const qtdStr = prompt(`Quantidade de "${insumo.nome}" usada por unidade do produto:`, '1');
-  const qtd = Number(qtdStr);
-  if(!qtd || qtd<=0){ toast('Quantidade inválida','error'); return; }
 
-  const p = PRODUTOS_DB.find(x=>x.codigo===codigoProduto);
-  if(!RECEITAS_DB[codigoProduto]){
-    RECEITAS_DB[codigoProduto] = { produto_codigo: codigoProduto, produto_nome: p?.nome||codigoProduto, itens: [] };
+  compBuscaCtx = { codigoProduto, lista:[], idxAtivo:0, selecionado:null, jaNaReceita:new Set(), salvando:false };
+  document.getElementById('comp-busca-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'comp-busca-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99990;display:flex;align-items:flex-start;justify-content:center;padding:60px 16px 16px';
+  ov.innerHTML = `
+    <div style="background:#fff;border-radius:12px;padding:18px;max-width:560px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-weight:700;font-size:15px">🧩 Adicionar insumo à composição</div>
+        <button type="button" onclick="fecharBuscaComposicao()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">✕</button>
+      </div>
+      <input type="text" id="comp-busca-input" autocomplete="off" placeholder="Digite parte do código ou do nome (ex: etiq, M01...)"
+        style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;box-sizing:border-box"
+        oninput="filtrarBuscaComposicao()" onkeydown="teclaBuscaComposicao(event)">
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">↑ ↓ para navegar · Enter para escolher · Esc para fechar</div>
+      <div id="comp-busca-lista" style="max-height:320px;overflow-y:auto;margin-top:8px"></div>
+      <div id="comp-busca-qtd" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)"></div>
+    </div>`;
+  ov.addEventListener('click', e=>{ if(e.target===ov) fecharBuscaComposicao(); });
+  document.body.appendChild(ov);
+  filtrarBuscaComposicao();
+  setTimeout(()=>document.getElementById('comp-busca-input')?.focus(), 50);
+}
+
+function fecharBuscaComposicao(){
+  document.getElementById('comp-busca-overlay')?.remove();
+  compBuscaCtx = null;
+}
+
+function filtrarBuscaComposicao(){
+  const ctx = compBuscaCtx; if(!ctx) return;
+  // Mudou a busca: descarta a seleção anterior
+  ctx.selecionado = null;
+  const boxQtd = document.getElementById('comp-busca-qtd');
+  if(boxQtd){ boxQtd.style.display='none'; boxQtd.innerHTML=''; }
+
+  ctx.jaNaReceita = new Set((RECEITAS_DB[ctx.codigoProduto]?.itens||[]).map(i=>String(i.codigo||'').toUpperCase()));
+  const q = normBuscaComp(document.getElementById('comp-busca-input')?.value.trim());
+  const listaEl = document.getElementById('comp-busca-lista');
+  if(!listaEl) return;
+  if(!q){
+    ctx.lista = [];
+    listaEl.innerHTML = '<div style="padding:10px;color:var(--muted);font-size:13px">Comece a digitar para ver as opções.</div>';
+    return;
   }
-  RECEITAS_DB[codigoProduto].itens.push({ codigo: insumo.codigo, nome: insumo.nome, qtd });
-  await db.ref('receitas/'+codigoProduto).set(RECEITAS_DB[codigoProduto]);
+  const termos = q.split(/\s+/).filter(Boolean);
+  const achados = [];
+  for(const i of INSUMOS_DB){
+    if(i.inativo) continue;
+    const cod = normBuscaComp(i.codigo), nome = normBuscaComp(i.nome);
+    const alvo = cod + ' ' + nome;
+    if(!termos.every(t => alvo.includes(t))) continue;
+    // Prioridade: código exato > código começa com > nome começa com > contém
+    const rank = cod===q ? 0 : cod.startsWith(q) ? 1 : nome.startsWith(q) ? 2 : 3;
+    achados.push({ i, rank });
+  }
+  achados.sort((a,b)=> a.rank-b.rank || String(a.i.nome||'').localeCompare(String(b.i.nome||''),'pt-BR'));
+  ctx.lista = achados.slice(0,30).map(x=>x.i);
+  // Começa destacado no primeiro que ainda pode ser escolhido
+  const primeiroLivre = ctx.lista.findIndex(i=>!ctx.jaNaReceita.has(String(i.codigo||'').toUpperCase()));
+  ctx.idxAtivo = primeiroLivre < 0 ? 0 : primeiroLivre;
+  renderListaBuscaComposicao(achados.length);
+}
+
+function renderListaBuscaComposicao(totalAchados){
+  const ctx = compBuscaCtx; if(!ctx) return;
+  const listaEl = document.getElementById('comp-busca-lista'); if(!listaEl) return;
+  if(!ctx.lista.length){
+    listaEl.innerHTML = '<div style="padding:10px;color:#dc2626;font-size:13px">Nenhum insumo ativo encontrado.</div>';
+    return;
+  }
+  listaEl.innerHTML = ctx.lista.map((i,idx)=>{
+    const ja = ctx.jaNaReceita.has(String(i.codigo||'').toUpperCase());
+    const ativo = idx === ctx.idxAtivo;
+    const est = Number(i.estoque_atual||0);
+    return `<div id="comp-busca-item-${idx}" ${ja ? '' : `onclick="selecionarInsumoComposicao(${idx})"`}
+      style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:13px;display:flex;justify-content:space-between;gap:10px;align-items:center;
+        cursor:${ja?'default':'pointer'};opacity:${ja?'.5':'1'};background:${ativo&&!ja?'#eef2ff':''};border-radius:6px"
+      onmouseover="if(!${ja}){compBuscaCtx.idxAtivo=${idx};destacarItemBuscaComposicao();}">
+      <div><strong>${esc(i.codigo)}</strong> — ${esc(i.nome||'')}${ja?' <span style="font-size:11px;color:var(--muted)">(já está na composição)</span>':''}</div>
+      <div style="font-size:12px;white-space:nowrap;color:${est>0?'var(--muted)':'#dc2626'}">Est: ${est.toLocaleString('pt-BR')} ${esc(i.unidade||'')}</div>
+    </div>`;
+  }).join('') + (totalAchados > ctx.lista.length
+    ? `<div style="padding:8px 10px;font-size:12px;color:var(--muted)">Mostrando ${ctx.lista.length} de ${totalAchados} — digite mais para refinar.</div>` : '');
+}
+
+function destacarItemBuscaComposicao(){
+  const ctx = compBuscaCtx; if(!ctx) return;
+  ctx.lista.forEach((i,idx)=>{
+    const el = document.getElementById('comp-busca-item-'+idx); if(!el) return;
+    const ja = ctx.jaNaReceita.has(String(i.codigo||'').toUpperCase());
+    el.style.background = (idx===ctx.idxAtivo && !ja) ? '#eef2ff' : '';
+  });
+  document.getElementById('comp-busca-item-'+ctx.idxAtivo)?.scrollIntoView({ block:'nearest' });
+}
+
+function teclaBuscaComposicao(ev){
+  const ctx = compBuscaCtx; if(!ctx) return;
+  if(ev.key === 'Escape'){ ev.preventDefault(); fecharBuscaComposicao(); return; }
+  if(!ctx.lista.length) return;
+  const livre = idx => !ctx.jaNaReceita.has(String(ctx.lista[idx]?.codigo||'').toUpperCase());
+  if(ev.key === 'ArrowDown' || ev.key === 'ArrowUp'){
+    ev.preventDefault();
+    const passo = ev.key === 'ArrowDown' ? 1 : -1;
+    let idx = ctx.idxAtivo;
+    for(let n=0; n<ctx.lista.length; n++){
+      idx = (idx + passo + ctx.lista.length) % ctx.lista.length;
+      if(livre(idx)) break;
+    }
+    ctx.idxAtivo = idx;
+    destacarItemBuscaComposicao();
+  } else if(ev.key === 'Enter'){
+    ev.preventDefault();
+    if(livre(ctx.idxAtivo)) selecionarInsumoComposicao(ctx.idxAtivo);
+  }
+}
+
+function selecionarInsumoComposicao(idx){
+  const ctx = compBuscaCtx; if(!ctx) return;
+  const ins = ctx.lista[idx]; if(!ins) return;
+  if(ctx.jaNaReceita.has(String(ins.codigo||'').toUpperCase())){
+    toast('Esse insumo já está na composição — altere a quantidade direto na tabela','error'); return;
+  }
+  ctx.selecionado = ins;
+  ctx.idxAtivo = idx;
+  destacarItemBuscaComposicao();
+  const box = document.getElementById('comp-busca-qtd'); if(!box) return;
+  box.style.display = '';
+  box.innerHTML = `
+    <div style="font-size:13px;margin-bottom:8px">Selecionado: <strong>${esc(ins.codigo)}</strong> — ${esc(ins.nome||'')}</div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <label style="font-size:13px">Qtd. usada por unidade do produto:</label>
+      <input type="number" id="comp-busca-qtd-input" step="0.001" min="0" value="1"
+        style="width:90px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;text-align:center"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();confirmarItemComposicao(true);} else if(event.key==='Escape'){event.preventDefault();fecharBuscaComposicao();}">
+      ${ins.unidade ? `<span style="font-size:12px;color:var(--muted)">${esc(ins.unidade)}</span>` : ''}
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap">
+      <button type="button" class="btn btn-outline btn-sm" onclick="confirmarItemComposicao(false)">Adicionar e fechar</button>
+      <button type="button" class="btn btn-primary btn-sm" onclick="confirmarItemComposicao(true)">Adicionar e incluir outro</button>
+    </div>`;
+  const qi = document.getElementById('comp-busca-qtd-input');
+  if(qi){ qi.focus(); qi.select(); }
+}
+
+async function confirmarItemComposicao(continuar){
+  const ctx = compBuscaCtx; if(!ctx || !ctx.selecionado || ctx.salvando) return;
+  const qtd = Number(document.getElementById('comp-busca-qtd-input')?.value);
+  if(!qtd || qtd<=0){ toast('Quantidade inválida','error'); return; }
+  const insumo = ctx.selecionado;
+  const codigoProduto = ctx.codigoProduto;
+  ctx.salvando = true;
+  const receitaNova = !RECEITAS_DB[codigoProduto];
+  try {
+    const p = PRODUTOS_DB.find(x=>x.codigo===codigoProduto);
+    if(receitaNova){
+      RECEITAS_DB[codigoProduto] = { produto_codigo: codigoProduto, produto_nome: p?.nome||codigoProduto, itens: [] };
+    }
+    RECEITAS_DB[codigoProduto].itens.push({ codigo: insumo.codigo, nome: insumo.nome, qtd });
+    await db.ref('receitas/'+codigoProduto).set(RECEITAS_DB[codigoProduto]);
+  } catch(e){
+    // Desfaz na memória o que não foi gravado
+    RECEITAS_DB[codigoProduto]?.itens?.pop();
+    if(receitaNova) delete RECEITAS_DB[codigoProduto];
+    ctx.salvando = false;
+    toast('Erro ao salvar composição: '+(e?.message||e),'error');
+    return;
+  }
+  ctx.salvando = false;
   renderModalProduto(codigoProduto);
-  toast('✓ Item adicionado à composição','success');
+  toast(`✓ ${insumo.codigo} adicionado à composição`,'success');
+  if(continuar && compBuscaCtx){
+    const inp = document.getElementById('comp-busca-input');
+    if(inp){ inp.value=''; }
+    filtrarBuscaComposicao();
+    inp?.focus();
+  } else {
+    fecharBuscaComposicao();
+  }
 }
 
 async function editarQtdComposicao(codigoProduto, idx, novoValor){
