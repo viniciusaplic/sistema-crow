@@ -13955,6 +13955,19 @@ async function salvarEdicaoProduto(codigoAntigo){
 
     if(!confirm(`Alterar o código de "${codigoAntigo}" para "${novoCodigo}"?\n\nIsso vai atualizar automaticamente todas as referências (composição, garantias). Pedidos e movimentações já registrados manterão o código antigo no histórico.`)) return;
 
+    // Confere o código novo NO BANCO antes de gravar. A checagem acima usa só a lista em
+    // memória, que não tem os registros sem nome (invisíveis) nem o que outra pessoa
+    // cadastrou depois que esta tela abriu — e o set() abaixo sobrescreveria esse registro
+    // inteiro, apagando o produto que estava lá.
+    const snapDestino = await db.ref('produtos/'+novoCodigo).once('value');
+    if(snapDestino.exists()){
+      const nomeDestino = String(snapDestino.val()?.nome||'').trim();
+      toast(nomeDestino
+        ? `O código "${novoCodigo}" já existe no banco (${nomeDestino}). Nada foi alterado.`
+        : `O código "${novoCodigo}" já existe no banco como registro SEM NOME (invisível). Nada foi alterado — use "🔍 Produtos Sem Nome" para resolver esse registro primeiro.`,'error');
+      return;
+    }
+
     // Cria o produto com o novo código, copiando todos os dados, e remove o antigo
     const snapAntigo = await db.ref('produtos/'+codigoAntigo).once('value');
     // O saldo copiado é o do SERVIDOR, não o do formulário
