@@ -13586,8 +13586,11 @@ function renderModalProduto(codigo){
         </div></div>
         ${produtoDetalheModo==='editar' && p._temp ? `<div class="form-row single"><div class="form-group" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="pd-inativo-criacao" style="width:auto"><label for="pd-inativo-criacao" style="margin:0">Cadastrar já como inativo (item sem estoque/em falta — reative quando voltar)</label></div></div>` : ''}
         <div class="form-actions">
+          ${p._temp ? `
+          <button class="btn btn-outline" onclick="cancelarNovoProdutoVendavel('${codigo}')">Cancelar</button>
+          <button class="btn btn-primary" onclick="salvarNovoProdutoVendavel('${codigo}')">💾 Criar Produto</button>` : `
           <button class="btn btn-outline" onclick="produtoDetalheModo='ver';renderModalProduto('${codigo}')">Cancelar</button>
-          <button class="btn btn-primary" onclick="salvarEdicaoProduto('${codigo}')">💾 Salvar Alterações</button>
+          <button class="btn btn-primary" onclick="salvarEdicaoProduto('${codigo}')">💾 Salvar Alterações</button>`}
         </div>`;
     } else {
       // Edição de INSUMO
@@ -13756,10 +13759,12 @@ function renderModalProduto(codigo){
           </tbody>
         </table>` : `<div style="font-size:12px;color:var(--muted)">Nenhum fornecedor cadastrado para este item.</div>`}
     </div>`;
-  const secoesExtras = fornecedoresHtml + composicaoHtml;
+  // Produto ainda não criado (_temp): fornecedores e composição gravariam num código que
+  // ainda não existe no banco — ficam para depois de clicar em "Criar Produto".
+  const secoesExtras = p._temp ? '' : (fornecedoresHtml + composicaoHtml);
 
   document.getElementById('produto-detalhe-conteudo').innerHTML = `
-    <div class="modal-title">${produtoDetalheModo==='editar'?(tipo==='insumo'?'✏️ Editar Insumo':'✏️ Editar Produto'):(tipo==='insumo'?'Detalhes do Insumo':'Detalhes do Produto')}</div>
+    <div class="modal-title">${p._temp ? (p._titulo_novo || '➕ Novo Produto Vendável') : produtoDetalheModo==='editar'?(tipo==='insumo'?'✏️ Editar Insumo':'✏️ Editar Produto'):(tipo==='insumo'?'Detalhes do Insumo':'Detalhes do Produto')}</div>
     ${corpo}
     ${secoesExtras}
   `;
@@ -14059,50 +14064,83 @@ async function salvarEdicaoInsumo(codigo){
 // Cadastro de novo produto vendável — abre o modal de detalhes com código auto-gerado
 function abrirModalNovoProdutoVendavel(codigoPreenchido, nomePreenchido){
   if(!temPermissaoEditar('produtos')){ toast('Acesso restrito','error'); return; }
+  // Descarta rascunho de uma tentativa anterior abandonada (senão ele entrava no cálculo do
+  // próximo código e aparecia na lista como produto sem nome)
+  PRODUTOS_DB = PRODUTOS_DB.filter(p=>!p._temp);
   const codigoAuto = codigoPreenchido || gerarProximoCodigo('vendavel');
-  // Injeta temporariamente em PRODUTOS_DB para que renderModalProduto encontre o objeto
-  PRODUTOS_DB.unshift({ codigo:codigoAuto, nome:nomePreenchido||'', unidade:'UN', preco_venda:0, preco_minimo:0, quantidade:0, estoque_minimo:0, localizacao:'', gtin:'', _temp:true });
+  // Rascunho temporário em PRODUTOS_DB para o renderModalProduto encontrar o objeto.
+  // O próprio renderModalProduto reconhece o _temp e mostra "Criar Produto"/"Cancelar".
+  // Antes isso era trocado por um setTimeout que procurava IDs que não existem no HTML —
+  // a troca nunca acontecia e o produto era gravado como EDIÇÃO: sem data de cadastro
+  // (ia parar no fim da lista), sem o "cadastrar como inativo" e com a pergunta
+  // "Alterar o código?" quando o código era mudado.
+  PRODUTOS_DB.unshift({ codigo:codigoAuto, nome:nomePreenchido||'', unidade:'UN', preco_venda:0, preco_minimo:0, quantidade:0, estoque_minimo:0, localizacao:'', gtin:'', _temp:true,
+    _titulo_novo: codigoPreenchido ? `➕ Cadastrar Produto (receita já existe — código ${codigoAuto})` : '➕ Novo Produto Vendável' });
   produtoDetalheModo = 'editar';
   itemDetalheTipo = 'vendavel';
   renderModalProduto(codigoAuto);
-  // Personaliza o botão salvar
-  setTimeout(()=>{
-    const btnSalvar = document.querySelector('#modal-produto-detalhe-conteudo .btn-primary');
-    if(btnSalvar){ btnSalvar.textContent='💾 Criar Produto'; btnSalvar.onclick=()=>salvarNovoProdutoVendavel(codigoAuto); }
-    const btnCancel = document.querySelector('#modal-produto-detalhe-conteudo .btn-outline');
-    if(btnCancel){ btnCancel.onclick=()=>{ const i=PRODUTOS_DB.findIndex(p=>p.codigo===codigoAuto&&p._temp); if(i>-1)PRODUTOS_DB.splice(i,1); fecharModal('modal-produto-detalhe'); }; }
-    document.getElementById('modal-produto-detalhe-titulo').textContent = codigoPreenchido ? `➕ Cadastrar Produto (receita já existe — código ${codigoAuto})` : '➕ Novo Produto Vendável';
-  }, 50);
   abrirModal('modal-produto-detalhe');
 }
 
+function cancelarNovoProdutoVendavel(codigoTemp){
+  PRODUTOS_DB = PRODUTOS_DB.filter(p=>!(p._temp && p.codigo===codigoTemp));
+  produtoDetalheModo = 'ver';
+  fecharModal('modal-produto-detalhe');
+}
+
+let salvandoNovoProduto = false;
 async function salvarNovoProdutoVendavel(codigoTemp){
+  if(!temPermissaoEditar('produtos')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  if(salvandoNovoProduto) return;
   const novoCodigo = document.getElementById('pd-codigo')?.value.trim().toUpperCase();
   const nome = document.getElementById('pd-nome')?.value.trim();
   if(!novoCodigo || !nome){ toast('Código e nome são obrigatórios','error'); return; }
-  // Remove o produto temporário
-  const idx = PRODUTOS_DB.findIndex(p=>p.codigo===codigoTemp && p._temp);
-  if(idx>-1) PRODUTOS_DB.splice(idx,1);
-  const conflito = PRODUTOS_DB.find(p=>p.codigo===novoCodigo);
+  if(/[.#$\[\]\/]/.test(novoCodigo)){ toast('O código não pode ter os caracteres . # $ [ ] /','error'); return; }
+
+  // Conflitos checados ANTES de descartar o rascunho (o rascunho não conta como conflito)
+  const conflito = PRODUTOS_DB.find(p=>p.codigo===novoCodigo && !p._temp);
   if(conflito){ toast(`Código "${novoCodigo}" já existe — ${conflito.nome}`,'error'); return; }
-  const produto = {
-    codigo:novoCodigo, nome,
-    unidade: document.getElementById('pd-unidade')?.value||'UN',
-    preco_venda: Number(document.getElementById('pd-preco-venda')?.value)||0,
-    preco_minimo: Number(document.getElementById('pd-preco-minimo')?.value)||0,
-    quantidade: Number(document.getElementById('pd-estoque')?.value)||0,
-    estoque_minimo: Number(document.getElementById('pd-estoque-min')?.value)||0,
-    localizacao: document.getElementById('pd-localizacao')?.value.trim()||'',
-    gtin: document.getElementById('pd-gtin')?.value.trim()||'',
-    categoria: document.getElementById('pd-categoria')?.value || '',
-    ts_cadastro: agoraTs(), pendente_w3: true, novo: true,
-    inativo: !!document.getElementById('pd-inativo-criacao')?.checked
-  };
-  await db.ref('produtos/'+novoCodigo).set(produto);
-  PRODUTOS_DB.unshift(produto);
-  fecharModal('modal-produto-detalhe');
-  toast(`✓ Produto "${nome}" cadastrado${produto.inativo?' (inativo)':''} — código ${novoCodigo}`,'success');
-  renderProdutos();
+  const conflitoInsumo = INSUMOS_DB.find(x=>x.codigo===novoCodigo);
+  if(conflitoInsumo){ toast(`O código "${novoCodigo}" já está em uso pelo INSUMO "${conflitoInsumo.nome}". Use outro.`,'error'); return; }
+  const gtin = document.getElementById('pd-gtin')?.value.trim()||'';
+  if(gtin){
+    const dup = PRODUTOS_DB.find(x=>!x._temp && x.gtin && x.gtin===gtin) || INSUMOS_DB.find(x=>x.gtin && x.gtin===gtin);
+    if(dup){ toast(`O código de barras "${gtin}" já está cadastrado em "${dup.nome}" (${dup.codigo})`,'error'); return; }
+  }
+
+  salvandoNovoProduto = true;
+  try {
+    // Confere no banco também: a lista em memória pode estar desatualizada se outra pessoa
+    // cadastrou esse código depois que esta tela foi carregada
+    const snapExiste = await db.ref('produtos/'+novoCodigo).once('value');
+    if(snapExiste.exists()){ toast(`Código "${novoCodigo}" já existe no banco — ${snapExiste.val()?.nome||''}. Aperte F5 para atualizar a lista.`,'error'); return; }
+
+    const produto = {
+      codigo:novoCodigo, nome,
+      unidade: document.getElementById('pd-unidade')?.value.trim()||'UN',
+      preco_venda: Number(document.getElementById('pd-preco-venda')?.value)||0,
+      preco_minimo: Number(document.getElementById('pd-preco-minimo')?.value)||0,
+      quantidade: Number(document.getElementById('pd-estoque')?.value)||0,
+      estoque_minimo: Number(document.getElementById('pd-estoque-min')?.value)||0,
+      localizacao: document.getElementById('pd-localizacao')?.value.trim()||'',
+      gtin,
+      categoria: document.getElementById('pd-categoria')?.value || '',
+      etiqueta_unica_por_lote: !!document.getElementById('pd-etiqueta-unica')?.checked,
+      ts_cadastro: agoraTs(), pendente_w3: true, novo: true,
+      inativo: !!document.getElementById('pd-inativo-criacao')?.checked
+    };
+    await db.ref('produtos/'+novoCodigo).set(produto);
+    PRODUTOS_DB = PRODUTOS_DB.filter(p=>!(p._temp && p.codigo===codigoTemp));
+    PRODUTOS_DB.unshift(produto);
+    produtoDetalheModo = 'ver';
+    fecharModal('modal-produto-detalhe');
+    toast(`✓ Produto "${nome}" cadastrado${produto.inativo?' (inativo)':''} — código ${novoCodigo}`,'success');
+    renderProdutos();
+  } catch(e){
+    toast('Erro ao criar produto: '+(e?.message||e),'error');
+  } finally {
+    salvandoNovoProduto = false;
+  }
 }
 
 function abrirModalNovoItem(){
