@@ -8399,11 +8399,22 @@ function sincronizarEstoqueMemoria(tipo, chave, valor){
 // committed=false mesmo estando tudo certo no banco: o valor real nunca era consultado.
 // O once() abaixo resolve porque popula o cache com o valor do servidor antes.
 async function transicaoStatus(caminho, de, para){
+  // 1) Confere no servidor se a transicao faz sentido, e avisa o chamador se nao faz.
   const snap = await db.ref(caminho).once('value');
-  const atualServidor = snap.exists() ? snap.val() : null;
+  if(!snap.exists()) return { ok:false, atual:null };
+  const atualServidor = snap.val();
   if(atualServidor !== de) return { ok:false, atual: atualServidor };
+
+  // 2) A transaction e que garante que so UMA execucao vence a corrida.
+  //    Detalhe que derruba a versao ingenua: o once() acima NAO deixa o valor no cache
+  //    local — ele solta o listener e o dado e descartado. Entao a primeira passada da
+  //    transaction recebe null de novo. Abortar nesse null encerra tudo sem consultar o
+  //    servidor, que foi exatamente o bug. Aqui, null significa "cache vazio", e nao
+  //    "campo inexistente" (ja confirmamos acima que existe): seguimos em frente e
+  //    deixamos o Firebase reexecutar com o valor do servidor, que e quem decide.
   const res = await db.ref(caminho).transaction(v => {
-    if(v !== de) return;   // aqui o cache ja tem o valor real do servidor
+    if(v === null) return para;   // cache vazio: deixa o servidor reavaliar
+    if(v !== de) return;          // valor real e nao e o esperado: aborta de verdade
     return para;
   });
   return { ok: res.committed, atual: res.snapshot.val() };
