@@ -3077,7 +3077,8 @@ async function iniciarApp(){
     const btnW3 = document.getElementById('btn-exportar-w3');
     if(btnW3) btnW3.style.display='inline-flex';
     verificarBackupAutomatico(); // dispara em segundo plano, não trava o login
-    carregarMapeamentoW3();      // carrega mapeamentos W3→produto em segundo plano
+    // Vínculos W3 não são mais carregados no login: pedidos não vêm mais do W3 e as
+    // ferramentas que usam os vínculos carregam sob demanda.
   }
   // Migração automática: thomaz/adesio sem tipo definido → tipo expedicao (mesmo se tiver admin:true por engano)
   if(!usuarioLogado.tipo && ['thomaz','adesio'].includes((usuarioLogado.usuario||'').toLowerCase())){
