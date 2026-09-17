@@ -16396,6 +16396,8 @@ let SUGESTAO_LISTA = [];
 //   Qtd Sugerida               = CMD × (Lead Time + Cobertura) + ES − Disponível − Em Trânsito
 // O item entra na lista quando Disponível + Em Trânsito <= Ponto de Pedido.
 const SUG_DIAS_HISTORICO = 365;   // janela do consumo médio (1 ano)
+const SUG_DIAS_RECENTE   = 90;    // janela curta: capta crescimento recente de venda
+const SUG_MARGEM_DIAS    = 15;    // folga sobre o prazo do fornecedor (atraso + montagem)
 const SUG_DIAS_COBERTURA = 45;    // dias de estoque que a compra deve garantir além do lead time
 
 // Cache do consumo anual: a leitura de 365 dias de pedidos + movimentos é pesada no
@@ -16408,9 +16410,15 @@ async function carregarConsumoAnualSugestao(forcar){
     return SUGESTAO_CONSUMO_CACHE;
   }
   const desdeTs = agoraTs() - SUG_DIAS_HISTORICO*24*60*60*1000;
+  const desde90 = agoraTs() - SUG_DIAS_RECENTE*24*60*60*1000;
   // Dois cenarios de demanda na mesma leitura, pro seletor da tela alternar sem reler o Firebase
   const consumo    = { concluidos:{vendavel:{},insumo:{}}, ampliado:{vendavel:{},insumo:{}} };
+  // Mesma coisa, só os ultimos 90 dias: e o que capta crescimento de venda
+  const consumoRec = { concluidos:{vendavel:{},insumo:{}}, ampliado:{vendavel:{},insumo:{}} };
   const emTransito = { vendavel:{}, insumo:{} };
+  // Data do registro mais antigo dentro da janela: o sistema tem menos de um ano de uso,
+  // entao dividir por 365 fixo derrubava a media diaria e o alerta chegava tarde demais.
+  let primeiroPedidoTs = null, primeiroMovTs = null;
 
   // Demanda de vendáveis: vendas reais em pedidos confirmados/concluídos no período
   const snapPedidos = await lerNoCache('pedidos');
@@ -16422,10 +16430,16 @@ async function carregarConsumoAnualSugestao(forcar){
     if(!concluido && !aberto) return;
     const dataPedido = new Date(p.data).getTime();
     if(isNaN(dataPedido) || dataPedido < desdeTs) return;
+    if(primeiroPedidoTs === null || dataPedido < primeiroPedidoTs) primeiroPedidoTs = dataPedido;
+    const recente = dataPedido >= desde90;
     (p.itens||[]).forEach(it=>{
       const qtd = Number(it.qtd||0);
-      if(concluido) consumo.concluidos.vendavel[it.codigo] = (consumo.concluidos.vendavel[it.codigo]||0) + qtd;
+      if(concluido){
+        consumo.concluidos.vendavel[it.codigo] = (consumo.concluidos.vendavel[it.codigo]||0) + qtd;
+        if(recente) consumoRec.concluidos.vendavel[it.codigo] = (consumoRec.concluidos.vendavel[it.codigo]||0) + qtd;
+      }
       consumo.ampliado.vendavel[it.codigo] = (consumo.ampliado.vendavel[it.codigo]||0) + qtd;
+      if(recente) consumoRec.ampliado.vendavel[it.codigo] = (consumoRec.ampliado.vendavel[it.codigo]||0) + qtd;
     });
   });
 
@@ -16438,8 +16452,13 @@ async function carregarConsumoAnualSugestao(forcar){
     const motivoLower = (m.motivo||'').toLowerCase();
     if(motivoLower.includes('balanço') || motivoLower.includes('balanco') || motivoLower.includes('estorno')) return;
     // Saida de insumo e consumo ja realizado: vale para os dois cenarios
+    if(primeiroMovTs === null || m.ts < primeiroMovTs) primeiroMovTs = m.ts;
     consumo.concluidos.insumo[m.codigo] = (consumo.concluidos.insumo[m.codigo]||0) + Number(m.qtd||0);
     consumo.ampliado.insumo[m.codigo]   = (consumo.ampliado.insumo[m.codigo]||0) + Number(m.qtd||0);
+    if(m.ts >= desde90){
+      consumoRec.concluidos.insumo[m.codigo] = (consumoRec.concluidos.insumo[m.codigo]||0) + Number(m.qtd||0);
+      consumoRec.ampliado.insumo[m.codigo]   = (consumoRec.ampliado.insumo[m.codigo]||0) + Number(m.qtd||0);
+    }
   });
 
   // Em trânsito: compras já fora da negociação (Separação em diante)
@@ -16458,7 +16477,13 @@ async function carregarConsumoAnualSugestao(forcar){
     emTransito.vendavel[op.produto_codigo] = (emTransito.vendavel[op.produto_codigo]||0) + Number(op.qtd_solicitada||0);
   });
 
-  SUGESTAO_CONSUMO_CACHE = { ts:agoraTs(), consumo, emTransito };
+  // Dias realmente cobertos pelo historico (minimo de 30, para uma base curta demais nao
+  // inflar a media; maximo de 365, o tamanho da janela).
+  const diasDe = ts => ts === null ? SUG_DIAS_HISTORICO
+    : Math.min(SUG_DIAS_HISTORICO, Math.max(30, Math.ceil((agoraTs() - ts)/(24*60*60*1000))));
+  const diasHistorico = { vendavel: diasDe(primeiroPedidoTs), insumo: diasDe(primeiroMovTs) };
+
+  SUGESTAO_CONSUMO_CACHE = { ts:agoraTs(), consumo, consumoRec, emTransito, diasHistorico };
   return SUGESTAO_CONSUMO_CACHE;
 }
 
@@ -16466,6 +16491,10 @@ async function relSugestaoCompra(el, forcarRecarga){
   // ATENÇÃO: os parâmetros precisam ser lidos ANTES de limpar o innerHTML, senão os
   // campos são destruídos junto com a tela e o código volta sempre pro padrão.
   const diasCobertura = Number(document.getElementById('sugestao-cobertura')?.value) || SUG_DIAS_COBERTURA;
+  const margemEl      = document.getElementById('sugestao-margem');
+  const margemDias    = margemEl ? (Number(margemEl.value) || 0) : SUG_MARGEM_DIAS;
+  const anteciparEl   = document.getElementById('sugestao-antecipar');
+  const anteciparDias = anteciparEl ? (Number(anteciparEl.value) || 0) : 0;
   const baseDemanda   = document.getElementById('sugestao-base-demanda')?.value || 'concluidos';
   const tipoAnterior  = document.getElementById('sugestao-filtro-tipo')?.value || '';
 
@@ -16479,6 +16508,25 @@ async function relSugestaoCompra(el, forcarRecarga){
 
   const dados = await carregarConsumoAnualSugestao(forcarRecarga);
   const mapaConsumo   = dados.consumo[baseDemanda] || dados.consumo.concluidos;
+  const mapaRecente   = (dados.consumoRec || {})[baseDemanda] || { vendavel:{}, insumo:{} };
+  const diasHist      = dados.diasHistorico || { vendavel:SUG_DIAS_HISTORICO, insumo:SUG_DIAS_HISTORICO };
+
+  // Média diária: divide pelos dias que o histórico REALMENTE cobre e fica com a maior
+  // entre o período todo e os últimos 90 dias — venda que cresceu puxa a previsão pra cima.
+  function cmdDe(chave, codigo){
+    const dias   = diasHist[chave] || SUG_DIAS_HISTORICO;
+    const dias90 = Math.min(SUG_DIAS_RECENTE, dias);
+    const media  = (mapaConsumo[chave][codigo] || 0) / dias;
+    const recente = dias90 > 0 ? (mapaRecente[chave]?.[codigo] || 0) / dias90 : 0;
+    return Math.max(media, recente);
+  }
+  const hojeMs = agoraTs();
+  // Data limite para fazer o pedido: hoje + dias que o estoque ainda aguenta, menos o
+  // tempo de reposição. Negativo = já está atrasado.
+  function dataLimite(diasAteFaltar, tempoReposicao){
+    const dias = Math.floor(diasAteFaltar - tempoReposicao);
+    return { dias, data: new Date(hojeMs + dias*24*60*60*1000) };
+  }
 
   // Monta a linha MRP de um item (vendável ou insumo)
   function montarLinha(item, tipo){
@@ -16487,8 +16535,7 @@ async function relSugestaoCompra(el, forcarRecarga){
       ? Number(item.estoque_atual||0)
       : Number(item.quantidade||0) - Number(item.reservado||0);
     const transito   = dados.emTransito[chave][item.codigo] || 0;
-    const consumoAno = mapaConsumo[chave][item.codigo] || 0;
-    const cmd        = consumoAno / SUG_DIAS_HISTORICO;
+    const cmd        = cmdDe(chave, item.codigo);
     const es         = Number(item.estoque_minimo||0);
 
     const nomeForn   = fornecedorPadrao(item);
@@ -16496,14 +16543,20 @@ async function relSugestaoCompra(el, forcarRecarga){
     const leadTime   = Number(cadastro?.prazo_entrega_dias||0);
 
     const pontoPedido = cmd*leadTime + es;
-    const posicao     = disponivel + transito;
+    // Antecipação: enxerga a posição como ela estará daqui a X dias de venda
+    const posicao     = disponivel + transito - cmd*anteciparDias;
     const alvo        = cmd*(leadTime + diasCobertura) + es;
     const sugestao    = Math.max(0, Math.ceil(alvo - posicao));
     const cobertura   = cmd > 0 ? disponivel/cmd : Infinity;
+    // Dias até a posição encostar no ponto de pedido; o pedido precisa sair nesse dia
+    const diasAteFaltar = cmd > 0 ? (disponivel + transito - es)/cmd : Infinity;
+    const limite = cmd > 0 ? dataLimite(diasAteFaltar, leadTime) : null;
 
     return { tipo, codigo:item.codigo, nome:item.nome||'', unidade:item.unidade||'UN',
       fornecedor:nomeForn, cod_fornecedor:(item.fornecedores||[])[0]?.codigo_fornecedor||'',
       cmd, leadTime, es, disponivel, emTransito:transito, pontoPedido, cobertura, sugestao,
+      diasLimite: limite ? limite.dias : null, dataLimite: limite ? limite.data : null,
+      futuro: sugestao > 0 && (disponivel + transito) > pontoPedido,
       semLeadTime: leadTime === 0, semConsumo: cmd === 0 };
   }
 
@@ -16582,15 +16635,17 @@ async function relSugestaoCompra(el, forcarRecarga){
   function montarLinhaInsumo(item){
     const disponivel = Number(item.estoque_atual||0);
     const transito   = dados.emTransito.insumo[item.codigo] || 0;
-    const consumoAno = mapaConsumo.insumo[item.codigo] || 0;
-    const cmd        = consumoAno / SUG_DIAS_HISTORICO;
+    const cmd        = cmdDe('insumo', item.codigo);
     const es         = Number(item.estoque_minimo||0);
 
     const nomeForn   = fornecedorPadrao(item);
     const cadastro   = FORNECEDORES_DB.find(f=>f.nome === nomeForn);
     const leadTime   = Number(cadastro?.prazo_entrega_dias||0);
 
-    const horizonte   = leadTime + diasCobertura;
+    // Margem cobre atraso do fornecedor e o tempo de montagem entre a chegada do insumo
+    // e a venda do produto pai.
+    const reposicao   = leadTime + margemDias;
+    const horizonte   = reposicao + diasCobertura;
     const necProducao = necessidadeDependente(item.codigo, horizonte);
     const necOP       = comprometidoOP[item.codigo] || 0;
     const naReceita   = parteDeReceita.has(item.codigo);
@@ -16602,36 +16657,62 @@ async function relSugestaoCompra(el, forcarRecarga){
     // Estoque mínimo de insumo NÃO entra em nenhum dos dois caminhos. Na receita, a
     // necessidade vem do pai. Fora da receita, vem do consumo histórico. O campo continua
     // no cadastro, mas não manda mais em nada aqui.
-    let necessidade, pontoPedido, origem;
+    let necessidade, pontoPedido, origem, necessidadeEm;
     if(naReceita || necProducao > 0 || necOP > 0){
       necessidade = necProducao + necOP;
       pontoPedido = null;
       origem = 'receita';
+      // Necessidade acumulada olhando "d" dias à frente — usada na antecipação e na data limite
+      necessidadeEm = d => necessidadeDependente(item.codigo, horizonte + d) + necOP;
     } else {
-      necessidade = cmd*(leadTime + diasCobertura);
-      pontoPedido = cmd*leadTime;
+      necessidade = cmd*horizonte;
+      pontoPedido = cmd*reposicao;
       origem = 'consumo';
+      necessidadeEm = d => cmd*(horizonte + d);
     }
 
-    const sugestao  = Math.max(0, Math.ceil(necessidade - disponivel - transito));
+    const posicao   = disponivel + transito;
+    const necAntecipada = anteciparDias > 0 ? necessidadeEm(anteciparDias) : necessidade;
+    const sugestao  = Math.max(0, Math.ceil(necAntecipada - posicao));
     const cobertura = cmd > 0 ? disponivel/cmd : Infinity;
+
+    // Em quantos dias a necessidade passa do que existe: busca binária, porque a
+    // necessidade só cresce conforme o horizonte aumenta.
+    let diasAteFaltar = null;
+    if(necessidade > posicao){
+      diasAteFaltar = 0;
+    } else if(necessidadeEm(365) > posicao){
+      let lo = 0, hi = 365;
+      while(hi - lo > 1){
+        const meio = Math.floor((lo + hi)/2);
+        if(necessidadeEm(meio) > posicao) hi = meio; else lo = meio;
+      }
+      diasAteFaltar = hi;
+    }
+    // A necessidade já inclui o tempo de reposição, então a data limite é o próprio dia
+    const limite = diasAteFaltar === null ? null : dataLimite(diasAteFaltar, 0);
 
     return { tipo:'Insumo', codigo:item.codigo, nome:item.nome||'', unidade:item.unidade||'UN',
       fornecedor:nomeForn, cod_fornecedor:(item.fornecedores||[])[0]?.codigo_fornecedor||'',
       cmd, leadTime, es, disponivel, emTransito:transito, pontoPedido, cobertura, sugestao,
-      necProducao, necOP, necessidade, origem, qtdPais, horizonte,
+      necProducao, necOP, necessidade: necAntecipada, origem, qtdPais, horizonte, margemDias,
+      diasLimite: limite ? limite.dias : null, dataLimite: limite ? limite.data : null,
+      futuro: sugestao > 0 && necessidade <= posicao,
       semPai: naReceita && qtdPais === 0,
       semLeadTime: leadTime === 0, semConsumo: cmd === 0 };
   }
 
   const lista = [
-    ...linhasVend.filter(l => l.disponivel + l.emTransito <= l.pontoPedido),
+    ...linhasVend.filter(l => l.disponivel + l.emTransito - l.cmd*anteciparDias <= l.pontoPedido),
     ...INSUMOS_DB.filter(i=>!i.inativo).map(i=>montarLinhaInsumo(i))
   ].filter(l => l.sugestao > 0)
-   // Infinity - Infinity dá NaN e deixa a ordenação indefinida: comparamos explicitamente
+   // Ordena pela data limite do pedido — quem precisa ser comprado antes aparece primeiro.
+   // Sem data (item sem consumo) vai para o fim. Infinity - Infinity daria NaN.
    .sort((a,b)=>{
-     if(a.cobertura === b.cobertura) return a.codigo.localeCompare(b.codigo,'pt-BR');
-     return a.cobertura < b.cobertura ? -1 : 1;
+     const da = a.diasLimite === null ? Infinity : a.diasLimite;
+     const dbb = b.diasLimite === null ? Infinity : b.diasLimite;
+     if(da === dbb) return a.codigo.localeCompare(b.codigo,'pt-BR');
+     return da < dbb ? -1 : 1;
    });
 
   relatorioCache = { tipo:'sugestao-compra', lista };
@@ -16655,9 +16736,11 @@ async function relSugestaoCompra(el, forcarRecarga){
     <button class="btn btn-primary btn-sm" style="background:#1565c0" onclick="criarPedidoCompraDoRelatorio()">🛒 Criar Pedido com Selecionados</button>
   </div>
   <div style="padding:10px 14px;background:#eff6ff;border-left:4px solid #1565c0;border-radius:6px;margin-bottom:12px;font-size:12px;color:#1e3a5f;line-height:1.6">
-    <strong>Cálculo MRP:</strong> CMD = itens de <strong>${baseDemanda==='ampliado'?'pedidos concluídos + aprovados + em separação':'pedidos concluídos'}</strong> nos últimos 365 dias ÷ 365 &nbsp;·&nbsp;
+    <strong>Cálculo MRP:</strong> CMD = itens de <strong>${baseDemanda==='ampliado'?'pedidos concluídos + aprovados + em separação':'pedidos concluídos'}</strong>, pela <strong>maior</strong> entre a média do histórico disponível (${diasHist.vendavel} dias de pedidos · ${diasHist.insumo} dias de movimentação de insumo) e a média dos últimos ${SUG_DIAS_RECENTE} dias &nbsp;·&nbsp;
     Ponto de Pedido = (CMD × Lead Time) + Estoque Mínimo &nbsp;·&nbsp;
     Qtd Sugerida = CMD × (Lead Time + ${diasCobertura} dias) + Estoque Mínimo − Disponível − Em Trânsito.
+    <br><strong>Insumos:</strong> o prazo do fornecedor entra com <strong>${margemDias} dia(s) de margem</strong> (atraso na entrega + tempo de montagem).
+    ${anteciparDias > 0 ? `<br><strong style="color:#b45309">Antecipação de ${anteciparDias} dia(s) ligada:</strong> as linhas em amarelo ainda não atingiram o ponto de pedido — elas vão atingir dentro desse prazo e vêm <strong>desmarcadas</strong>, para você escolher o que adiantar.` : ''}
     <br><strong>Insumos seguem outra lógica e não usam estoque mínimo:</strong> a necessidade é a produção
     líquida de todos os produtos pais dentro do <em>horizonte do próprio insumo</em> (lead time dele + ${diasCobertura} dias),
     somada ao que as OPs abertas ainda vão consumir. Assim um insumo já transformado em produto acabado não é
@@ -16689,9 +16772,17 @@ async function relSugestaoCompra(el, forcarRecarga){
         <option value="ampliado" ${baseDemanda==='ampliado'?'selected':''}>Concluídos + aprovados + em separação</option>
       </select>
     </div>
-    <div class="form-group" style="margin:0;width:160px">
+    <div class="form-group" style="margin:0;width:120px">
       <label>Cobertura (dias)</label>
       <input type="number" id="sugestao-cobertura" value="${diasCobertura}" min="1">
+    </div>
+    <div class="form-group" style="margin:0;width:120px">
+      <label title="Folga sobre o prazo do fornecedor: atraso na entrega e tempo de montagem">Margem (dias)</label>
+      <input type="number" id="sugestao-margem" value="${margemDias}" min="0">
+    </div>
+    <div class="form-group" style="margin:0;width:150px">
+      <label title="Mostra também o que vai precisar de compra dentro desse prazo, para adiantar o pedido">Antecipar (dias)</label>
+      <input type="number" id="sugestao-antecipar" value="${anteciparDias}" min="0">
     </div>
     <button class="btn btn-outline btn-sm" onclick="recalcularSugestaoCompra()">🔄 Recalcular</button>
   </div>
@@ -16766,7 +16857,7 @@ function renderTabelaSugestao(){
   const colTipo   = !filtroTipo;                 // com filtro, o tipo já é óbvio
   const colNecPrd = filtroTipo !== 'Vendável';   // vendável nunca tem necessidade de produção
   const colPonto  = true;                        // ponto de pedido sempre visível
-  const totalCols = 11 + (colTipo?1:0) + (colNecPrd?1:0) + (colPonto?1:0);
+  const totalCols = 12 + (colTipo?1:0) + (colNecPrd?1:0) + (colPonto?1:0);
   const td = 'padding:7px 6px';
 
   // Cabeçalho fixo: o container tem altura máxima e rolagem própria, e cada <th> usa
@@ -16779,7 +16870,7 @@ function renderTabelaSugestao(){
       <th style="${thBase};width:30px"><input type="checkbox" id="rel-sel-todos" onchange="selecionarTodosSugestao(this.checked)"></th>
       <th style="${thBase}">Código</th><th style="${thBase}">Produto/Insumo</th>
       ${colTipo ? `<th style="${thBase};text-align:center">Tipo</th>` : ''}
-      <th style="${thBase};text-align:center" title="Consumo Médio Diário — últimos 365 dias">CMD</th>
+      <th style="${thBase};text-align:center" title="Consumo Médio Diário — maior entre a média do histórico disponível e a dos últimos 90 dias">CMD</th>
       <th style="${thBase};text-align:center" title="Prazo de entrega do fornecedor">Lead (d)</th>
       <th style="${thBase};text-align:center">Disponível</th>
       <th style="${thBase};text-align:center">Em Trânsito</th>
@@ -16787,6 +16878,7 @@ function renderTabelaSugestao(){
       ${colNecPrd ? `<th style="${thBase};text-align:center" title="Insumos: quantidade exigida pela produção planejada + OPs abertas">Nec. Produção</th>` : ''}
       ${colPonto ? `<th style="${thBase};text-align:center" title="Vendáveis: (CMD × Lead Time) + Estoque Mínimo">Ponto Pedido</th>` : ''}
       <th style="${thBase};text-align:center" title="Dias de estoque restantes no ritmo atual">Cobertura</th>
+      <th style="${thBase};text-align:center" title="Último dia para fazer o pedido sem faltar, já descontado o tempo de reposição">Comprar até</th>
       <th style="${thBase};text-align:center">Qtd Sugerida</th>
       <th style="${thBase};text-align:center">Qtd a Pedir</th>
     </tr></thead><tbody>`;
@@ -16796,8 +16888,12 @@ function renderTabelaSugestao(){
     itens.forEach(p=>{
       const corCob = p.cobertura <= p.leadTime ? '#dc2626' : (p.cobertura <= p.leadTime+7 ? '#d97706' : '#16a34a');
       const txtCob = isFinite(p.cobertura) ? `${Math.floor(p.cobertura)} d` : '—';
-      html += `<tr style="border-bottom:1px solid var(--border)">
-        <td style="${td};text-align:center"><input type="checkbox" class="rel-sugestao-check" data-id="${p.tipo}|${p.codigo}" checked></td>
+      // Data limite do pedido: vermelho já passou, laranja nos próximos 7 dias
+      const corLim = p.diasLimite === null ? 'var(--muted)' : (p.diasLimite <= 0 ? '#dc2626' : (p.diasLimite <= 7 ? '#d97706' : '#16a34a'));
+      const txtLim = p.diasLimite === null ? '—'
+        : (p.diasLimite <= 0 ? 'HOJE' : `${p.dataLimite.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})}<div style="font-size:10px;font-weight:400;color:var(--muted)">em ${p.diasLimite} d</div>`);
+      html += `<tr style="border-bottom:1px solid var(--border);${p.futuro?'background:#fffbeb':''}" ${p.futuro?'title="Ainda não atingiu o ponto de pedido — aparece por causa da antecipação"':''}>
+        <td style="${td};text-align:center"><input type="checkbox" class="rel-sugestao-check" data-id="${p.tipo}|${p.codigo}" ${p.futuro?'':'checked'}></td>
         <td style="${td}"><strong>${p.codigo}</strong></td>
         <td style="${td};min-width:130px;line-height:1.3">${esc(p.nome)}</td>
         ${colTipo ? `<td style="${td};text-align:center"><span class="badge badge-gray" style="font-size:10px">${p.tipo}</span></td>` : ''}
@@ -16813,6 +16909,7 @@ function renderTabelaSugestao(){
           ? '<span style="color:var(--muted);font-weight:400" title="Insumo de receita: não usa ponto de pedido próprio">—</span>'
           : fmt(p.pontoPedido)}</td>` : ''}
         <td style="${td};text-align:center;color:${corCob};font-weight:700">${txtCob}</td>
+        <td style="${td};text-align:center;font-weight:700;color:${corLim}">${txtLim}</td>
         <td style="${td};text-align:center;font-weight:700">${fmt(p.sugestao)}</td>
         <td style="${td};text-align:center">
           <input type="number" class="rel-sugestao-qtd" data-id="${p.tipo}|${p.codigo}" value="${p.sugestao}" min="1"
