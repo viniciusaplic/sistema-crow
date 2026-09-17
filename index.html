@@ -16611,60 +16611,70 @@ function renderTabelaSugestao(){
 
   const fmt = n => n.toLocaleString('pt-BR',{maximumFractionDigits:2});
 
+  // Layout compacto para caber na tela sem rolagem lateral: colunas que ficariam
+  // sempre vazias com o filtro de tipo atual não são desenhadas.
+  const colTipo   = !filtroTipo;                 // com filtro, o tipo já é óbvio
+  const colNecPrd = filtroTipo !== 'Vendável';   // vendável nunca tem necessidade de produção
+  const colPonto  = true;                        // ponto de pedido sempre visível
+  const totalCols = 11 + (colTipo?1:0) + (colNecPrd?1:0) + (colPonto?1:0);
+  const td = 'padding:7px 6px';
+
   // Cabeçalho fixo: o container tem altura máxima e rolagem própria, e cada <th> usa
   // position:sticky. Sem a altura máxima aqui o sticky não gruda em lugar nenhum,
   // porque o overflow-x do container já cria um contexto de rolagem próprio.
-  const thBase = 'padding:10px 12px;position:sticky;top:0;z-index:3;background:var(--primary);color:rgba(255,255,255,.85);white-space:nowrap';
+  const thBase = 'padding:8px 6px;position:sticky;top:0;z-index:3;background:var(--primary);color:rgba(255,255,255,.85);font-size:10px;letter-spacing:.3px;line-height:1.25;vertical-align:middle';
   let html = `<div style="overflow:auto;max-height:70vh;border:1px solid var(--border);border-radius:8px">
-    <table style="width:100%;border-collapse:collapse;font-size:13px">
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
     <thead><tr>
       <th style="${thBase};width:30px"><input type="checkbox" id="rel-sel-todos" onchange="selecionarTodosSugestao(this.checked)"></th>
       <th style="${thBase}">Código</th><th style="${thBase}">Produto/Insumo</th>
-      <th style="${thBase};text-align:center">Tipo</th>
+      ${colTipo ? `<th style="${thBase};text-align:center">Tipo</th>` : ''}
       <th style="${thBase};text-align:center" title="Consumo Médio Diário — últimos 365 dias">CMD</th>
       <th style="${thBase};text-align:center" title="Prazo de entrega do fornecedor">Lead (d)</th>
       <th style="${thBase};text-align:center">Disponível</th>
       <th style="${thBase};text-align:center">Em Trânsito</th>
       <th style="${thBase};text-align:center" title="Estoque de segurança = estoque mínimo cadastrado">Est. Mín</th>
-      <th style="${thBase};text-align:center" title="Insumos: quantidade exigida pela produção planejada + OPs abertas">Nec. Produção</th>
-      <th style="${thBase};text-align:center" title="Vendáveis: (CMD × Lead Time) + Estoque Mínimo">Ponto Pedido</th>
+      ${colNecPrd ? `<th style="${thBase};text-align:center" title="Insumos: quantidade exigida pela produção planejada + OPs abertas">Nec. Produção</th>` : ''}
+      ${colPonto ? `<th style="${thBase};text-align:center" title="Vendáveis: (CMD × Lead Time) + Estoque Mínimo">Ponto Pedido</th>` : ''}
       <th style="${thBase};text-align:center" title="Dias de estoque restantes no ritmo atual">Cobertura</th>
       <th style="${thBase};text-align:center">Qtd Sugerida</th>
       <th style="${thBase};text-align:center">Qtd a Pedir</th>
     </tr></thead><tbody>`;
 
   Object.entries(porFornecedor).forEach(([forn, itens])=>{
-    html += `<tr style="background:#f8f9fa"><td colspan="14" style="padding:8px 12px;font-weight:700;color:var(--primary);position:sticky;top:41px;z-index:2;background:#f8f9fa">📦 ${forn}</td></tr>`;
+    html += `<tr style="background:#f8f9fa"><td colspan="${totalCols}" style="padding:6px 8px;font-weight:700;color:var(--primary);position:sticky;top:var(--sug-th-h,41px);z-index:2;background:#f8f9fa">📦 ${forn}</td></tr>`;
     itens.forEach(p=>{
       const corCob = p.cobertura <= p.leadTime ? '#dc2626' : (p.cobertura <= p.leadTime+7 ? '#d97706' : '#16a34a');
       const txtCob = isFinite(p.cobertura) ? `${Math.floor(p.cobertura)} d` : '—';
       html += `<tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:10px 12px;text-align:center"><input type="checkbox" class="rel-sugestao-check" data-id="${p.tipo}|${p.codigo}" checked></td>
-        <td style="padding:10px 12px"><strong>${p.codigo}</strong></td>
-        <td style="padding:10px 12px">${esc(p.nome)}</td>
-        <td style="padding:10px 12px;text-align:center"><span class="badge badge-gray" style="font-size:10px">${p.tipo}</span></td>
-        <td style="padding:10px 12px;text-align:center">${p.semConsumo ? '<span style="color:#9ca3af" title="Sem consumo no último ano — sugestão baseada só no estoque mínimo">0</span>' : fmt(p.cmd)}</td>
-        <td style="padding:10px 12px;text-align:center">${p.semLeadTime ? '<span style="color:#b45309" title="Fornecedor sem prazo de entrega cadastrado">—</span>' : p.leadTime}</td>
-        <td style="padding:10px 12px;text-align:center;color:${p.disponivel<=0?'#dc2626':'#d97706'};font-weight:700">${fmt(p.disponivel)}</td>
-        <td style="padding:10px 12px;text-align:center;color:${p.emTransito>0?'#1565c0':'var(--muted)'}">${p.emTransito ? fmt(p.emTransito) : '—'}</td>
-        <td style="padding:10px 12px;text-align:center;${p.tipo==='Insumo'?'color:#9ca3af':''}" ${p.tipo==='Insumo'?'title="Insumos não usam estoque mínimo: a necessidade vem da receita ou do consumo histórico"':''}>${p.es ? fmt(p.es) : '—'}</td>
-        <td style="padding:10px 12px;text-align:center;font-weight:600">${p.origem==='receita'
+        <td style="${td};text-align:center"><input type="checkbox" class="rel-sugestao-check" data-id="${p.tipo}|${p.codigo}" checked></td>
+        <td style="${td}"><strong>${p.codigo}</strong></td>
+        <td style="${td};min-width:130px;line-height:1.3">${esc(p.nome)}</td>
+        ${colTipo ? `<td style="${td};text-align:center"><span class="badge badge-gray" style="font-size:10px">${p.tipo}</span></td>` : ''}
+        <td style="${td};text-align:center">${p.semConsumo ? '<span style="color:#9ca3af" title="Sem consumo no último ano — sugestão baseada só no estoque mínimo">0</span>' : fmt(p.cmd)}</td>
+        <td style="${td};text-align:center">${p.semLeadTime ? '<span style="color:#b45309" title="Fornecedor sem prazo de entrega cadastrado">—</span>' : p.leadTime}</td>
+        <td style="${td};text-align:center;color:${p.disponivel<=0?'#dc2626':'#d97706'};font-weight:700">${fmt(p.disponivel)}</td>
+        <td style="${td};text-align:center;color:${p.emTransito>0?'#1565c0':'var(--muted)'}">${p.emTransito ? fmt(p.emTransito) : '—'}</td>
+        <td style="${td};text-align:center;${p.tipo==='Insumo'?'color:#9ca3af':''}" ${p.tipo==='Insumo'?'title="Insumos não usam estoque mínimo: a necessidade vem da receita ou do consumo histórico"':''}>${p.es ? fmt(p.es) : '—'}</td>
+        ${colNecPrd ? `<td style="${td};text-align:center;font-weight:600">${p.origem==='receita'
           ? `${fmt(p.necessidade)}<div style="font-size:10px;color:var(--muted);font-weight:400">${p.necOP>0?`OP: ${fmt(p.necOP)}`:''}${p.necOP>0&&p.necProducao>0?' · ':''}${p.necProducao>0?`${p.qtdPais} pai(s) · ${p.horizonte}d`:''}</div>`
-          : '<span style="color:var(--muted);font-weight:400">—</span>'}</td>
-        <td style="padding:10px 12px;text-align:center;font-weight:600">${p.pontoPedido===null
+          : '<span style="color:var(--muted);font-weight:400">—</span>'}</td>` : ''}
+        ${colPonto ? `<td style="${td};text-align:center;font-weight:600">${p.pontoPedido===null
           ? '<span style="color:var(--muted);font-weight:400" title="Insumo de receita: não usa ponto de pedido próprio">—</span>'
-          : fmt(p.pontoPedido)}</td>
-        <td style="padding:10px 12px;text-align:center;color:${corCob};font-weight:700">${txtCob}</td>
-        <td style="padding:10px 12px;text-align:center;font-weight:700">${fmt(p.sugestao)}</td>
-        <td style="padding:10px 12px;text-align:center">
+          : fmt(p.pontoPedido)}</td>` : ''}
+        <td style="${td};text-align:center;color:${corCob};font-weight:700">${txtCob}</td>
+        <td style="${td};text-align:center;font-weight:700">${fmt(p.sugestao)}</td>
+        <td style="${td};text-align:center">
           <input type="number" class="rel-sugestao-qtd" data-id="${p.tipo}|${p.codigo}" value="${p.sugestao}" min="1"
-            style="width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;font-size:12px;text-align:center">
+            style="width:62px;padding:4px 4px;border:1px solid var(--border);border-radius:6px;font-size:12px;text-align:center">
         </td>
       </tr>`;
     });
   });
   html += '</tbody></table></div>';
   wrap.innerHTML = html;
+  const thEl = wrap.querySelector('thead th');
+  if(thEl) wrap.style.setProperty('--sug-th-h', thEl.offsetHeight + 'px');
 }
 
 // ── Sugestão Jornal do Mês (corrigida) ──
@@ -17380,30 +17390,63 @@ async function criarPedidoCompraDoRelatorio(){
     : `Criar ${fornecedores.length} pedido(s) de compra (um por fornecedor)?`;
   if(!confirm(`🛒 ${msg}`)) return;
 
+  // Último preço de compra de cada item com o MESMO fornecedor — mesma regra do
+  // "adicionar item" manual: qualquer status, preço > 0, mais recente pela data do
+  // pedido e, no empate, pelo horário de criação. Usa a leitura em cache que a própria
+  // sugestão acabou de fazer, então normalmente não custa nenhuma leitura a mais.
+  const snapHist = await lerNoCache('pedidos_compra');
+  const ultimoPreco = {}; // 'fornecedor|tipo|codigo' -> { preco, data, ts }
+  Object.values(snapHist.val() || {}).forEach(c=>{
+    const fornC = (c.fornecedor||'').trim().toLowerCase();
+    const data = c.data || '';
+    const ts = Number(c.ts_criacao) || 0;
+    (c.itens||[]).forEach(it=>{
+      const preco = Number(it.preco_unit)||0;
+      if(preco <= 0 || !it.codigo) return;
+      const chave = fornC+'|'+it.codigo;
+      const atual = ultimoPreco[chave];
+      if(!atual || data > atual.data || (data === atual.data && ts > atual.ts)){
+        ultimoPreco[chave] = { preco, data, ts };
+      }
+    });
+  });
+
   let criados = 0;
+  let semPreco = 0;
   for(const [forn, itens] of Object.entries(porFornecedor)){
     const key = db.ref('pedidos_compra').push().key;
     const snapNum = await db.ref('contador_pedidos_compra').transaction(v=>(v||0)+1);
     const numero = snapNum.snapshot.val();
-    const itensPedido = itens.map(p=>({
-      codigo: p.codigo, nome: p.nome, tipo: (p.tipo==='Insumo'?'insumo':'vendavel'),
-      codigo_fornecedor: p.cod_fornecedor||'',
-      qtd: p.qtdPedir, preco_unit: 0, ipi_pct: 0, st_valor: 0,
-      valorBruto:0, valorIpi:0, valorSt:0, rateioFrete:0, custoTotalItem:0, custoFinalUnitario:0
-    }));
+    const fornChave = (forn||'').trim().toLowerCase();
+    const itensPedido = itens.map(p=>{
+      const preco = ultimoPreco[fornChave+'|'+p.codigo]?.preco || 0;
+      if(!preco) semPreco++;
+      // Sem frete, IPI e ST no momento da criação: custo final = preço unitário
+      const valorBruto = Number(p.qtdPedir||0) * preco;
+      return {
+        codigo: p.codigo, nome: p.nome, tipo: (p.tipo==='Insumo'?'insumo':'vendavel'),
+        codigo_fornecedor: p.cod_fornecedor||'',
+        qtd: p.qtdPedir, preco_unit: preco, ipi_pct: 0, st_valor: 0,
+        valorBruto, valorIpi:0, valorSt:0, rateioFrete:0,
+        custoTotalItem: valorBruto, custoFinalUnitario: preco
+      };
+    });
+    const totalPedido = itensPedido.reduce((s,i)=>s+i.custoTotalItem, 0);
     await db.ref('pedidos_compra/'+key).set({
       fornecedor: forn, nf:'', data: agora().toISOString().split('T')[0],
       frete:0, desconto:0, obs:'Gerado pela Sugestão de Compra',
       numero_origem: 'C'+String(numero).padStart(4,'0'),
-      status:'negociacao', itens:itensPedido, total:0,
+      status:'negociacao', itens:itensPedido, total:totalPedido,
       ts_criacao:agoraTs(), criado_por:usuarioLogado.nome
     });
     criados++;
   }
+  invalidarCacheNo('pedidos_compra'); // os pedidos novos precisam aparecer na próxima leitura
   toast(`✓ ${criados} pedido(s) de compra criado(s)!`,'success');
   document.getElementById('rel-conteudo').innerHTML +=
     `<div style="margin-top:16px;padding:12px 16px;background:#dcfce7;border-radius:8px;font-size:13px;color:#16a34a">
-      ✅ ${criados} pedido(s) de compra criado(s) com status <strong>Em Negociação</strong>. Acesse <strong>Compras → Pedidos de Compra</strong> para complementar preços e confirmar.
+      ✅ ${criados} pedido(s) de compra criado(s) com status <strong>Em Negociação</strong>, com o último preço pago a cada fornecedor.
+      ${semPreco ? `<br><strong style="color:#b45309">⚠ ${semPreco} item(ns) sem compra anterior com esse fornecedor ficaram com preço R$ 0,00</strong> — complete em <strong>Compras → Pedidos de Compra</strong>.` : ''}
     </div>`;
 }
 
