@@ -1917,10 +1917,10 @@ tbody td{padding:11px 16px;font-size:14px}
     <div class="form-row single"><div class="form-group"><label>Meta do Mês (R$) *</label>
       <input type="text" inputmode="decimal" id="meta-mes-valor" placeholder="ex: 320.000,00" oninput="ecoMetaMes()" autocomplete="off">
       <div id="meta-mes-eco" style="font-size:12px;color:var(--muted);margin-top:4px"></div></div></div>
-    <div class="form-row">
-      <div class="form-group"><label>Dias Úteis do Mês *</label><input type="number" id="meta-mes-dias-uteis" placeholder="ex: 23"></div>
-      <div class="form-group"><label>Dias Trabalhados até hoje *</label><input type="number" id="meta-mes-dias-trabalhados" placeholder="ex: 15"></div>
-    </div>
+    <div class="form-row single"><div class="form-group"><label>Folgas extras no mês (opcional)</label>
+      <input type="text" id="meta-mes-folgas" placeholder="ex: 16, 17 — Carnaval, recesso, emenda" oninput="ecoDiasMetaMes()" autocomplete="off">
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Dias úteis e trabalhados são calculados sozinhos (seg a sex, menos feriados nacionais e de BH). Aqui entram só os dias do mês em que a empresa não abriu além disso.</div>
+      <div id="meta-mes-dias-eco" style="font-size:12px;color:var(--primary);margin-top:6px"></div></div></div>
     <div class="form-actions">
       <button class="btn btn-outline" onclick="fecharModal('modal-meta-mes')">Cancelar</button>
       <button class="btn btn-primary" onclick="salvarMetaMes()">Salvar</button>
@@ -3471,10 +3471,69 @@ async function renderPainel(){
   }
 }
 
+// ══ CALENDÁRIO DE DIAS ÚTEIS ══
+// Dia útil = segunda a sexta, fora feriados nacionais e municipais de Belo Horizonte.
+// Carnaval é ponto facultativo e NÃO entra aqui: se a empresa fechar, lança como folga
+// extra na Meta do Mês. Tudo calculado no navegador — nenhuma leitura no Firebase.
+function dataPascoa(ano){
+  // Algoritmo de Meeus/Jones/Butcher (calendário gregoriano)
+  const a=ano%19, b=Math.floor(ano/100), c=ano%100, d=Math.floor(b/4), e=b%4;
+  const f=Math.floor((b+8)/25), g=Math.floor((b-f+1)/3), h=(19*a+b-d-g+15)%30;
+  const i=Math.floor(c/4), k=c%4, l=(32+2*e+2*i-h-k)%7, m=Math.floor((a+11*h+22*l)/451);
+  const mes=Math.floor((h+l-7*m+114)/31), dia=((h+l-7*m+114)%31)+1;
+  return new Date(ano, mes-1, dia);
+}
+const _FERIADOS_CACHE = {};
+function feriadosDoAno(ano){
+  if(_FERIADOS_CACHE[ano]) return _FERIADOS_CACHE[ano];
+  const mapa = {};
+  const add = (d, nome)=>{ mapa[ymdLocal(d)] = nome; };
+  // Nacionais fixos
+  [[1,1,'Confraternização Universal'],[4,21,'Tiradentes'],[5,1,'Dia do Trabalho'],
+   [9,7,'Independência'],[10,12,'N. Sra. Aparecida'],[11,2,'Finados'],
+   [11,15,'Proclamação da República'],[11,20,'Consciência Negra'],[12,25,'Natal'],
+   // Municipais de Belo Horizonte
+   [8,15,'Assunção de N. Sra. (BH)'],[12,8,'Imaculada Conceição (BH)']
+  ].forEach(([m,d,n])=>add(new Date(ano,m-1,d), n));
+  // Móveis: Sexta-feira Santa (nacional) e Corpus Christi (municipal em BH)
+  const pascoa = dataPascoa(ano);
+  add(new Date(ano, pascoa.getMonth(), pascoa.getDate()-2), 'Sexta-feira Santa');
+  add(new Date(ano, pascoa.getMonth(), pascoa.getDate()+60), 'Corpus Christi (BH)');
+  return (_FERIADOS_CACHE[ano] = mapa);
+}
+// Conta os dias úteis do mês e os já encerrados antes de hoje. Hoje NÃO conta como
+// trabalhado (o dia ainda está em andamento) e por isso fica entre os dias restantes.
+function calendarioUteisMes(mesInicio, folgasExtras){
+  const ano = mesInicio.getFullYear(), mes = mesInicio.getMonth();
+  const feriados = feriadosDoAno(ano);
+  const folgas = new Set((folgasExtras||[]).map(Number));
+  const hoje = agora(); hoje.setHours(0,0,0,0);
+  const ultimoDia = new Date(ano, mes+1, 0).getDate();
+  let uteis = 0, trabalhados = 0;
+  const feriadosNoMes = [];
+  for(let dia=1; dia<=ultimoDia; dia++){
+    const d = new Date(ano, mes, dia);
+    const semana = d.getDay();
+    if(semana===0 || semana===6) continue;
+    const nomeFeriado = feriados[ymdLocal(d)];
+    if(nomeFeriado){ feriadosNoMes.push(`${String(dia).padStart(2,'0')} ${nomeFeriado}`); continue; }
+    if(folgas.has(dia)) continue;
+    uteis++;
+    if(d < hoje) trabalhados++;
+  }
+  return { uteis, trabalhados, feriadosNoMes };
+}
+// "16, 17" -> [16,17]; ignora o que não for dia válido do mês
+function lerFolgasExtras(texto, mesInicio){
+  const ultimoDia = new Date(mesInicio.getFullYear(), mesInicio.getMonth()+1, 0).getDate();
+  const dias = String(texto||'').split(/[^0-9]+/).map(Number).filter(n=>n>=1 && n<=ultimoDia);
+  return [...new Set(dias)].sort((a,b)=>a-b);
+}
+
 // ══ META DO MÊS (RESUMO ADMIN) ══
-// Painel de acompanhamento de meta x realizado, visível só pra admin. Só a Meta do Mês, os
-// Dias Úteis e os Dias Trabalhados são preenchidos manualmente (ficam salvos por mês em
-// metas/{AAAA-MM}) — tudo o mais é calculado sozinho a partir dos pedidos: faturado do mês,
+// Painel de acompanhamento de meta x realizado, visível só pra admin. Só a Meta do Mês e as
+// folgas extras são preenchidas manualmente (ficam salvas por mês em metas/{AAAA-MM}); os
+// dias úteis e trabalhados saem do calendário. Tudo o mais é calculado a partir dos pedidos: faturado do mês,
 // vendido ainda não faturado, e o que era de mês anterior e só faturou agora.
 async function renderMetaMes(mesInicio, pedidosDoMes){
   const el = document.getElementById('dash-meta-mes');
@@ -3484,11 +3543,20 @@ async function renderMetaMes(mesInicio, pedidosDoMes){
   const mesAnteriorInicio = new Date(mesInicio.getFullYear(), mesInicio.getMonth()-1, 1);
   const chaveMes = `${mesInicio.getFullYear()}-${String(mesInicio.getMonth()+1).padStart(2,'0')}`;
 
-  let cfg = { meta:0, dias_uteis:0, dias_trabalhados:0 };
+  let cfg = { meta:0 };
   try{
     const snap = await db.ref('metas/'+chaveMes).once('value');
     if(snap.val()) cfg = { ...cfg, ...snap.val() };
   } catch(e){ console.warn('[CROW] falha silenciosa ignorada:', e); }
+  // Dias vêm do calendário. Valores manuais antigos gravados no banco são ignorados.
+  const cal = calendarioUteisMes(mesInicio, cfg.folgas_extras);
+  cfg.dias_uteis = cal.uteis;
+  cfg.dias_trabalhados = cal.trabalhados;
+  const folgasTxt = (cfg.folgas_extras||[]).join(', ');
+  const notaDias = [
+    cal.feriadosNoMes.length ? 'Feriados: '+cal.feriadosNoMes.join(' · ') : '',
+    folgasTxt ? 'Folgas extras: dia(s) '+folgasTxt : ''
+  ].filter(Boolean).join('<br>');
 
   // "pedidosDoMes" já veio pronto do Painel (mesma consulta que ele já faz pros cards de
   // cima) — não busca de novo, só reaproveita. Só falta 1 consulta extra: os FATURADOS, pra
@@ -3569,15 +3637,15 @@ async function renderMetaMes(mesInicio, pedidosDoMes){
   el.innerHTML = `
     <div class="section-header">
       <div class="section-title">🎯 Meta do Mês — ${mesInicio.toLocaleDateString('pt-BR',{month:'long',year:'numeric'})}</div>
-      <button class="btn btn-outline btn-sm" onclick="abrirModalMetaMes('${chaveMes}', ${cfg.meta||0}, ${cfg.dias_uteis||0}, ${cfg.dias_trabalhados||0})">✏️ Editar Meta/Dias</button>
+      <button class="btn btn-outline btn-sm" onclick="abrirModalMetaMes('${chaveMes}', ${cfg.meta||0}, '${folgasTxt}')">✏️ Editar Meta/Dias</button>
     </div>
     <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:16px;margin-bottom:20px;align-items:start">
       <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
         <table style="width:100%;border-collapse:collapse;font-size:13px">
           <tbody>
             ${linha('Meta do Mês (R$)', fmtMoeda(cfg.meta||0))}
-            ${linha('Dias Úteis do Mês', cfg.dias_uteis||0)}
-            ${linha('Dias Trabalhados (até hoje)', cfg.dias_trabalhados||0)}
+            ${linha(`Dias Úteis do Mês${notaDias ? `<div style="font-size:10px;margin-top:2px">${notaDias}</div>` : ''}`, cfg.dias_uteis||0)}
+            ${linha('Dias Trabalhados (sem contar hoje)', cfg.dias_trabalhados||0)}
             ${linha('Dias Restantes', diasRestantes)}
             ${linha('Meta Proporcional até Hoje', fmtMoeda(metaProporcional))}
             ${linha('Realizado (faturado)', fmtMoeda(realizadoMes))}
@@ -3663,13 +3731,29 @@ function garantirChartJs(){
   });
 }
 
-function abrirModalMetaMes(chave, meta, diasUteis, diasTrabalhados){
+function abrirModalMetaMes(chave, meta, folgas){
   document.getElementById('meta-mes-chave').value = chave;
   document.getElementById('meta-mes-valor').value = meta ? Number(meta).toLocaleString('pt-BR',{minimumFractionDigits:2, maximumFractionDigits:2}) : '';
   ecoMetaMes();
-  document.getElementById('meta-mes-dias-uteis').value = diasUteis || '';
-  document.getElementById('meta-mes-dias-trabalhados').value = diasTrabalhados || '';
+  document.getElementById('meta-mes-folgas').value = folgas || '';
+  ecoDiasMetaMes();
   abrirModal('modal-meta-mes');
+}
+
+function mesInicioDaChave(chave){
+  const [a, m] = String(chave||'').split('-').map(Number);
+  return (a && m) ? new Date(a, m-1, 1) : null;
+}
+
+// Mostra na hora como ficam os dias com as folgas digitadas
+function ecoDiasMetaMes(){
+  const el = document.getElementById('meta-mes-dias-eco');
+  const mesInicio = mesInicioDaChave(document.getElementById('meta-mes-chave').value);
+  if(!el || !mesInicio) return;
+  const folgas = lerFolgasExtras(document.getElementById('meta-mes-folgas').value, mesInicio);
+  const cal = calendarioUteisMes(mesInicio, folgas);
+  el.innerHTML = `Dias úteis: <strong>${cal.uteis}</strong> · Trabalhados (sem contar hoje): <strong>${cal.trabalhados}</strong>` +
+    (folgas.length ? ` · folgas: ${folgas.join(', ')}` : '');
 }
 
 // Mostra em tempo real quanto o sistema entendeu do que foi digitado. Sem esse retorno,
@@ -3690,11 +3774,10 @@ async function salvarMetaMes(){
   // parseBR entende 320.000,00 e 320000 — o type="number" antigo usava o padrão inglês
   // e lia "320.000" como 320, gravando trezentos e vinte reais no lugar da meta.
   const meta = parseMoedaBR(document.getElementById('meta-mes-valor').value);
-  const dias_uteis = Number(document.getElementById('meta-mes-dias-uteis').value) || 0;
-  const dias_trabalhados = Number(document.getElementById('meta-mes-dias-trabalhados').value) || 0;
   if(!chave){ toast('Erro: mês não identificado','error'); return; }
+  const folgas_extras = lerFolgasExtras(document.getElementById('meta-mes-folgas').value, mesInicioDaChave(chave));
   await db.ref('metas/'+chave).set({
-    meta, dias_uteis, dias_trabalhados,
+    meta, folgas_extras: folgas_extras.length ? folgas_extras : null,
     atualizado_por: usuarioLogado.nome, atualizado_em: agoraTs()
   });
   fecharModal('modal-meta-mes');
