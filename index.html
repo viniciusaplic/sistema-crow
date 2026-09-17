@@ -881,9 +881,10 @@ tbody td{padding:11px 16px;font-size:14px}
         <div class="table-wrap" style="padding:24px">
           <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">🔄 Recalcular Reservas de Estoque</div>
           <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
-            Recalcula o campo "Reservado" de todos os produtos com base nos pedidos realmente abertos (Aguard. Aprovação, Aprovado, Em Separação). Use quando o número de reservados estiver inconsistente com os pedidos do sistema.
+            O sistema já confere e corrige as reservas sozinho uma vez por dia, no primeiro acesso de um administrador. Use o botão só se precisar corrigir na hora.
           </div>
           <button class="btn btn-primary btn-sm" style="background:#7c3aed" onclick="recalcularTodasReservas()">🔄 Recalcular Agora</button>
+          <button class="btn btn-outline btn-sm" onclick="verHistoricoReservas()">📋 Histórico de correções</button>
           <div id="recalcular-reservas-result" style="margin-top:12px;font-size:13px;max-height:200px;overflow-y:auto"></div>
         </div>
         <div class="table-wrap" style="padding:24px">
@@ -3115,6 +3116,7 @@ async function iniciarApp(){
   carregarClientesFirebase();
   await carregarProdutosFirebase();
   carregarCampanhasFirebase();
+  if(usuarioLogado.admin) conferirReservasDoDia(); // 1x por dia, em segundo plano
   renderPainel(); // re-renderiza com dados atualizados do Firebase
 }
 
@@ -6737,6 +6739,12 @@ async function confirmarPedido(){
     if(pedidoAtual.editando && pedidoAtual.id){
       const snapAntigo = await db.ref('pedidos/'+pedidoAtual.id).once('value');
       if(snapAntigo.exists()){ pedidoOriginal = snapAntigo.val(); itensAntigos = pedidoOriginal.itens || []; }
+      // Alguém cancelou o pedido enquanto ele estava aberto nesta tela. Salvar agora
+      // reservaria estoque de novo num pedido cancelado (reserva fantasma).
+      if(pedidoOriginal?.status === 'Cancelado'){
+        toast(`Este pedido foi cancelado por outro usuário enquanto você editava — nada foi salvo`,'error');
+        return;
+      }
     }
 
     // ── Troca de cliente num pedido que já existia (inclusive já bipado) ──
@@ -6938,7 +6946,9 @@ async function confirmarPedido(){
     // Pedido já bipado (CC) NÃO tem reserva — a baixa física já aconteceu. Nele, o que
     // precisa acertar é o saldo real, senão editar a quantidade deixava o estoque errado
     // e ainda criava uma reserva fantasma que nunca seria liberada.
-    if(itensAntigos){
+    // Orçamento nunca reservou estoque: na conversão só reserva os itens do pedido novo.
+    // Antes ele "liberava" os itens do orçamento e comia a reserva de outros pedidos.
+    if(itensAntigos && !convertendoOrcamento){
       if(pedidoOriginal?.status === 'CC'){
         await ajustarBaixaFisicaEdicaoPedido(itensAntigos, pedidoAtual.itens, numero, pedidoAtual.id);
       } else {
@@ -15396,63 +15406,92 @@ async function corrigirCodigosPedidos(silencioso=false){
   }
 }
 
+// Reserva correta = soma dos itens dos pedidos abertos (AA, AP, EX). Busca SÓ esses
+// pedidos, filtrando por status no servidor (índice já usado pela expedição), em vez de
+// baixar a história inteira de pedidos como antes.
+async function calcularReservasAbertas(){
+  const snaps = await Promise.all(['AA','AP','EX'].map(st =>
+    db.ref('pedidos').orderByChild('status').equalTo(st).once('value')));
+  const reservaReal = {};
+  let pedidosContados = 0;
+  snaps.forEach(sn => Object.values(sn.val() || {}).forEach(p => {
+    pedidosContados++;
+    (p.itens || []).forEach(item => {
+      if(!item.codigo) return;
+      reservaReal[item.codigo] = (reservaReal[item.codigo] || 0) + Number(item.qtd || 0);
+    });
+  }));
+  return { reservaReal, pedidosContados };
+}
+
+// Compara com o reservado atual dos produtos e grava só o que diverge. Só toca produto
+// que existe — nunca cria nó novo em produtos/.
+async function conferirECorrigirReservas(produtos, origem){
+  const { reservaReal, pedidosContados } = await calcularReservasAbertas();
+  const arred = n => Math.round(Number(n || 0) * 1000) / 1000;
+  const updates = {};
+  const divergencias = [];
+  for(const codigo in produtos){
+    const era = arred(produtos[codigo].reservado);
+    const ficou = arred(reservaReal[codigo]);
+    if(era !== ficou){
+      updates['produtos/'+codigo+'/reservado'] = ficou;
+      divergencias.push({ codigo, nome: produtos[codigo].nome || '', era, ficou });
+    }
+  }
+  if(divergencias.length){
+    await db.ref().update(updates);
+    divergencias.forEach(d => { const pm = PRODUTOS_DB.find(x => x.codigo === d.codigo); if(pm) pm.reservado = d.ficou; });
+    // Registro das correções, para acompanhar se ainda existe algum caminho que desanda a reserva
+    db.ref('controle_reservas/log').push({
+      ts: agoraTs(), usuario: usuarioLogado?.nome || '', origem,
+      pedidos_abertos: pedidosContados, itens: divergencias.slice(0, 200)
+    }).catch(e => console.warn('[CROW] log de reservas falhou:', e));
+  }
+  db.ref('controle_reservas/ultima').set({
+    ts: agoraTs(), usuario: usuarioLogado?.nome || '', origem,
+    pedidos_abertos: pedidosContados, corrigidos: divergencias.length
+  }).catch(e => console.warn('[CROW] registro da conferência falhou:', e));
+  return { pedidosContados, divergencias };
+}
+
+// Conferência automática: uma vez por dia, no primeiro acesso de um admin. A transaction
+// na data garante que só uma aba/usuário roda no dia. Usa o cadastro de produtos que o
+// login acabou de carregar, então não faz leitura extra de produtos.
+async function conferirReservasDoDia(){
+  try {
+    if(!usuarioLogado?.admin || !PRODUTOS_DB.length) return;
+    const hoje = ymdLocal(agora());
+    const res = await db.ref('controle_reservas/data').transaction(v => (v === hoje ? undefined : hoje));
+    if(!res.committed) return;
+    const produtos = {};
+    PRODUTOS_DB.forEach(p => { produtos[p.codigo] = { reservado: p.reservado, nome: p.nome }; });
+    const r = await conferirECorrigirReservas(produtos, 'auto');
+    if(r.divergencias.length){
+      console.warn('[CROW] Conferência diária de reservas corrigiu', r.divergencias);
+      if(typeof renderProdutos === 'function') renderProdutos();
+    }
+  } catch(e){ console.warn('[CROW] conferência diária de reservas falhou:', e); }
+}
+
 async function recalcularTodasReservas(){
   if(!usuarioLogado?.admin){ toast('Acesso restrito ao administrador','error'); return; }
   const resultEl = document.getElementById('recalcular-reservas-result');
   resultEl.innerHTML = '<span style="color:var(--accent)">⏳ Verificando e corrigindo dados...</span>';
   try {
-    // PASSO 1: Corrigir produtos com campo 'codigo' interno corrompido no Firebase
-    // (ex: campo gravado como "reservado" por um set() malformado)
-    const snapProdutosRaw = await db.ref('produtos').once('value');
-    const dadosRaw = snapProdutosRaw.val() || {};
-    const updatesCodigo = {};
-    let corrigidosCodigo = 0;
-    for(const chave in dadosRaw){
-      const p = dadosRaw[chave];
-      if(p && p.codigo && p.codigo !== chave){
-        // Campo interno 'codigo' diferente da chave real — corrige para a chave
-        updatesCodigo['produtos/'+chave+'/codigo'] = chave;
-        corrigidosCodigo++;
-      }
-    }
-    if(Object.keys(updatesCodigo).length) await db.ref().update(updatesCodigo);
-
-    // PASSO 2: Recarregar PRODUTOS_DB já com dados corrigidos
-    await carregarProdutosFirebase();
-    const snapPedidos = await db.ref('pedidos').once('value');
-    const todosPedidos = snapPedidos.val() || {};
-
-    const statusAbertos = ['AA','AP','EX'];
-    const reservaReal = {};
-    let pedidosContados = 0;
-    for(const id in todosPedidos){
-      const p = todosPedidos[id];
-      if(!statusAbertos.includes(p.status)) continue;
-      pedidosContados++;
-      for(const item of (p.itens||[])){
-        if(!item.codigo) continue;
-        reservaReal[item.codigo] = (reservaReal[item.codigo]||0) + Number(item.qtd||0);
-      }
-    }
-
+    // Botão manual lê o cadastro direto do banco (uma vez só) — é caminho que grava.
     const snapProdutos = await db.ref('produtos').once('value');
     const produtos = snapProdutos.val() || {};
 
-    const updates = {};
-    const divergencias = [];
-    for(const codigo in produtos){
-      const reservadoAtual = Number(produtos[codigo].reservado||0);
-      const reservadoCorreto = reservaReal[codigo] || 0;
-      if(reservadoAtual !== reservadoCorreto){
-        updates['produtos/'+codigo+'/reservado'] = reservadoCorreto;
-        divergencias.push({ codigo, nome: produtos[codigo].nome||'', era: reservadoAtual, ficou: reservadoCorreto });
-      }
+    // Campo 'codigo' interno diferente da chave (registro corrompido antigo): corrige
+    const updatesCodigo = {};
+    for(const chave in produtos){
+      const p = produtos[chave];
+      if(p && p.codigo && p.codigo !== chave) updatesCodigo['produtos/'+chave+'/codigo'] = chave;
     }
+    if(Object.keys(updatesCodigo).length) await db.ref().update(updatesCodigo);
 
-    if(Object.keys(updates).length){
-      await db.ref().update(updates);
-      divergencias.forEach(d=>{ const p = PRODUTOS_DB.find(x=>x.codigo===d.codigo); if(p) p.reservado=d.ficou; });
-    }
+    const { pedidosContados, divergencias } = await conferirECorrigirReservas(produtos, 'manual');
 
     let html = `<span style="color:var(--success)">✓ Recalculado com base em ${pedidosContados} pedido(s) aberto(s). ${divergencias.length} produto(s) corrigido(s).</span>`;
     if(divergencias.length){
@@ -15468,6 +15507,33 @@ async function recalcularTodasReservas(){
     renderProdutos();
   } catch(e){
     resultEl.innerHTML = `<span style="color:#dc2626">Erro: ${e.message}</span>`;
+  }
+}
+
+// Histórico das correções (automáticas e manuais) — só as 15 mais recentes
+async function verHistoricoReservas(){
+  const el = document.getElementById('recalcular-reservas-result');
+  el.innerHTML = '<span style="color:var(--accent)">⏳ Carregando...</span>';
+  try {
+    const [snapUlt, snapLog] = await Promise.all([
+      db.ref('controle_reservas/ultima').once('value'),
+      db.ref('controle_reservas/log').limitToLast(15).once('value')
+    ]);
+    const ult = snapUlt.val();
+    const fmtTs = ts => new Date(ts).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'});
+    let html = ult
+      ? `<div style="margin-bottom:8px">Última conferência: <strong>${fmtTs(ult.ts)}</strong> (${ult.origem==='auto'?'automática':'manual'}, ${esc(ult.usuario||'')}) — ${ult.corrigidos} correção(ões)</div>`
+      : '<div style="margin-bottom:8px;color:var(--muted)">Nenhuma conferência registrada ainda.</div>';
+    const logs = Object.values(snapLog.val() || {}).sort((a,b)=>b.ts-a.ts);
+    if(!logs.length) html += '<div style="color:var(--success)">✅ Nenhuma correção registrada.</div>';
+    logs.forEach(l=>{
+      html += `<details style="margin-top:4px"><summary style="cursor:pointer">${fmtTs(l.ts)} · ${l.origem==='auto'?'automática':'manual'} · ${(l.itens||[]).length} produto(s)</summary>` +
+        (l.itens||[]).map(d=>`<div style="font-size:11px;margin-left:12px"><strong>${d.codigo}</strong> ${esc(d.nome||'')} — ${d.era} → ${d.ficou}</div>`).join('') +
+        '</details>';
+    });
+    el.innerHTML = html;
+  } catch(e){
+    el.innerHTML = `<span style="color:#dc2626">Erro: ${e.message}</span>`;
   }
 }
 
