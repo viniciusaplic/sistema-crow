@@ -497,9 +497,10 @@ tbody td{padding:11px 16px;font-size:14px}
           <div class="filtro-group">
             <label>Situação</label>
             <select id="f-status">
-              <option value="ativos">Aguard. Aprovação + Aprovado + Em Separação</option>
+              <option value="ativos">Aguard. Aprovação + Em Análise + Aprovado + Em Separação</option>
               <option value="">Todos os status</option>
               <option value="AA">Aguard. Aprovação</option>
+              <option value="EA">Em Análise</option>
               <option value="AP">Aprovado</option>
               <option value="EX">Em Separação</option>
               <option value="CC">Concluído</option>
@@ -2666,6 +2667,7 @@ let paginaManutencao = 1;
 // Status do pedido: ciclo de vida completo
 const STATUS_PEDIDO = {
   'AA': { label:'Aguard. Aprovação', cor:'#92400e', bg:'#fef3c7' },
+  'EA': { label:'Em Análise',        cor:'#0e7490', bg:'#cffafe' }, // análise financeira
   'AP': { label:'Aprovado',          cor:'#1565c0', bg:'#dbeafe' },
   'EX': { label:'Em Separação',      cor:'#7c3aed', bg:'#ede9fe' },
   'CC': { label:'Concluído',         cor:'#16a34a', bg:'#dcfce7' },
@@ -3426,7 +3428,7 @@ async function renderPainel(){
   }
 
   // Painel mostra só pedidos ativos (Aguardando Aprovação, Aprovado, Em Separação)
-  const statusAtivos = ['AA', 'AP', 'EX'];
+  const statusAtivos = ['AA', 'EA', 'AP', 'EX'];
   const ativos = meusPedidos
     .filter(p => statusAtivos.includes(p.status))
     .sort((a,b)=>new Date(b.data)-new Date(a.data));
@@ -4174,7 +4176,7 @@ async function renderPedidos(usarCache){
         return false;
       }
     } else {
-      if(fStatus==='ativos'){ if(p.status!=='AA' && p.status!=='AP' && p.status!=='EX') return false; }
+      if(fStatus==='ativos'){ if(p.status!=='AA' && p.status!=='EA' && p.status!=='AP' && p.status!=='EX') return false; }
       else if(fStatus && p.status!==fStatus) return false;
     }
     if(fFaturado==='sim' && !p.faturado) return false;
@@ -4776,7 +4778,9 @@ async function verPedido(id){
         ${!bloqueado&&p.status!=='Cancelado'?`<button class="btn btn-outline btn-sm" onclick="editarPedido('${id}')">✏️ Editar</button>`:''}
         ${usuarioLogado.admin&&p.status==='Cancelado'?`<button class="btn btn-outline btn-sm" style="color:#16a34a;border-color:#16a34a" onclick="reativarPedido('${id}')">↩️ Reativar Pedido</button>`:''}
         ${usuarioLogado.admin?`<button class="btn btn-outline btn-sm" onclick="abrirCorrigirVendedorPedido('${id}')">🔧 Corrigir Vendedor</button>`:''}
-        ${usuarioLogado.admin&&p.status==='AA'?`<button class="btn btn-primary btn-sm" onclick="aprovarPedido('${id}')">✅ Aprovar Pedido</button>`:''}
+        ${usuarioLogado.admin&&p.status==='AA'?`<button class="btn btn-outline btn-sm" style="color:#0e7490;border-color:#0e7490" onclick="enviarPedidoAnalise('${id}')">🔎 Enviar p/ Análise</button>`:''}
+        ${usuarioLogado.admin&&p.status==='EA'?`<button class="btn btn-outline btn-sm" onclick="voltarPedidoAguardando('${id}')">↩️ Voltar p/ Aguard. Aprovação</button>`:''}
+        ${usuarioLogado.admin&&(p.status==='AA'||p.status==='EA')?`<button class="btn btn-primary btn-sm" onclick="aprovarPedido('${id}')">✅ Aprovar Pedido</button>`:''}
         ${(usuarioLogado.admin||ehExpedicao())&&(p.status==='EX'||p.status==='CC')?`<button class="btn btn-outline btn-sm" style="color:#7c3aed;border-color:#7c3aed" onclick="fecharModal('modal-ver-pedido');abrirModalEtiqueta('${id}')">🏷️ Imprimir Etiqueta</button>`:''}
         ${usuarioLogado.admin&&p.status==='CC'?`<button class="btn btn-outline btn-sm" style="color:#dc2626;border-color:#dc2626" onclick="cancelarBipagemPedido('${id}')">↺ Cancelar Bipagem</button>`:''}
         ${usuarioLogado.admin&&p.status!=='Cancelado'&&p.status!=='Orçamento'&&!p.faturado?`<button class="btn btn-outline btn-sm" style="color:#166534;border-color:#166534" onclick="abrirModalFaturarPedido('${id}')">💰 Marcar como Faturado</button>`:''}
@@ -4897,10 +4901,42 @@ async function confirmarFaturamentoPedido(){
   } catch(e){ toast('Erro ao registrar faturamento: '+e.message,'error'); }
 }
 
+// Em Análise (EA) = pedido em análise financeira. Fluxo: AA -> EA -> AP.
+// Continua reservando estoque (igual AA) e NÃO aparece na separação (só AP/EX).
+// Transições via transaction: só vira se o status atual for o esperado (evita duas abas
+// ou clique duplo atropelarem um pedido que já mudou de status).
+async function enviarPedidoAnalise(id){
+  try {
+    if(!usuarioLogado?.admin){ toast('Só administrador pode enviar para análise','error'); return; }
+    const r = await transicaoStatus('pedidos/'+id+'/status', 'AA', 'EA');
+    if(!r.ok){ toast('Pedido não está mais em Aguardando Aprovação — atualize a tela','error'); return; }
+    fecharModal('modal-ver-pedido');
+    renderPedidos();
+    toast('🔎 Pedido em análise financeira','success');
+  } catch(e){ toast('Erro ao enviar para análise: '+e.message,'error'); }
+}
+
+async function voltarPedidoAguardando(id){
+  try {
+    if(!usuarioLogado?.admin){ toast('Só administrador pode alterar este status','error'); return; }
+    const r = await transicaoStatus('pedidos/'+id+'/status', 'EA', 'AA');
+    if(!r.ok){ toast('Pedido não está mais Em Análise — atualize a tela','error'); return; }
+    fecharModal('modal-ver-pedido');
+    renderPedidos();
+    toast('↩️ Pedido voltou para Aguardando Aprovação','success');
+  } catch(e){ toast('Erro ao alterar status: '+e.message,'error'); }
+}
+
 async function aprovarPedido(id){
   try {
     if(!temPermissaoEditar('pedidos')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
-    await db.ref('pedidos/'+id+'/status').set('AP');
+    // Aprova a partir de Aguard. Aprovação OU Em Análise; qualquer outro status aborta
+    const atualSnap = await db.ref('pedidos/'+id+'/status').once('value');
+    const atual = atualSnap.val();
+    const resAprov = (atual==='AA' || atual==='EA')
+      ? await transicaoStatus('pedidos/'+id+'/status', atual, 'AP')
+      : { ok:false };
+    if(!resAprov.ok){ toast('Pedido não está mais aguardando aprovação/análise — atualize a tela','error'); return; }
     fecharModal('modal-ver-pedido');
     renderPedidos();
     toast('✓ Pedido aprovado! Já disponível para separação.','success');
@@ -5001,7 +5037,7 @@ async function editarPedido(id){
   // pedido lançado no cliente errado. Estoque não muda (reserva/baixa não dependem do cliente);
   // crédito do cliente antigo é devolvido e os avisos (W3, NF, etiqueta) aparecem ao salvar.
   const podeTrocarCliente = ehOrcamento || p.status === 'AA' ||
-    (!!usuarioLogado?.admin && ['AP','EX','CC'].includes(p.status));
+    (!!usuarioLogado?.admin && ['EA','AP','EX','CC'].includes(p.status));
   const creditoHtmlEdicao = pedidoAtual.credito_disponivel > 0 ? `
     <div class="alerta" style="margin-top:8px;border:2px solid #16a34a;background:#f0fdf4;padding:12px 14px;border-radius:8px">
       <div style="font-weight:700;color:#166534">💰 Este cliente tem ${fmtMoeda(creditoAtualCliente)} de crédito disponível</div>
@@ -5145,7 +5181,7 @@ async function exportarPedidosW3(){
         // o cliente nem aprovou gera separação, nota e entrega indevidas.
         if(!STATUS_PEDIDO_REAL.includes(p.status)) continue;
 
-        if(fStatus==='ativos'){ if(p.status!=='AA' && p.status!=='AP' && p.status!=='EX') continue; }
+        if(fStatus==='ativos'){ if(p.status!=='AA' && p.status!=='EA' && p.status!=='AP' && p.status!=='EX') continue; }
         else if(fStatus && p.status!==fStatus) continue;
 
         // A exportação passa a respeitar o filtro de Faturamento que está na tela — antes
@@ -5231,7 +5267,7 @@ async function reativarPedido(id){
   // Registro estragado por um cancelamento duplo antigo: restaurar para "Cancelado"
   // deixaria o pedido num estado sem sentido e ainda reservaria estoque.
   if(statusAnterior === 'Cancelado') statusAnterior = 'AA';
-  const labelStatus = { AA:'Aguardando Aprovação', AP:'Aprovado', EX:'Em Separação/Expedição', CC:'Conferido/Concluído' };
+  const labelStatus = { AA:'Aguardando Aprovação', EA:'Em Análise', AP:'Aprovado', EX:'Em Separação/Expedição', CC:'Conferido/Concluído' };
 
   const eraBipado = statusAnterior === 'CC';
   const aviso = eraBipado
@@ -6768,7 +6804,7 @@ async function confirmarPedido(){
           if(gs.length) avisos.push(`• Garantia(s) #${gs.map(g=>g.numero).join(', #')} do cliente antigo foram embaladas junto com este pedido.`);
         } catch(e){ /* sem o aviso de garantia, segue */ }
       }
-      if(avisos.length || ['AP','EX','CC'].includes(pedidoOriginal.status)){
+      if(avisos.length || ['EA','AP','EX','CC'].includes(pedidoOriginal.status)){
         const okTroca = await confirmCustom(
           `Trocar o cliente do pedido #${pedidoOriginal.numero}?\n\nDe: <strong>${esc(pedidoOriginal.cliente_nome||'')}</strong>\nPara: <strong>${esc(c.nome)}</strong>\n\nO estoque não é alterado.` +
           (avisos.length ? '\n\n' + avisos.join('\n') : ''), 'Trocar cliente');
@@ -9031,7 +9067,7 @@ async function abrirReservasItem(codigo){
     const snap = await lerNoCache('pedidos');
     const todos = snap.val() || {};
     // Considera reservado apenas em pedidos ainda não bipados/cancelados (AA, AP ou EX)
-    const statusReservam = ['AA','AP','EX'];
+    const statusReservam = ['AA','EA','AP','EX'];
     const linhas = [];
     for(const k in todos){
       const p = todos[k];
@@ -15412,7 +15448,7 @@ async function corrigirCodigosPedidos(silencioso=false){
 // pedidos, filtrando por status no servidor (índice já usado pela expedição), em vez de
 // baixar a história inteira de pedidos como antes.
 async function calcularReservasAbertas(){
-  const snaps = await Promise.all(['AA','AP','EX'].map(st =>
+  const snaps = await Promise.all(['AA','EA','AP','EX'].map(st =>
     db.ref('pedidos').orderByChild('status').equalTo(st).once('value')));
   const reservaReal = {};
   let pedidosContados = 0;
@@ -15651,7 +15687,7 @@ async function exportarPedidosW3PorPeriodoExcel(){
 
   pedidos.sort((a,b)=>a.numero-b.numero);
 
-  const STATUS = { AA:'Aguardando Aprovação', AP:'Aprovado', EX:'Em Separação', CC:'Concluído/Bipado', Cancelado:'Cancelado' };
+  const STATUS = { AA:'Aguardando Aprovação', EA:'Em Análise', AP:'Aprovado', EX:'Em Separação', CC:'Concluído/Bipado', Cancelado:'Cancelado' };
 
   const wb = XLSX.utils.book_new();
 
@@ -15937,7 +15973,7 @@ let relatorioAtual = 'vendas-periodo';
 let relatorioGrafico = null;
 // Status que representam PEDIDO DE VENDA de verdade. Orçamento ainda não virou pedido e
 // Cancelado deixou de ser: nenhum dos dois entra em filtro de faturamento nem vai para o W3.
-const STATUS_PEDIDO_REAL = ['AA','AP','EX','CC'];
+const STATUS_PEDIDO_REAL = ['AA','EA','AP','EX','CC'];
 
 let relatorioCache = null; // dados do último relatório gerado (para exportar Excel)
 
