@@ -880,6 +880,14 @@ tbody td{padding:11px 16px;font-size:14px}
           <div id="import-cadastro-produtos-result" style="margin-top:12px;font-size:13px;max-height:240px;overflow-y:auto"></div>
         </div>
         <div class="table-wrap" style="padding:24px">
+          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">📍 Endereços do Estoque</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:16px">Planilha de endereçamento (.xlsx) ou CSV com as colunas <strong>Código</strong> e <strong>Endereço</strong> (ou Localização). Altera SÓ a localização dos produtos — preço, estoque e demais dados não são tocados. Códigos que não existem no cadastro são ignorados.</div>
+          <input type="file" id="import-enderecos-file" accept=".xlsx,.xls,.csv" style="font-size:13px;margin-bottom:10px;display:block">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin-bottom:12px;cursor:pointer"><input type="checkbox" id="import-enderecos-limpar"> Apagar a localização dos produtos que NÃO estão na planilha (usar na mudança de galpão)</label>
+          <button class="btn btn-primary btn-sm" onclick="importarEnderecosEstoque()">Importar Endereços</button>
+          <div id="import-enderecos-result" style="margin-top:12px;font-size:13px;max-height:240px;overflow-y:auto"></div>
+        </div>
+        <div class="table-wrap" style="padding:24px">
           <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">🔄 Recalcular Reservas de Estoque</div>
           <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
             O sistema já confere e corrige as reservas sozinho uma vez por dia, no primeiro acesso de um administrador. Use o botão só se precisar corrigir na hora.
@@ -12326,7 +12334,11 @@ function renderModalSeparacao(){
       <div style="color:#92400e;margin-top:6px;font-size:12px">Separe a garantia junto com este pedido.</div>
     </div>` : '';
 
-  const linhasItens = itens.map((item, idx) => {
+  // Ordem de ROTA: itens na sequência dos endereços (R1-P01-V1... ), sem endereço por último.
+  // Guarda o índice original — marcar/desmarcar/OP continuam apontando para o item certo do pedido.
+  const itensRota = itens.map((item, idx) => ({ item, idx, loc: String(PRODUTOS_DB.find(x=>x.codigo===item.codigo)?.localizacao||'').trim() }))
+    .sort((a,b) => (!a.loc - !b.loc) || a.loc.localeCompare(b.loc, 'pt-BR', {numeric:true}) || (a.idx - b.idx));
+  const linhasItens = itensRota.map(({item, idx}) => {
     const produto = PRODUTOS_DB.find(x=>x.codigo===item.codigo);
     const estoqueDisponivel = produto ? Number(produto.quantidade||0) : 0;
     const temEstoqueSuficiente = estoqueDisponivel >= item.qtd;
@@ -12346,7 +12358,7 @@ function renderModalSeparacao(){
       <div style="flex:1">
         <div style="font-weight:600;font-size:13px">${esc(item.nome)}</div>
         <div style="font-size:12px;color:var(--muted)">Qtd pedida: <strong>${item.qtd}</strong></div>
-        <div style="font-size:12px;color:var(--muted)">📍 Localização: <strong>${produto?.localizacao || '—'}</strong></div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">📍 ${produto?.localizacao ? `<span style="background:#1F3A5F;color:#fff;border-radius:5px;padding:2px 8px;font-weight:700;font-size:13px;letter-spacing:.3px">${esc(produto.localizacao)}</span>` : '<strong>sem endereço</strong>'}</div>
         <div style="font-size:12px;margin-top:2px">${statusVisual}</div>
       </div>
       <div style="display:flex;gap:6px">
@@ -12370,7 +12382,7 @@ function renderModalSeparacao(){
   document.getElementById('separacao-conteudo').innerHTML = `
     <div class="modal-title">Pedido #${p.numero} — ${esc(p.cliente_nome)}</div>
     ${avisoGarantiaSep}
-    <div style="font-size:13px;color:var(--muted);margin-bottom:16px">${p.cliente_cidade||''}/${p.cliente_uf||''} · ${itens.length} itens</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:16px">${p.cliente_cidade||''}/${p.cliente_uf||''} · ${itens.length} itens · <span title="Itens listados na ordem dos endereços do estoque">🧭 em ordem de rota</span></div>
     <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:18px">
       ${linhasItens}
     </div>
@@ -19467,6 +19479,106 @@ function importarCadastroCompletoProdutos(){
     }
   };
   reader.readAsText(file, 'utf-8');
+}
+
+// ══════════════════════════════════════════════
+// ENDEREÇOS DO ESTOQUE — grava SÓ produtos/<codigo>/localizacao, num único update() multi-caminho.
+// Zero leituras extras no Firebase (usa PRODUTOS_DB da memória) e só escreve o que mudou.
+// Código que não existe no cadastro é ignorado — nunca cria nó novo em produtos/.
+// ══════════════════════════════════════════════
+async function importarEnderecosEstoque(){
+  if(!temPermissaoEditar('importar')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  const file = document.getElementById('import-enderecos-file').files[0];
+  if(!file){ toast('Selecione um arquivo','error'); return; }
+  const limparAusentes = document.getElementById('import-enderecos-limpar').checked;
+  const resultEl = document.getElementById('import-enderecos-result');
+  resultEl.innerHTML = '<span style="color:var(--accent)">⏳ Lendo arquivo...</span>';
+  try {
+    let wb;
+    if(/\.csv$/i.test(file.name)){
+      const texto = await file.text();
+      wb = XLSX.read(texto, { type:'string', FS: (texto.split('\n')[0].includes(';') ? ';' : ',') });
+    } else {
+      wb = XLSX.read(await file.arrayBuffer(), { type:'array' });
+    }
+    // Planilha de endereçamento: usa a aba PRODUTOS; outro arquivo: primeira aba
+    const nomeAba = wb.SheetNames.find(n => n.trim().toUpperCase()==='PRODUTOS') || wb.SheetNames[0];
+    const linhas = XLSX.utils.sheet_to_json(wb.Sheets[nomeAba], { header:1, defval:'', raw:false });
+    const norm = v => String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase();
+
+    let linhaCab = -1, iCod = -1, iEnd = -1;
+    for(let r=0; r<Math.min(10, linhas.length); r++){
+      const h = linhas[r].map(norm);
+      const c = h.findIndex(x => x==='codigo' || x==='codigo produto');
+      const e = h.findIndex(x => x==='endereco' || x==='localizacao');
+      if(c>=0 && e>=0){ linhaCab = r; iCod = c; iEnd = e; break; }
+    }
+    if(linhaCab < 0){
+      resultEl.innerHTML = '<span style="color:#dc2626">Não encontrei as colunas "Código" e "Endereço" (ou "Localização") no arquivo.</span>';
+      return;
+    }
+
+    if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
+    const porCodigo = {};
+    PRODUTOS_DB.forEach(p => { porCodigo[String(p.codigo).trim().toUpperCase()] = p; });
+
+    const enderecoPorCodigo = {};   // codigo real -> endereço
+    const naoEncontrados = [], codigosRepetidos = [];
+    for(const linha of linhas.slice(linhaCab+1)){
+      const cod = String(linha[iCod]||'').trim().toUpperCase();
+      const end = String(linha[iEnd]||'').trim().toUpperCase();
+      if(!cod || !end || end==='SEM ENDEREÇO' || end==='SEM ENDERECO') continue;
+      const prod = porCodigo[cod];
+      if(!prod){ naoEncontrados.push(cod); continue; }
+      if(enderecoPorCodigo[prod.codigo] !== undefined) codigosRepetidos.push(prod.codigo);
+      enderecoPorCodigo[prod.codigo] = end;
+    }
+
+    // Endereço usado por mais de um produto — só avisa (pode ser intencional)
+    const usoEndereco = {};
+    Object.entries(enderecoPorCodigo).forEach(([c,e]) => { (usoEndereco[e] = usoEndereco[e] || []).push(c); });
+    const enderecosRepetidos = Object.entries(usoEndereco).filter(([,cs]) => cs.length > 1);
+
+    const updates = {};
+    let alterados = 0, iguais = 0, limpos = 0;
+    Object.entries(enderecoPorCodigo).forEach(([cod, end]) => {
+      if((porCodigo[cod.toUpperCase()].localizacao||'').trim().toUpperCase() === end){ iguais++; return; }
+      updates['produtos/'+cod+'/localizacao'] = end; alterados++;
+    });
+    if(limparAusentes){
+      PRODUTOS_DB.forEach(p => {
+        if(enderecoPorCodigo[p.codigo] === undefined && (p.localizacao||'').trim()){
+          updates['produtos/'+p.codigo+'/localizacao'] = null; limpos++;
+        }
+      });
+    }
+
+    if(!alterados && !limpos){
+      resultEl.innerHTML = `<span style="color:var(--muted)">Nada para alterar — ${iguais} produto(s) já estavam com o mesmo endereço.</span>`;
+      return;
+    }
+    const msgConf = `Vai gravar o endereço de ${alterados} produto(s)` + (limpos ? ` e APAGAR a localização de ${limpos} produto(s) que não estão na planilha` : '') + '.\n\nContinuar?';
+    if(!confirm(msgConf)){ resultEl.innerHTML = '<span style="color:var(--muted)">Importação cancelada.</span>'; return; }
+
+    resultEl.innerHTML = '<span style="color:var(--accent)">⏳ Gravando...</span>';
+    await db.ref().update(updates);
+
+    // Atualiza a memória só depois de gravar com sucesso
+    Object.entries(updates).forEach(([caminho, valor]) => {
+      const cod = caminho.split('/')[1];
+      const p = PRODUTOS_DB.find(x => x.codigo === cod);
+      if(p) p.localizacao = valor || '';
+    });
+
+    let html = `<span style="color:var(--success)">✓ ${alterados} endereço(s) gravado(s)` + (limpos ? ` · 🧹 ${limpos} localização(ões) apagada(s)` : '') + (iguais ? ` · ${iguais} já estavam iguais` : '') + '</span>';
+    if(naoEncontrados.length) html += `<br><span style="color:#d97706">⚠️ ${naoEncontrados.length} código(s) não existem no cadastro e foram ignorados: ${naoEncontrados.slice(0,30).map(esc).join(', ')}${naoEncontrados.length>30?'…':''}</span>`;
+    if(codigosRepetidos.length) html += `<br><span style="color:#d97706">⚠️ Código(s) repetido(s) na planilha (valeu a última linha): ${[...new Set(codigosRepetidos)].map(esc).join(', ')}</span>`;
+    if(enderecosRepetidos.length) html += `<br><span style="color:#d97706">⚠️ ${enderecosRepetidos.length} endereço(s) com mais de um produto: ${enderecosRepetidos.slice(0,15).map(([e,cs]) => esc(e)+' ('+cs.map(esc).join(', ')+')').join(' · ')}${enderecosRepetidos.length>15?'…':''}</span>`;
+    resultEl.innerHTML = html;
+    toast(`✓ ${alterados} endereço(s) atualizado(s)`, 'success');
+  } catch(err){
+    resultEl.innerHTML = `<span style="color:#dc2626">Erro: ${esc(err.message)}</span>`;
+  }
 }
 
 function importarPrecos(){
