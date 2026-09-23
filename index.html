@@ -4040,7 +4040,9 @@ function atualizarBotaoImprimirOrcamentos(){
 }
 
 // Abre uma janela de impressão com uma ou mais folhas de pedido/orçamento, cada uma em sua própria página
-function abrirJanelaImpressaoPedidos(lista, tituloJanela, winPreAberta){
+// opts.interno = true → folha da expedição: mostra a localização de cada item e lista em ordem de rota.
+// O "Gerar PDF p/ Enviar" (cliente) e orçamentos NÃO passam opts — endereço do estoque não sai para o cliente.
+function abrirJanelaImpressaoPedidos(lista, tituloJanela, winPreAberta, opts){
   if(!lista.length){
     if(winPreAberta && !winPreAberta.closed) winPreAberta.close();
     toast('Nenhum item encontrado para imprimir','error');
@@ -4051,7 +4053,7 @@ function abrirJanelaImpressaoPedidos(lista, tituloJanela, winPreAberta){
     toast('Não foi possível abrir a janela de impressão. Verifique se o navegador está bloqueando pop-ups.','error');
     return;
   }
-  const paginasHtml = lista.map(p => `<div class="folha">${montarSlipPedidoHTML(p, lista.length)}</div>`).join('');
+  const paginasHtml = lista.map(p => `<div class="folha">${montarSlipPedidoHTML(p, lista.length, opts)}</div>`).join('');
   win.document.write(`<!DOCTYPE html>
     <html>
     <head>
@@ -4082,7 +4084,7 @@ async function imprimirPedidosSelecionados(){
     const p = snap.val(); if(p) lista.push(p);
   }
   lista.sort((a,b)=>(a.numero||0)-(b.numero||0));
-  abrirJanelaImpressaoPedidos(lista, `Impressão de ${lista.length} Pedido(s)`, win);
+  abrirJanelaImpressaoPedidos(lista, `Impressão de ${lista.length} Pedido(s)`, win, { interno:true });
   for(const id of pedidosSelecionadosImprimir){ registrarEventoHistorico(id, 'Pedido impresso (em lote)'); }
 }
 
@@ -15928,7 +15930,7 @@ async function imprimirCapaPedidoVenda(id){
   const win = window.open('', '_blank');
   const snap = await db.ref('pedidos/'+id).once('value');
   const p = snap.val(); if(!p){ if(win && !win.closed) win.close(); return; }
-  abrirJanelaImpressaoPedidos([p], `Pedido #${p.numero}`, win);
+  abrirJanelaImpressaoPedidos([p], `Pedido #${p.numero}`, win, p.status==='Orçamento' ? undefined : { interno:true });
   registrarEventoHistorico(id, `${p.status==='Orçamento'?'Orçamento':'Pedido'} impresso`);
 }
 
@@ -20780,13 +20782,15 @@ const LOGO_CROW_B64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAywAAADqCAY
 
 // Monta uma única linha (<tr>) de item — reaproveitado tanto no HTML de impressão quanto,
 // individualmente, para medir a altura real de cada linha na paginação da imagem do WhatsApp
-function montarLinhaItemHTML(i, idx){
+function montarLinhaItemHTML(i, idx, mostrarLocal){
   const sub = i.qtd * i.preco * (1-(i.desconto_item||0)/100);
   const zebra = idx%2===1 ? 'background:#f5f5f5' : 'background:#fff';
+  const loc = mostrarLocal ? String(PRODUTOS_DB.find(x=>x.codigo===i.codigo)?.localizacao||'').trim() : '';
+  const locHtml = mostrarLocal ? `<div style="margin-top:3px;font-size:10px;font-weight:700;white-space:nowrap;color:${loc?'#0B3B21':'#999'}">📍 ${loc ? esc(loc) : 's/ endereço'}</div>` : '';
   return `<tr style="${zebra}">
     <td style="padding:3px 6px;border:1px solid #ccc;text-align:center">${fotoImg(i.codigo, 34)}</td>
     <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc">${esc(i.nome)}</td>
-    <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:center">${i.codigo}</td>
+    <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:center">${i.codigo}${locHtml}</td>
     <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:center">${i.unidade||'UN'}</td>
     <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:center">${i.qtd}</td>
     <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:right">${Number(i.preco).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
@@ -20925,9 +20929,17 @@ function montarSummarySlipHTML(p){
   `;
 }
 
-function montarRodapeSlipHTML(p){
+function montarRodapeSlipHTML(p, opts){
   // Versão completa: inclui tabela de itens + summary (usada na impressão normal)
-  const itens = p.itens||[];
+  const interno = !!(opts && opts.interno);
+  let itens = p.itens||[];
+  if(interno){
+    // Ordem de rota (mesma da tela de separação): por endereço, sem endereço por último
+    const locDe = it => String(PRODUTOS_DB.find(x=>x.codigo===it.codigo)?.localizacao||'').trim();
+    itens = itens.map((it,i)=>({it,i,loc:locDe(it)}))
+      .sort((a,b)=> (!a.loc - !b.loc) || a.loc.localeCompare(b.loc,'pt-BR',{numeric:true}) || (a.i-b.i))
+      .map(x=>x.it);
+  }
   return `
     <div style="font-size:10px;font-weight:600;color:#333;margin-bottom:4px">Itens do pedido de venda</div>
     <table style="width:100%;border-collapse:collapse">
@@ -20940,15 +20952,15 @@ function montarRodapeSlipHTML(p){
         <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:right;font-size:11px">Valor unitário</th>
         <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:right;font-size:11px">Valor total</th>
       </tr></thead>
-      <tbody>${itens.map((i,idx)=>montarLinhaItemHTML(i,idx)).join('')}</tbody>
+      <tbody>${itens.map((i,idx)=>montarLinhaItemHTML(i,idx,interno)).join('')}</tbody>
     </table>
     ${montarSummarySlipHTML(p)}
   `;
 }
 
 
-function montarSlipPedidoHTML(p, totalDoc){
-  return `${montarCabecalhoSlipHTML(p, null, totalDoc)}${montarRodapeSlipHTML(p)}`;
+function montarSlipPedidoHTML(p, totalDoc, opts){
+  return `${montarCabecalhoSlipHTML(p, null, totalDoc)}${montarRodapeSlipHTML(p, opts)}`;
 }
 
 // ── Geração de imagem para WhatsApp, agora PAGINADA como uma impressão real ──
