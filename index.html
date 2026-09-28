@@ -505,6 +505,7 @@ tbody td{padding:11px 16px;font-size:14px}
               <option value="EX">Em Separação</option>
               <option value="CC">Concluído</option>
               <option value="Cancelado">Cancelado</option>
+              <option value="nao_impresso">🖨️ Aprovados não impressos</option>
             </select>
           </div>
           <div class="filtro-group">
@@ -878,14 +879,6 @@ tbody td{padding:11px 16px;font-size:14px}
           <input type="file" id="import-cadastro-produtos-file" accept=".csv" style="font-size:13px;margin-bottom:12px;display:block">
           <button class="btn btn-primary btn-sm" onclick="importarCadastroCompletoProdutos()">Importar Cadastro Completo</button>
           <div id="import-cadastro-produtos-result" style="margin-top:12px;font-size:13px;max-height:240px;overflow-y:auto"></div>
-        </div>
-        <div class="table-wrap" style="padding:24px">
-          <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">📍 Endereços do Estoque</div>
-          <div style="font-size:13px;color:var(--muted);margin-bottom:16px">Planilha de endereçamento (.xlsx) ou CSV com as colunas <strong>Código</strong> e <strong>Endereço</strong> (ou Localização). Altera SÓ a localização dos produtos — preço, estoque e demais dados não são tocados. Códigos que não existem no cadastro são ignorados.</div>
-          <input type="file" id="import-enderecos-file" accept=".xlsx,.xls,.csv" style="font-size:13px;margin-bottom:10px;display:block">
-          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin-bottom:12px;cursor:pointer"><input type="checkbox" id="import-enderecos-limpar"> Apagar a localização dos produtos que NÃO estão na planilha (usar na mudança de galpão)</label>
-          <button class="btn btn-primary btn-sm" onclick="importarEnderecosEstoque()">Importar Endereços</button>
-          <div id="import-enderecos-result" style="margin-top:12px;font-size:13px;max-height:240px;overflow-y:auto"></div>
         </div>
         <div class="table-wrap" style="padding:24px">
           <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px">🔄 Recalcular Reservas de Estoque</div>
@@ -2686,6 +2679,16 @@ const STATUS_PEDIDO = {
 };
 function statusInfo(s){ return STATUS_PEDIDO[s] || { label:s||'—', cor:'#666', bg:'#f0f0f0' }; }
 function statusBadge(s){ const i=statusInfo(s); return `<span class="badge" style="background:${i.bg};color:${i.cor}">${i.label}</span>`; }
+// Pedido aprovado (AP/EX) que ainda não foi impresso DEPOIS da aprovação -> expedição precisa imprimir e separar.
+// Impressão feita antes de aprovar (em AA/EA) não conta: marcamos impresso_em só com o pedido já em AP/EX.
+function pedidoPendenteImpressao(p){ return (p.status==='AP' || p.status==='EX') && !p.impresso_em; }
+function badgeImpressao(p){ return pedidoPendenteImpressao(p) ? '<span class="badge" style="background:#fee2e2;color:#b91c1c;font-size:10px;font-weight:700">🖨️ Não impresso</span>' : ''; }
+// Grava a marca de impressão (1 escrita pequena, sem leitura extra). Só na primeira impressão pós-aprovação.
+function marcarPedidoImpresso(id, p){
+  if(!p || !pedidoPendenteImpressao(p)) return;
+  db.ref('pedidos/'+id).update({ impresso_em: agora().toISOString(), impresso_por: usuarioLogado?.nome || '' })
+    .catch(e => console.warn('Falha ao marcar impresso:', e));
+}
 let FOTOS_DB = {};
 let FOTO_MAPA = {};
 
@@ -3450,7 +3453,7 @@ async function renderPainel(){
       <div class="pedido-card">
         <div class="pedido-card-header">
           <div>
-            <div class="pedido-card-num">#${p.numero} ${statusBadge(p.status)} ${p.faturado?'<span class="badge" style="background:#dcfce7;color:#16a34a;font-size:10px">💰</span>':''}</div>
+            <div class="pedido-card-num">#${p.numero} ${statusBadge(p.status)} ${badgeImpressao(p)} ${p.faturado?'<span class="badge" style="background:#dcfce7;color:#16a34a;font-size:10px">💰</span>':''}</div>
             <div style="font-size:12px;color:var(--muted);margin-top:2px">${fmtData(p.data)}</div>
           </div>
           <div style="text-align:right">
@@ -3477,7 +3480,7 @@ async function renderPainel(){
             <td>${esc(p.cliente_nome)}</td>
             <td><strong class="valor-sensivel">${fmtMoeda(p.total)}</strong></td>
             <td>${p.condicao||''}</td>
-            <td>${statusBadge(p.status)}</td>
+            <td>${statusBadge(p.status)} ${badgeImpressao(p)}</td>
             <td>${fmtData(p.data)}</td>
           </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">Nenhum pedido ativo no momento</td></tr>'}
         </tbody></table>
@@ -4040,9 +4043,7 @@ function atualizarBotaoImprimirOrcamentos(){
 }
 
 // Abre uma janela de impressão com uma ou mais folhas de pedido/orçamento, cada uma em sua própria página
-// opts.interno = true → folha da expedição: mostra a localização de cada item e lista em ordem de rota.
-// O "Gerar PDF p/ Enviar" (cliente) e orçamentos NÃO passam opts — endereço do estoque não sai para o cliente.
-function abrirJanelaImpressaoPedidos(lista, tituloJanela, winPreAberta, opts){
+function abrirJanelaImpressaoPedidos(lista, tituloJanela, winPreAberta){
   if(!lista.length){
     if(winPreAberta && !winPreAberta.closed) winPreAberta.close();
     toast('Nenhum item encontrado para imprimir','error');
@@ -4053,7 +4054,7 @@ function abrirJanelaImpressaoPedidos(lista, tituloJanela, winPreAberta, opts){
     toast('Não foi possível abrir a janela de impressão. Verifique se o navegador está bloqueando pop-ups.','error');
     return;
   }
-  const paginasHtml = lista.map(p => `<div class="folha">${montarSlipPedidoHTML(p, lista.length, opts)}</div>`).join('');
+  const paginasHtml = lista.map(p => `<div class="folha">${montarSlipPedidoHTML(p, lista.length)}</div>`).join('');
   win.document.write(`<!DOCTYPE html>
     <html>
     <head>
@@ -4079,13 +4080,14 @@ async function imprimirPedidosSelecionados(){
   if(!pedidosSelecionadosImprimir.size){ toast('Marque ao menos um pedido para imprimir','error'); return; }
   const win = window.open('', '_blank'); // abre já, no clique — antes de qualquer busca assíncrona (celular bloqueia senão)
   const lista = [];
+  const porId = {};
   for(const id of pedidosSelecionadosImprimir){
     const snap = await db.ref('pedidos/'+id).once('value');
-    const p = snap.val(); if(p) lista.push(p);
+    const p = snap.val(); if(p){ lista.push(p); porId[id] = p; }
   }
   lista.sort((a,b)=>(a.numero||0)-(b.numero||0));
-  abrirJanelaImpressaoPedidos(lista, `Impressão de ${lista.length} Pedido(s)`, win, { interno:true });
-  for(const id of pedidosSelecionadosImprimir){ registrarEventoHistorico(id, 'Pedido impresso (em lote)'); }
+  abrirJanelaImpressaoPedidos(lista, `Impressão de ${lista.length} Pedido(s)`, win);
+  for(const id of pedidosSelecionadosImprimir){ registrarEventoHistorico(id, 'Pedido impresso (em lote)'); marcarPedidoImpresso(id, porId[id]); }
 }
 
 async function imprimirOrcamentosSelecionados(){
@@ -4175,7 +4177,9 @@ async function renderPedidos(usarCache){
       const w3Str = String(p.codigo_w3||'');
       if(!numStr.includes(fNumero) && !w3Str.includes(fNumero)) return false;
     }
-    if(fFaturado){
+    if(fStatus==='nao_impresso'){
+      if(!pedidoPendenteImpressao(p)) return false;
+    } else if(fFaturado){
       // Filtrando por Faturamento, a restrição de "Situação = ativos" precisa afrouxar para
       // deixar o Concluído aparecer — senão o pedido faturado some mesmo com o filtro certo.
       // Mas afrouxar por completo, como era antes, fazia entrar Orçamento e Cancelado na
@@ -4296,7 +4300,7 @@ async function renderPedidos(usarCache){
           <div style="display:flex;align-items:flex-start;gap:8px">
             <input type="checkbox" class="check-imprimir-pedido" data-id="${p.id}" ${pedidosSelecionadosImprimir.has(p.id)?'checked':''} onchange="toggleSelecaoPedido('${p.id}',this.checked)" style="margin-top:4px;width:16px;height:16px;cursor:pointer;flex-shrink:0">
             <div>
-              <div class="pedido-card-num">#${p.numero} ${statusBadge(p.status)} ${p.faturado?'<span class="badge" style="background:#dcfce7;color:#16a34a;font-size:10px">💰 Faturado</span>':''}</div>
+              <div class="pedido-card-num">#${p.numero} ${statusBadge(p.status)} ${badgeImpressao(p)} ${p.faturado?'<span class="badge" style="background:#dcfce7;color:#16a34a;font-size:10px">💰 Faturado</span>':''}</div>
               <div style="font-size:12px;color:var(--muted);margin-top:2px">${fmtData(p.data)}</div>
             </div>
           </div>
@@ -4323,7 +4327,7 @@ async function renderPedidos(usarCache){
         <input type="checkbox" class="check-imprimir-pedido" data-id="${p.id}" ${pedidosSelecionadosImprimir.has(p.id)?'checked':''} onchange="toggleSelecaoPedido('${p.id}',this.checked)" style="flex-shrink:0;width:16px;height:16px;cursor:pointer">
         <div style="flex-shrink:0;min-width:90px">
           <div style="font-family:'DM Sans',sans-serif;font-weight:700;font-size:14px">#${p.numero}</div>
-          <div style="margin-top:2px;display:flex;gap:4px;flex-wrap:wrap">${statusBadge(p.status)} ${p.faturado?'<span class="badge" style="background:#dcfce7;color:#16a34a;font-size:10px">💰 Faturado</span>':''}</div>
+          <div style="margin-top:2px;display:flex;gap:4px;flex-wrap:wrap">${statusBadge(p.status)} ${badgeImpressao(p)} ${p.faturado?'<span class="badge" style="background:#dcfce7;color:#16a34a;font-size:10px">💰 Faturado</span>':''}</div>
         </div>
         <div style="flex-shrink:0;font-size:12px;color:var(--muted);min-width:70px">${fmtData(p.data)}</div>
         <div style="flex:1;min-width:0;overflow:hidden">
@@ -4705,7 +4709,7 @@ async function verPedido(id){
 
     document.getElementById('ver-pedido-conteudo').innerHTML = `
       <div style="font-family:'DM Sans',sans-serif;font-size:20px;font-weight:700;margin-bottom:4px">
-        #${p.numero} — ${statusBadge(p.status)}
+        #${p.numero} — ${statusBadge(p.status)} ${badgeImpressao(p)}
         ${p.status==='Orçamento'?'<button class="btn btn-success btn-sm" style="margin-left:12px" onclick="confirmarOrcamento(\''+id+'\')">Confirmar como Pedido</button>':''}
       </div>
       <div style="font-size:13px;color:var(--muted);margin-bottom:4px">${fmtData(p.data)} · Vendedor: ${p.vendedor_nome}</div>
@@ -12291,7 +12295,7 @@ async function renderSeparacao(){
             <div class="pedido-card-num">#${p.numero} — ${esc(p.cliente_nome)}</div>
             <div style="font-size:12px;color:var(--muted);margin-top:2px">${p.cliente_cidade||''}/${p.cliente_uf||''} · ${fmtData(p.data)}</div>
           </div>
-          ${statusBadge(p.status)}
+          <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">${statusBadge(p.status)} ${badgeImpressao(p)}</div>
         </div>
         <div class="pedido-card-info">📦 Itens separados: <span>${separados} / ${totalItens}</span> (${pct}%)</div>
         ${p.obs ? `<div style="font-size:12px;margin-top:6px;padding:6px 10px;background:#fffbea;border-left:3px solid #f59e0b;border-radius:0 6px 6px 0;color:#92400e"><strong>⚠️ Obs:</strong> ${p.obs}</div>` : ''}
@@ -12336,11 +12340,7 @@ function renderModalSeparacao(){
       <div style="color:#92400e;margin-top:6px;font-size:12px">Separe a garantia junto com este pedido.</div>
     </div>` : '';
 
-  // Ordem de ROTA: itens na sequência dos endereços (R1-P01-V1... ), sem endereço por último.
-  // Guarda o índice original — marcar/desmarcar/OP continuam apontando para o item certo do pedido.
-  const itensRota = itens.map((item, idx) => ({ item, idx, loc: String(PRODUTOS_DB.find(x=>x.codigo===item.codigo)?.localizacao||'').trim() }))
-    .sort((a,b) => (!a.loc - !b.loc) || a.loc.localeCompare(b.loc, 'pt-BR', {numeric:true}) || (a.idx - b.idx));
-  const linhasItens = itensRota.map(({item, idx}) => {
+  const linhasItens = itens.map((item, idx) => {
     const produto = PRODUTOS_DB.find(x=>x.codigo===item.codigo);
     const estoqueDisponivel = produto ? Number(produto.quantidade||0) : 0;
     const temEstoqueSuficiente = estoqueDisponivel >= item.qtd;
@@ -12360,7 +12360,7 @@ function renderModalSeparacao(){
       <div style="flex:1">
         <div style="font-weight:600;font-size:13px">${esc(item.nome)}</div>
         <div style="font-size:12px;color:var(--muted)">Qtd pedida: <strong>${item.qtd}</strong></div>
-        <div style="font-size:12px;color:var(--muted);margin-top:2px">📍 ${produto?.localizacao ? `<span style="background:#1F3A5F;color:#fff;border-radius:5px;padding:2px 8px;font-weight:700;font-size:13px;letter-spacing:.3px">${esc(produto.localizacao)}</span>` : '<strong>sem endereço</strong>'}</div>
+        <div style="font-size:12px;color:var(--muted)">📍 Localização: <strong>${produto?.localizacao || '—'}</strong></div>
         <div style="font-size:12px;margin-top:2px">${statusVisual}</div>
       </div>
       <div style="display:flex;gap:6px">
@@ -12384,7 +12384,7 @@ function renderModalSeparacao(){
   document.getElementById('separacao-conteudo').innerHTML = `
     <div class="modal-title">Pedido #${p.numero} — ${esc(p.cliente_nome)}</div>
     ${avisoGarantiaSep}
-    <div style="font-size:13px;color:var(--muted);margin-bottom:16px">${p.cliente_cidade||''}/${p.cliente_uf||''} · ${itens.length} itens · <span title="Itens listados na ordem dos endereços do estoque">🧭 em ordem de rota</span></div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:16px">${p.cliente_cidade||''}/${p.cliente_uf||''} · ${itens.length} itens</div>
     <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:18px">
       ${linhasItens}
     </div>
@@ -15930,8 +15930,9 @@ async function imprimirCapaPedidoVenda(id){
   const win = window.open('', '_blank');
   const snap = await db.ref('pedidos/'+id).once('value');
   const p = snap.val(); if(!p){ if(win && !win.closed) win.close(); return; }
-  abrirJanelaImpressaoPedidos([p], `Pedido #${p.numero}`, win, p.status==='Orçamento' ? undefined : { interno:true });
+  abrirJanelaImpressaoPedidos([p], `Pedido #${p.numero}`, win);
   registrarEventoHistorico(id, `${p.status==='Orçamento'?'Orçamento':'Pedido'} impresso`);
+  marcarPedidoImpresso(id, p);
 }
 
 async function imprimirCapaPedidoCompra(id){
@@ -19483,106 +19484,6 @@ function importarCadastroCompletoProdutos(){
   reader.readAsText(file, 'utf-8');
 }
 
-// ══════════════════════════════════════════════
-// ENDEREÇOS DO ESTOQUE — grava SÓ produtos/<codigo>/localizacao, num único update() multi-caminho.
-// Zero leituras extras no Firebase (usa PRODUTOS_DB da memória) e só escreve o que mudou.
-// Código que não existe no cadastro é ignorado — nunca cria nó novo em produtos/.
-// ══════════════════════════════════════════════
-async function importarEnderecosEstoque(){
-  if(!temPermissaoEditar('importar')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
-  const file = document.getElementById('import-enderecos-file').files[0];
-  if(!file){ toast('Selecione um arquivo','error'); return; }
-  const limparAusentes = document.getElementById('import-enderecos-limpar').checked;
-  const resultEl = document.getElementById('import-enderecos-result');
-  resultEl.innerHTML = '<span style="color:var(--accent)">⏳ Lendo arquivo...</span>';
-  try {
-    let wb;
-    if(/\.csv$/i.test(file.name)){
-      const texto = await file.text();
-      wb = XLSX.read(texto, { type:'string', FS: (texto.split('\n')[0].includes(';') ? ';' : ',') });
-    } else {
-      wb = XLSX.read(await file.arrayBuffer(), { type:'array' });
-    }
-    // Planilha de endereçamento: usa a aba PRODUTOS; outro arquivo: primeira aba
-    const nomeAba = wb.SheetNames.find(n => n.trim().toUpperCase()==='PRODUTOS') || wb.SheetNames[0];
-    const linhas = XLSX.utils.sheet_to_json(wb.Sheets[nomeAba], { header:1, defval:'', raw:false });
-    const norm = v => String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase();
-
-    let linhaCab = -1, iCod = -1, iEnd = -1;
-    for(let r=0; r<Math.min(10, linhas.length); r++){
-      const h = linhas[r].map(norm);
-      const c = h.findIndex(x => x==='codigo' || x==='codigo produto');
-      const e = h.findIndex(x => x==='endereco' || x==='localizacao');
-      if(c>=0 && e>=0){ linhaCab = r; iCod = c; iEnd = e; break; }
-    }
-    if(linhaCab < 0){
-      resultEl.innerHTML = '<span style="color:#dc2626">Não encontrei as colunas "Código" e "Endereço" (ou "Localização") no arquivo.</span>';
-      return;
-    }
-
-    if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
-    const porCodigo = {};
-    PRODUTOS_DB.forEach(p => { porCodigo[String(p.codigo).trim().toUpperCase()] = p; });
-
-    const enderecoPorCodigo = {};   // codigo real -> endereço
-    const naoEncontrados = [], codigosRepetidos = [];
-    for(const linha of linhas.slice(linhaCab+1)){
-      const cod = String(linha[iCod]||'').trim().toUpperCase();
-      const end = String(linha[iEnd]||'').trim().toUpperCase();
-      if(!cod || !end || end==='SEM ENDEREÇO' || end==='SEM ENDERECO') continue;
-      const prod = porCodigo[cod];
-      if(!prod){ naoEncontrados.push(cod); continue; }
-      if(enderecoPorCodigo[prod.codigo] !== undefined) codigosRepetidos.push(prod.codigo);
-      enderecoPorCodigo[prod.codigo] = end;
-    }
-
-    // Endereço usado por mais de um produto — só avisa (pode ser intencional)
-    const usoEndereco = {};
-    Object.entries(enderecoPorCodigo).forEach(([c,e]) => { (usoEndereco[e] = usoEndereco[e] || []).push(c); });
-    const enderecosRepetidos = Object.entries(usoEndereco).filter(([,cs]) => cs.length > 1);
-
-    const updates = {};
-    let alterados = 0, iguais = 0, limpos = 0;
-    Object.entries(enderecoPorCodigo).forEach(([cod, end]) => {
-      if((porCodigo[cod.toUpperCase()].localizacao||'').trim().toUpperCase() === end){ iguais++; return; }
-      updates['produtos/'+cod+'/localizacao'] = end; alterados++;
-    });
-    if(limparAusentes){
-      PRODUTOS_DB.forEach(p => {
-        if(enderecoPorCodigo[p.codigo] === undefined && (p.localizacao||'').trim()){
-          updates['produtos/'+p.codigo+'/localizacao'] = null; limpos++;
-        }
-      });
-    }
-
-    if(!alterados && !limpos){
-      resultEl.innerHTML = `<span style="color:var(--muted)">Nada para alterar — ${iguais} produto(s) já estavam com o mesmo endereço.</span>`;
-      return;
-    }
-    const msgConf = `Vai gravar o endereço de ${alterados} produto(s)` + (limpos ? ` e APAGAR a localização de ${limpos} produto(s) que não estão na planilha` : '') + '.\n\nContinuar?';
-    if(!confirm(msgConf)){ resultEl.innerHTML = '<span style="color:var(--muted)">Importação cancelada.</span>'; return; }
-
-    resultEl.innerHTML = '<span style="color:var(--accent)">⏳ Gravando...</span>';
-    await db.ref().update(updates);
-
-    // Atualiza a memória só depois de gravar com sucesso
-    Object.entries(updates).forEach(([caminho, valor]) => {
-      const cod = caminho.split('/')[1];
-      const p = PRODUTOS_DB.find(x => x.codigo === cod);
-      if(p) p.localizacao = valor || '';
-    });
-
-    let html = `<span style="color:var(--success)">✓ ${alterados} endereço(s) gravado(s)` + (limpos ? ` · 🧹 ${limpos} localização(ões) apagada(s)` : '') + (iguais ? ` · ${iguais} já estavam iguais` : '') + '</span>';
-    if(naoEncontrados.length) html += `<br><span style="color:#d97706">⚠️ ${naoEncontrados.length} código(s) não existem no cadastro e foram ignorados: ${naoEncontrados.slice(0,30).map(esc).join(', ')}${naoEncontrados.length>30?'…':''}</span>`;
-    if(codigosRepetidos.length) html += `<br><span style="color:#d97706">⚠️ Código(s) repetido(s) na planilha (valeu a última linha): ${[...new Set(codigosRepetidos)].map(esc).join(', ')}</span>`;
-    if(enderecosRepetidos.length) html += `<br><span style="color:#d97706">⚠️ ${enderecosRepetidos.length} endereço(s) com mais de um produto: ${enderecosRepetidos.slice(0,15).map(([e,cs]) => esc(e)+' ('+cs.map(esc).join(', ')+')').join(' · ')}${enderecosRepetidos.length>15?'…':''}</span>`;
-    resultEl.innerHTML = html;
-    toast(`✓ ${alterados} endereço(s) atualizado(s)`, 'success');
-  } catch(err){
-    resultEl.innerHTML = `<span style="color:#dc2626">Erro: ${esc(err.message)}</span>`;
-  }
-}
-
 function importarPrecos(){
   const file=document.getElementById('import-precos-file').files[0]; if(!file){toast('Selecione um arquivo','error');return;}
   const reader=new FileReader();
@@ -20782,15 +20683,13 @@ const LOGO_CROW_B64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAywAAADqCAY
 
 // Monta uma única linha (<tr>) de item — reaproveitado tanto no HTML de impressão quanto,
 // individualmente, para medir a altura real de cada linha na paginação da imagem do WhatsApp
-function montarLinhaItemHTML(i, idx, mostrarLocal){
+function montarLinhaItemHTML(i, idx){
   const sub = i.qtd * i.preco * (1-(i.desconto_item||0)/100);
   const zebra = idx%2===1 ? 'background:#f5f5f5' : 'background:#fff';
-  const loc = mostrarLocal ? String(PRODUTOS_DB.find(x=>x.codigo===i.codigo)?.localizacao||'').trim() : '';
-  const locHtml = mostrarLocal ? `<div style="margin-top:3px;font-size:10px;font-weight:700;white-space:nowrap;color:${loc?'#0B3B21':'#999'}">📍 ${loc ? esc(loc) : 's/ endereço'}</div>` : '';
   return `<tr style="${zebra}">
     <td style="padding:3px 6px;border:1px solid #ccc;text-align:center">${fotoImg(i.codigo, 34)}</td>
     <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc">${esc(i.nome)}</td>
-    <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:center">${i.codigo}${locHtml}</td>
+    <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:center">${i.codigo}</td>
     <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:center">${i.unidade||'UN'}</td>
     <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:center">${i.qtd}</td>
     <td style="padding:5px 8px;font-size:11px;border:1px solid #ccc;text-align:right">${Number(i.preco).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
@@ -20929,17 +20828,9 @@ function montarSummarySlipHTML(p){
   `;
 }
 
-function montarRodapeSlipHTML(p, opts){
+function montarRodapeSlipHTML(p){
   // Versão completa: inclui tabela de itens + summary (usada na impressão normal)
-  const interno = !!(opts && opts.interno);
-  let itens = p.itens||[];
-  if(interno){
-    // Ordem de rota (mesma da tela de separação): por endereço, sem endereço por último
-    const locDe = it => String(PRODUTOS_DB.find(x=>x.codigo===it.codigo)?.localizacao||'').trim();
-    itens = itens.map((it,i)=>({it,i,loc:locDe(it)}))
-      .sort((a,b)=> (!a.loc - !b.loc) || a.loc.localeCompare(b.loc,'pt-BR',{numeric:true}) || (a.i-b.i))
-      .map(x=>x.it);
-  }
+  const itens = p.itens||[];
   return `
     <div style="font-size:10px;font-weight:600;color:#333;margin-bottom:4px">Itens do pedido de venda</div>
     <table style="width:100%;border-collapse:collapse">
@@ -20952,15 +20843,15 @@ function montarRodapeSlipHTML(p, opts){
         <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:right;font-size:11px">Valor unitário</th>
         <th style="padding:5px 8px;border:1px solid #0B3B21;text-align:right;font-size:11px">Valor total</th>
       </tr></thead>
-      <tbody>${itens.map((i,idx)=>montarLinhaItemHTML(i,idx,interno)).join('')}</tbody>
+      <tbody>${itens.map((i,idx)=>montarLinhaItemHTML(i,idx)).join('')}</tbody>
     </table>
     ${montarSummarySlipHTML(p)}
   `;
 }
 
 
-function montarSlipPedidoHTML(p, totalDoc, opts){
-  return `${montarCabecalhoSlipHTML(p, null, totalDoc)}${montarRodapeSlipHTML(p, opts)}`;
+function montarSlipPedidoHTML(p, totalDoc){
+  return `${montarCabecalhoSlipHTML(p, null, totalDoc)}${montarRodapeSlipHTML(p)}`;
 }
 
 // ── Geração de imagem para WhatsApp, agora PAGINADA como uma impressão real ──
