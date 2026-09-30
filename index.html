@@ -12546,6 +12546,20 @@ async function irParaBipagem(){
   abrirModal('modal-separacao');
 }
 
+// Ordem de ROTA para a bipagem — mesma regra da folha impressa e da tela de separação:
+// por endereço (R1-P01-V1...), sem endereço por último, empate na ordem original do pedido.
+// Devolve só os ÍNDICES: p.itens NÃO é reordenado, então o que é gravado no Firebase continua igual.
+function ordemRotaIndices(itens){
+  return (itens||[]).map((it, i) => ({ i, loc: String(PRODUTOS_DB.find(x=>x.codigo===it.codigo)?.localizacao||'').trim() }))
+    .sort((a,b) => (!a.loc - !b.loc) || a.loc.localeCompare(b.loc, 'pt-BR', {numeric:true}) || (a.i - b.i))
+    .map(x => x.i);
+}
+// Primeiro item (na ordem de rota) que ainda não foi 100% bipado; -1 se tudo bipado
+function idxAtualBipagemRota(itens){
+  const idx = ordemRotaIndices(itens).find(i => Number(itens[i].qtd_bipada||0) < itens[i].qtd);
+  return idx === undefined ? -1 : idx;
+}
+
 function renderModalBipagem(){
   const p = pedidoSeparacaoAtual;
   const itens = p.itens || [];
@@ -12557,21 +12571,25 @@ function renderModalBipagem(){
   const totalUnidades = itens.reduce((s,i)=>s+Number(i.qtd),0);
   const totalBipado = itens.reduce((s,i)=>s+Number(i.qtd_bipada||0),0);
 
-  // Item atual = primeiro item da lista que ainda não está 100% bipado
-  const idxAtual = itens.findIndex(i => Number(i.qtd_bipada||0) < i.qtd);
+  // Item atual = primeiro item, NA ORDEM DE ROTA, que ainda não está 100% bipado
+  const ordem = ordemRotaIndices(itens);
+  const idxAtual = idxAtualBipagemRota(itens);
   const itemAtual = idxAtual >= 0 ? itens[idxAtual] : null;
+  const posAtual = ordem.indexOf(idxAtual);
 
-  const linhasConcluidas = itens.map((item,idx) => {
+  const linhasConcluidas = ordem.map((idx, pos) => {
+    const item = itens[idx];
     const qtdBipada = Number(item.qtd_bipada||0);
     const completo = qtdBipada >= item.qtd;
     const ehAtual = idx === idxAtual;
-    const aindaNaoChegou = idx > idxAtual && idxAtual >= 0;
+    const aindaNaoChegou = idxAtual >= 0 && pos > posAtual;
+    const locItem = String(PRODUTOS_DB.find(x=>x.codigo===item.codigo)?.localizacao||'').trim();
     return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);
       ${completo?'background:#f0fdf4':''}${ehAtual?'background:#fef9e7;border-left:4px solid #d97706':''}${aindaNaoChegou?'opacity:.4':''}">
       ${!aindaNaoChegou ? `<div style="background:${ehAtual?'#d97706':completo?'var(--success)':'var(--muted)'};color:#fff;border-radius:6px;padding:4px 8px;font-family:'DM Sans',sans-serif;font-weight:700;font-size:13px;min-width:55px;text-align:center">${item.codigo}</div>` : ''}
       <div style="flex:1">
         <div style="font-size:13px;font-weight:600">${completo?'✅ ':ehAtual?'👉 ':'⏳ '}${aindaNaoChegou ? '🔒 Item bloqueado até concluir o anterior' : item.nome}</div>
-        ${!aindaNaoChegou ? `<div style="font-size:11px;color:var(--muted)">GTIN: ${item.gtin||'—'}</div>` : ''}
+        ${!aindaNaoChegou ? `<div style="font-size:11px;color:var(--muted)">GTIN: ${item.gtin||'—'}${locItem ? ` · 📍 <strong>${esc(locItem)}</strong>` : ''}</div>` : ''}
       </div>
       <div style="font-weight:700;color:${completo?'var(--success)':ehAtual?'#d97706':'var(--muted)'};font-size:15px">
         ${aindaNaoChegou ? '—' : `${qtdBipada} / ${item.qtd}`}
@@ -12589,6 +12607,7 @@ function renderModalBipagem(){
         <div style="font-size:12px;color:#92400e;text-transform:uppercase;font-weight:600;margin-bottom:8px">Bipando agora</div>
         <div style="display:inline-block;background:#d97706;color:#fff;border-radius:8px;padding:6px 16px;font-family:'DM Sans',sans-serif;font-weight:700;font-size:22px;margin-bottom:8px">${itemAtual.codigo}</div>
         <div style="font-size:16px;font-weight:700">${esc(itemAtual.nome)}</div>
+        ${(()=>{ const l = String(PRODUTOS_DB.find(x=>x.codigo===itemAtual.codigo)?.localizacao||'').trim(); return l ? `<div style="margin-top:6px"><span style="background:#1F3A5F;color:#fff;border-radius:5px;padding:2px 10px;font-weight:700;font-size:13px">📍 ${esc(l)}</span></div>` : ''; })()}
         <div style="font-size:28px;font-weight:900;font-family:'DM Sans',sans-serif;color:#d97706;margin-top:8px">${Number(itemAtual.qtd_bipada||0)} / ${itemAtual.qtd}</div>
       </div>
     ` : '<div style="text-align:center;color:var(--success);font-weight:700;padding:12px">✅ Todos os itens bipados!</div>'}
@@ -12616,8 +12635,8 @@ async function processarBipagem(codigoLido){
   const p = pedidoSeparacaoAtual;
   const msg = document.getElementById('bipagem-msg');
 
-  // Encontra o item atual da fila (primeiro não-completo)
-  const idxAtual = p.itens.findIndex(i => Number(i.qtd_bipada||0) < i.qtd);
+  // Encontra o item atual da fila (primeiro não-completo, na ORDEM DE ROTA — igual à folha impressa)
+  const idxAtual = idxAtualBipagemRota(p.itens);
   if(idxAtual < 0){ msg.innerHTML = `<span style="color:var(--success)">✅ Pedido já totalmente bipado</span>`; return; }
   const itemAtual = p.itens[idxAtual];
 
