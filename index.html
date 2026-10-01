@@ -1504,7 +1504,7 @@ tbody td{padding:11px 16px;font-size:14px}
             <input type="text" id="op-f-produto" placeholder="Nome ou código...">
           </div>
           <div class="filtros-btns">
-            <button class="btn btn-primary" onclick="paginaProducao=1;renderProducao()">Filtrar</button>
+            <button class="btn btn-primary" onclick="paginaProducao=1;renderProducao(false)">Filtrar</button>
             <button class="btn btn-outline" onclick="limparFiltrosOP()">Limpar</button>
           </div>
         </div>
@@ -7870,10 +7870,12 @@ async function carregarOPsFirebase(){
   } catch(e){ OPS_DB = []; }
 }
 
-async function renderProducao(){
+// recarregar=true (padrão): busca as OPs no Firebase — usado ao abrir a aba e depois de salvar/alterar OP.
+// recarregar=false: só refiltra o que já está em memória (filtros, cards, paginação) — zero leitura no Firebase.
+async function renderProducao(recarregar = true){
   if(!temPermissaoEditar('producao')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
-  await carregarOPsFirebase();
+  if(recarregar || !OPS_DB.length) await carregarOPsFirebase();
   if(!INSUMOS_DB.length) await carregarInsumosFirebase();
 
   const pendentes = OPS_DB.filter(o=>o.status==='pendente').length;
@@ -7962,7 +7964,7 @@ async function renderProducao(){
     </div>`;
   }).join('') || '<div style="text-align:center;color:var(--muted);padding:32px">Nenhuma ordem de produção encontrada</div>';
 
-  renderPaginacao('producao-pag', total, paginaProducao, n=>{ paginaProducao=n; renderProducao(); });
+  renderPaginacao('producao-pag', total, paginaProducao, n=>{ paginaProducao=n; renderProducao(false); });
   atualizarBotaoExportarOPs();
 }
 
@@ -8039,7 +8041,7 @@ function filtrarStatusOP(status){
   // Clicar de novo no mesmo card remove o filtro (toggle)
   select.value = (select.value === status) ? '' : status;
   paginaProducao = 1;
-  renderProducao();
+  renderProducao(false);
 }
 
 function limparFiltrosOP(){
@@ -8049,7 +8051,7 @@ function limparFiltrosOP(){
   document.getElementById('op-f-responsavel').value = '';
   document.getElementById('op-f-produto').value = '';
   paginaProducao = 1;
-  renderProducao();
+  renderProducao(false);
 }
 
 function abrirModalOP(){
@@ -8326,14 +8328,23 @@ async function salvarQtdEIniciar(key){
   if(novaQtd <= 0){ toast('Quantidade deve ser maior que zero','error'); return; }
   const responsavelProducao = document.getElementById('op-responsavel-producao').value.trim();
   if(!responsavelProducao){ toast('Informe o nome do responsável pela produção','error'); return; }
-  await db.ref('ordens_producao/'+key).update({
-    qtd_solicitada: novaQtd,
-    status: 'em_producao',
-    responsavel_producao: responsavelProducao,
-    ts_iniciada: agoraTs()
+  // Só inicia se, no Firebase, a OP ainda estiver pendente. Sem essa checagem, uma tela desatualizada
+  // podia "reabrir" como Em Produção uma OP que outro usuário já concluiu — e ela seria concluída (e baixada) de novo.
+  const res = await db.ref('ordens_producao/'+key).transaction(cur => {
+    if(cur === null) return cur;               // sem dado local: servidor devolve o valor real e roda de novo
+    if(cur.status !== 'pendente') return;      // aborta
+    cur.qtd_solicitada = novaQtd;
+    cur.status = 'em_producao';
+    cur.responsavel_producao = responsavelProducao;
+    cur.ts_iniciada = agoraTs();
+    return cur;
   });
   fecharModal('modal-op-detalhe');
   await renderProducao();
+  if(!res.committed || !res.snapshot.exists() || res.snapshot.val().status !== 'em_producao'){
+    toast('Esta OP já foi iniciada, concluída ou cancelada por outro usuário — a lista foi atualizada.','error');
+    return;
+  }
   toast('✓ OP iniciada!','success');
 
   // Abre o modal para imprimir etiquetas do item que será produzido, já sugerindo a quantidade da OP —
@@ -8431,20 +8442,34 @@ async function toggleUrgenteOP(key, eraUrgente){
 
 async function cancelarOP(key){
   if(!temPermissaoEditar('producao')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
-  const op = OPS_DB.find(o=>o.key===key);
-  if(!confirm(`Cancelar a OP #${op?.numero} (${op?.produto_nome})?\n\nEla não foi iniciada, então nenhum insumo será afetado.`)) return;
-  await db.ref('ordens_producao/'+key).remove();
+  // Lê a OP direto do Firebase (a lista em memória pode estar desatualizada)
+  const snapOP = await db.ref('ordens_producao/'+key).once('value');
+  if(!snapOP.exists()){ toast('Esta OP não existe mais — a lista foi atualizada.','error'); fecharModal('modal-op-detalhe'); await renderProducao(); return; }
+  const op = snapOP.val();
+  if(op.status !== 'pendente'){ toast(`Esta OP já está "${op.status==='concluida'?'Concluída':'Em Produção'}" (alterada por outro usuário) e não pode ser cancelada.`,'error'); fecharModal('modal-op-detalhe'); await renderProducao(); return; }
+  if(!confirm(`Cancelar a OP #${op.numero} (${op.produto_nome})?\n\nEla não foi iniciada, então nenhum insumo será afetado.`)) return;
+  // Remoção atômica: só apaga se, no momento exato da gravação, ela ainda estiver pendente e sem conclusão em andamento
+  let motivoBloqueio = '';
+  const res = await db.ref('ordens_producao/'+key).transaction(cur => {
+    if(cur === null) return cur;                       // sem dado local: o servidor devolve o valor real e roda de novo
+    if(cur.status !== 'pendente' || cur.conclusao_lock){ motivoBloqueio = 'status'; return; } // aborta
+    return null;                                       // apaga
+  });
   fecharModal('modal-op-detalhe');
   await renderProducao();
+  if(!res.committed){ toast('A OP foi alterada por outro usuário e não foi cancelada.','error'); return; }
   toast('✓ OP cancelada','success');
 }
 
 async function concluirOP(key){
   if(!temPermissaoEditar('producao')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
-  const op = OPS_DB.find(o=>o.key===key);
-  if(!op) return;
-  if(op.status === 'concluida'){ toast('Esta OP já foi concluída — não é possível concluir de novo (evita duplicar a baixa de estoque).','error'); return; }
   if(opEmConclusao){ toast('Já estamos processando a conclusão desta OP, aguarde...','error'); return; }
+  // Lê a OP direto do Firebase — NUNCA da memória: outra pessoa/aba pode ter concluído depois que a lista foi carregada
+  const snapOP = await db.ref('ordens_producao/'+key).once('value');
+  if(!snapOP.exists()){ toast('Esta OP não existe mais (foi cancelada por outro usuário).','error'); fecharModal('modal-op-detalhe'); await renderProducao(); return; }
+  const op = { key, ...snapOP.val() };
+  if(op.status === 'concluida'){ toast('Esta OP já foi concluída (possivelmente por outro usuário) — não é possível concluir de novo.','error'); fecharModal('modal-op-detalhe'); await renderProducao(); return; }
+  if(op.conclusao_lock){ toast(`A conclusão desta OP foi iniciada por ${op.conclusao_lock.por||'outro usuário'} e não terminou. NÃO conclua de novo: confira as movimentações de estoque da OP #${op.numero} e acione o administrador.`,'error'); return; }
   const qtdProduzida = Number(document.getElementById('op-qtd-concluir').value) || op.qtd_solicitada;
 
   // Verifica antecipadamente se algum insumo vai ficar negativo, pra avisar antes de confirmar
@@ -8468,11 +8493,35 @@ async function concluirOP(key){
   if(!confirmado) return;
 
   // Trava para impedir clique duplo / duplo envio (mesmo problema que gerava a "Saída" duplicada)
-  if(op.status === 'concluida'){ toast('Esta OP já foi concluída — não é possível concluir de novo.','error'); return; }
+  if(opEmConclusao){ toast('Já estamos processando a conclusão desta OP, aguarde...','error'); return; }
   opEmConclusao = true;
+
+  // Trava ATÔMICA no Firebase: entre dois computadores/abas clicando ao mesmo tempo, só um consegue.
+  // Não cria registro fantasma: se a OP não existir, nada é gravado.
+  let baixaIniciada = false;
+  try {
+    const lock = await db.ref('ordens_producao/'+key).transaction(cur => {
+      if(cur === null) return cur;                                  // sem dado local: servidor devolve o valor real e roda de novo
+      if(cur.status === 'concluida' || cur.conclusao_lock) return;  // aborta
+      cur.conclusao_lock = { por: usuarioLogado?.nome || usuarioLogado?.usuario || '?', ts: agoraTs() };
+      return cur;
+    });
+    if(!lock.committed || !lock.snapshot.exists() || lock.snapshot.val().conclusao_lock?.ts === undefined){
+      toast('Esta OP foi concluída ou cancelada por outro usuário — nenhuma baixa foi feita.','error');
+      opEmConclusao = false;
+      fecharModal('modal-op-detalhe');
+      await renderProducao();
+      return;
+    }
+  } catch(e){
+    opEmConclusao = false;
+    toast('Erro ao reservar a OP para conclusão: ' + e.message + ' — nenhuma baixa foi feita.','error');
+    return;
+  }
 
   try {
     // Baixa nos insumos (proporcional à quantidade produzida)
+    baixaIniciada = true;
     for(const item of (op.receita||[])){
       const consumir = item.qtd * qtdProduzida;
       const insumoKey = 'ins_' + item.codigo;
@@ -8521,7 +8570,8 @@ async function concluirOP(key){
     await db.ref('ordens_producao/'+key).update({
       status: 'concluida',
       qtd_produzida: qtdProduzida,
-      ts_conclusao: agoraTs()
+      ts_conclusao: agoraTs(),
+      conclusao_lock: null
     });
 
     // Nos caminhos legado (campo 'estoque') e de produto novo o saldo é gravado direto,
@@ -8535,7 +8585,14 @@ async function concluirOP(key){
     await renderProducao();
     toast(`✅ OP #${op.numero} concluída! Estoque atualizado.`,'success');
   } catch(e){
-    toast('Erro ao concluir OP: ' + e.message, 'error');
+    if(!baixaIniciada){
+      // Nada foi movimentado: libera a trava para poder tentar de novo
+      try { await db.ref('ordens_producao/'+key+'/conclusao_lock').remove(); } catch(_){}
+      toast('Erro ao concluir OP: ' + e.message + ' — nenhuma baixa foi feita, pode tentar de novo.', 'error');
+    } else {
+      // Parte da baixa pode ter sido feita: a trava fica, para impedir baixa em dobro
+      toast(`Erro no meio da conclusão da OP #${op.numero}: ${e.message}. A OP ficou travada para evitar baixa em dobro — confira as movimentações de estoque dela antes de qualquer ação.`, 'error');
+    }
   } finally {
     opEmConclusao = false;
   }
