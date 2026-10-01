@@ -7901,11 +7901,11 @@ async function renderProducao(){
   let filtrado = filtroStatus ? OPS_DB.filter(o=>o.status===filtroStatus) : OPS_DB;
   if(filtroDataIni){
     const dIni = new Date(filtroDataIni + 'T00:00:00');
-    filtrado = filtrado.filter(o => new Date(o.ts_criacao) >= dIni);
+    filtrado = filtrado.filter(o => o.status !== 'concluida' || new Date(o.ts_criacao) >= dIni); // OP aberta nunca some pelo filtro de data
   }
   if(filtroDataFim){
     const dFim = new Date(filtroDataFim + 'T23:59:59');
-    filtrado = filtrado.filter(o => new Date(o.ts_criacao) <= dFim);
+    filtrado = filtrado.filter(o => o.status !== 'concluida' || new Date(o.ts_criacao) <= dFim);
   }
   if(filtroResponsavel){
     filtrado = filtrado.filter(o => o.responsavel_producao === filtroResponsavel);
