@@ -2436,7 +2436,12 @@ tbody td{padding:11px 16px;font-size:14px}
       <div style="position:absolute;left:5%;right:5%;top:50%;height:24%;transform:translateY(-50%);border:2px solid rgba(255,255,255,.85);border-radius:8px;pointer-events:none"></div>
     </div>
     <div id="scanner-status" style="font-size:13px;color:var(--muted);margin-top:10px"></div>
-    <div class="form-actions"><button class="btn btn-outline" onclick="fecharScannerNF()">Cancelar</button></div>
+    <div class="form-actions" style="flex-wrap:wrap">
+      <button class="btn btn-outline" onclick="fecharScannerNF()">Cancelar</button>
+      <label class="btn btn-primary" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer" onclick="pararScannerNF()">📸 Tirar foto da DANFE
+        <input type="file" id="scanner-foto-input" accept="image/*" capture="environment" style="display:none" onchange="lerFotoDanfe(this)">
+      </label>
+    </div>
   </div>
 </div>
 
@@ -13330,81 +13335,166 @@ function limparAssinaturaColeta(){
 }
 
 // ══ LEITOR PELA CÂMERA ══
-// Chrome/Android: BarcodeDetector nativo. iPad e outros: biblioteca ZXing, baixada só na
-// primeira vez que a câmera é usada.
-let SCANNER_STREAM = null, SCANNER_TIMER = null, SCANNER_ZXING = null, SCANNER_ATIVO = false;
+// Chrome/Android: BarcodeDetector nativo. iPad/iPhone (qualquer navegador usa o motor do
+// Safari, sem BarcodeDetector): biblioteca ZXing, baixada só na primeira vez que for usada.
+// O código da DANFE é longo e de barras finas. Por isso o ZXing não recebe o quadro inteiro
+// da câmera (reduzido, as barras se fundem): recebe só a faixa do meio, em resolução cheia.
+// Se ao vivo não ler, "Tirar foto" usa a câmera nativa do aparelho (foco e resolução muito
+// melhores) e procura o código faixa por faixa na foto.
+const ZXING_URL_COLETA = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
+let SCANNER_STREAM = null, SCANNER_TIMER = null, SCANNER_ATIVO = false, SCANNER_PID = null;
+let ZXING_LEITOR_COLETA = null;
 
 function carregarScriptColeta(url){
   return new Promise((resolve, reject) => {
-    if(document.querySelector(`script[data-src="${url}"]`)) return resolve();
+    if(document.querySelector(`script[data-src="${url}"]`) && window.ZXing) return resolve();
     const s = document.createElement('script');
     s.src = url; s.async = true; s.setAttribute('data-src', url);
     s.onload = () => resolve();
-    s.onerror = () => { s.remove(); reject(new Error('não foi possível carregar o leitor de código de barras')); };
+    s.onerror = () => { s.remove(); reject(new Error('não foi possível carregar o leitor de código de barras — verifique a internet')); };
     document.head.appendChild(s);
   });
 }
 
+async function detectorNativoColeta(){
+  if(!('BarcodeDetector' in window)) return null;
+  try {
+    if(!(await BarcodeDetector.getSupportedFormats()).includes('code_128')) return null;
+    return new BarcodeDetector({ formats:['code_128'] });
+  } catch(_){ return null; }
+}
+
+async function obterLeitorZXingColeta(){
+  if(ZXING_LEITOR_COLETA) return ZXING_LEITOR_COLETA;
+  await carregarScriptColeta(ZXING_URL_COLETA);
+  const leitor = new ZXing.MultiFormatReader();
+  const dicas = new Map();
+  dicas.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.CODE_128]);
+  dicas.set(ZXing.DecodeHintType.TRY_HARDER, true);
+  leitor.setHints(dicas);
+  ZXING_LEITOR_COLETA = leitor;
+  return leitor;
+}
+
+// Tenta ler uma chave válida num canvas. Devolve a chave (44 dígitos) ou null.
+async function lerChaveNoCanvas(canvas, detector){
+  const valida = t => { const d = String(t||'').replace(/\D/g,''); return d.length === 44 && analisarChaveNFe(d).ok ? d : null; };
+  if(detector){
+    try { for(const c of await detector.detect(canvas)){ const v = valida(c.rawValue); if(v) return v; } } catch(_){}
+    return null;
+  }
+  try {
+    const src = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
+    const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(src));
+    return valida(ZXING_LEITOR_COLETA.decodeWithState(bmp).getText());
+  } catch(_){ return null; }
+}
+
+// Copia um recorte da fonte (vídeo ou imagem) para um canvas, com largura máxima e rotação
+function recorteParaCanvas(fonte, sx, sy, sw, sh, larguraMax, girar){
+  const fator = Math.min(1, larguraMax / sw);
+  const w = Math.max(1, Math.round(sw * fator)), h = Math.max(1, Math.round(sh * fator));
+  const c = document.createElement('canvas');
+  c.width = girar ? h : w; c.height = girar ? w : h;
+  const ctx = c.getContext('2d', { willReadFrequently:true });
+  if(girar){ ctx.translate(h, 0); ctx.rotate(Math.PI/2); }
+  ctx.drawImage(fonte, sx, sy, sw, sh, 0, 0, w, h);
+  return c;
+}
+
+function leituraConcluidaColeta(chave){
+  const pid = SCANNER_PID;
+  pararScannerNF();
+  fecharModal('modal-scanner-nf');
+  if(navigator.vibrate) try { navigator.vibrate(80); } catch(_){}
+  aplicarNFColeta(pid, chave);
+}
+
 async function abrirScannerNF(pid){
+  SCANNER_PID = pid;
   const status = document.getElementById('scanner-status');
   const video = document.getElementById('scanner-video');
+  document.getElementById('scanner-foto-input').value = '';
   abrirModal('modal-scanner-nf');
   status.textContent = 'Abrindo a câmera…';
   SCANNER_ATIVO = true;
-  const aoLer = texto => {
-    if(!SCANNER_ATIVO) return true;
-    const d = String(texto||'').replace(/\D/g,'');
-    if(d.length !== 44 || !analisarChaveNFe(d).ok) return false; // leitura parcial: continua tentando
-    pararScannerNF();
-    fecharModal('modal-scanner-nf');
-    if(navigator.vibrate) try { navigator.vibrate(80); } catch(_){}
-    aplicarNFColeta(pid, d);
-    return true;
-  };
-  const restricoes = { video:{ facingMode:{ ideal:'environment' }, width:{ ideal:1920 }, height:{ ideal:1080 } }, audio:false };
   try {
-    if(!navigator.mediaDevices?.getUserMedia) throw new Error('este navegador não libera a câmera');
-    let nativo = false;
-    if('BarcodeDetector' in window){
-      try { nativo = (await BarcodeDetector.getSupportedFormats()).includes('code_128'); } catch(_){}
-    }
-    if(nativo){
-      SCANNER_STREAM = await navigator.mediaDevices.getUserMedia(restricoes);
-      if(!SCANNER_ATIVO){ pararScannerNF(); return; }
-      video.srcObject = SCANNER_STREAM;
-      await video.play();
-      const detector = new BarcodeDetector({ formats:['code_128'] });
-      status.textContent = 'Aponte para o código de barras da DANFE, com a nota deitada ocupando a largura da tela.';
-      const ciclo = async () => {
-        if(!SCANNER_ATIVO) return;
-        try {
-          const codigos = await detector.detect(video);
-          for(const c of codigos){ if(aoLer(c.rawValue)) return; }
-        } catch(_){}
-        SCANNER_TIMER = setTimeout(ciclo, 200);
-      };
-      ciclo();
-      return;
-    }
-    status.textContent = 'Carregando o leitor…';
-    await carregarScriptColeta('https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js');
+    if(!navigator.mediaDevices?.getUserMedia) throw new Error('este navegador não libera a câmera ao vivo');
+    const detector = await detectorNativoColeta();
+    if(!detector){ status.textContent = 'Carregando o leitor…'; await obterLeitorZXingColeta(); }
     if(!SCANNER_ATIVO) return;
-    const dicas = new Map();
-    dicas.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.CODE_128]);
-    dicas.set(ZXing.DecodeHintType.TRY_HARDER, true);
-    SCANNER_ZXING = new ZXing.BrowserMultiFormatReader(dicas, 250);
-    status.textContent = 'Aponte para o código de barras da DANFE, com a nota deitada ocupando a largura da tela.';
-    await SCANNER_ZXING.decodeFromConstraints(restricoes, video, res => { if(res) aoLer(res.getText()); });
+    SCANNER_STREAM = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:{ ideal:'environment' }, width:{ ideal:1920 }, height:{ ideal:1080 } }, audio:false
+    });
+    if(!SCANNER_ATIVO){ pararScannerNF(); return; }
+    video.srcObject = SCANNER_STREAM;
+    video.setAttribute('playsinline',''); video.muted = true;
+    await video.play();
+    status.textContent = 'Encaixe o código de barras da DANFE dentro do retângulo, com a nota deitada. Se não ler em alguns segundos, use "Tirar foto".';
+    const ciclo = async () => {
+      if(!SCANNER_ATIVO) return;
+      const vw = video.videoWidth, vh = video.videoHeight;
+      if(vw && vh){
+        // Faixa central (onde fica o retângulo guia), em resolução cheia
+        const faixa = recorteParaCanvas(video, 0, Math.round(vh*0.32), vw, Math.round(vh*0.36), 1600, false);
+        const chave = await lerChaveNoCanvas(faixa, detector);
+        if(chave && SCANNER_ATIVO){ leituraConcluidaColeta(chave); return; }
+      }
+      SCANNER_TIMER = setTimeout(ciclo, detector ? 150 : 250);
+    };
+    ciclo();
   } catch(e){
-    pararScannerNF();
-    status.textContent = 'Não foi possível usar a câmera (' + (e.message || e.name) + '). Feche esta janela e digite o número da NF.';
+    if(SCANNER_STREAM){ SCANNER_STREAM.getTracks().forEach(t => t.stop()); SCANNER_STREAM = null; }
+    status.textContent = 'Câmera ao vivo indisponível (' + (e.message || e.name) + '). Use "Tirar foto da DANFE" ou digite o número da NF.';
+  }
+}
+
+// Foto tirada pela câmera nativa do aparelho: procura o código em faixas horizontais,
+// em duas resoluções e, se preciso, com a foto girada (nota fotografada de lado).
+async function lerFotoDanfe(input){
+  const arquivo = input.files && input.files[0];
+  if(!arquivo) return;
+  const status = document.getElementById('scanner-status');
+  status.textContent = 'Procurando o código de barras na foto…';
+  try {
+    const detector = await detectorNativoColeta();
+    if(!detector) await obterLeitorZXingColeta();
+    const url = URL.createObjectURL(arquivo);
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('não foi possível abrir a foto')); i.src = url; });
+    const W = img.naturalWidth, H = img.naturalHeight;
+    let chave = null;
+    const tentativas = [];
+    for(const girar of [false, true]){
+      for(const larg of [3200, 1800]){
+        tentativas.push([0, 0, W, H, larg, girar]); // foto inteira
+        const altura = girar ? W : H;
+        for(let ini = 0; ini < 0.86; ini += 0.1){
+          const a = 0.22;
+          if(!girar) tentativas.push([0, Math.round(H*ini), W, Math.round(H*a), larg, false]);
+          else tentativas.push([Math.round(W*ini), 0, Math.round(W*a), H, larg, true]);
+        }
+      }
+    }
+    for(let i = 0; i < tentativas.length && !chave; i++){
+      const [sx, sy, sw, sh, larg, girar] = tentativas[i];
+      // girada: o lado que vira "largura" é a altura original
+      const c = girar ? recorteParaCanvas(img, sx, sy, sw, sh, larg * (sw/sh), true) : recorteParaCanvas(img, sx, sy, sw, sh, larg, false);
+      chave = await lerChaveNoCanvas(c, detector);
+      if(i % 6 === 5) await new Promise(r => setTimeout(r, 0)); // não travar a tela
+    }
+    URL.revokeObjectURL(url);
+    input.value = '';
+    if(chave){ leituraConcluidaColeta(chave); return; }
+    status.textContent = 'Não encontrei o código nessa foto. Tire outra mais de perto, com boa luz e a nota bem reta — ou digite o número da NF.';
+  } catch(e){
+    input.value = '';
+    status.textContent = 'Erro ao ler a foto (' + e.message + '). Digite o número da NF.';
   }
 }
 
 function pararScannerNF(){
   SCANNER_ATIVO = false;
   clearTimeout(SCANNER_TIMER); SCANNER_TIMER = null;
-  if(SCANNER_ZXING){ try { SCANNER_ZXING.reset(); } catch(_){} SCANNER_ZXING = null; }
   if(SCANNER_STREAM){ SCANNER_STREAM.getTracks().forEach(t => t.stop()); SCANNER_STREAM = null; }
   const v = document.getElementById('scanner-video');
   if(v) v.srcObject = null;
