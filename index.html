@@ -389,6 +389,7 @@ tbody td{padding:11px 16px;font-size:14px}
       <div class="nav-tab nav-group-trigger" onclick="toggleNavGroup(this,event)">Operações ▾</div>
       <div class="nav-group-menu">
         <div class="nav-tab" data-tab="separacao" onclick="showTab('separacao',this)">📦 Separação</div>
+        <div class="nav-tab" data-tab="coleta" onclick="showTab('coleta',this)">📝 Coleta</div>
         <div class="nav-tab" data-tab="producao" onclick="showTab('producao',this)">🏭 Ordens de Produção</div>
         <div class="nav-tab" data-tab="garantias" onclick="showTab('garantias',this)">🛡️ Garantias</div>
         <div class="nav-tab" data-tab="manutencao" onclick="showTab('manutencao',this)">🔧 Manutenção</div>
@@ -1221,6 +1222,38 @@ tbody td{padding:11px 16px;font-size:14px}
       </div>
       <div id="separacao-lista"></div>
     </div>
+
+    <!-- COLETA / ROMANEIO — comprovante de retirada (substitui o canhoto da NF) -->
+    <div id="tab-coleta" style="display:none">
+      <style>
+        .coleta-linha{border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:var(--card)}
+        .coleta-linha.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+        .coleta-linha-topo{display:flex;gap:12px;align-items:flex-start;cursor:pointer}
+        .coleta-linha-topo input[type=checkbox]{width:22px;height:22px;margin-top:1px;flex-shrink:0;accent-color:var(--accent)}
+        .coleta-linha-campos{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-top:10px;padding-left:34px}
+        .coleta-bloco{margin-bottom:18px}
+        .coleta-rotulo{font-weight:600;font-size:14px;margin-bottom:8px}
+        .coleta-radio{display:flex;align-items:center;gap:8px;font-size:15px;cursor:pointer}
+        .coleta-radio input{width:20px;height:20px;accent-color:var(--accent)}
+        .coleta-assinatura{width:100%;height:190px;border:2px dashed var(--border);border-radius:10px;background:#fff;touch-action:none;display:block;cursor:crosshair}
+        @media (max-width:600px){ .coleta-linha-campos{padding-left:0} }
+      </style>
+      <div class="section-header">
+        <div class="section-title">📝 Coleta de Pedidos</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" id="btn-buscar-bipados" onclick="buscarBipadosRecentes()" title="Inclui na lista pedidos bipados antes desta tela existir">🔄 Buscar bipados recentes</button>
+          <button class="btn btn-primary" id="btn-nova-coleta" onclick="abrirModalColeta()">+ Registrar coleta</button>
+        </div>
+      </div>
+      <div style="font-weight:600;margin:4px 0 8px">Aguardando coleta</div>
+      <div id="coleta-pendentes"></div>
+      <div class="section-header" style="margin-top:28px">
+        <div style="font-weight:600">Romaneios registrados</div>
+        <input class="search-input" id="coleta-hist-busca" placeholder="Buscar NF, pedido, cliente…" oninput="renderHistoricoColetas()">
+      </div>
+      <div id="coleta-historico"></div>
+    </div>
+
 
     <!-- PEDIDOS DE COMPRA -->
     <div id="tab-compras" style="display:none">
@@ -2345,6 +2378,75 @@ tbody td{padding:11px 16px;font-size:14px}
   </div>
 </div>
 
+<div class="modal-overlay" id="modal-coleta">
+  <div class="modal" style="max-width:720px">
+    <button class="modal-close" onclick="fecharModal('modal-coleta')">×</button>
+    <div class="modal-title">📝 Registrar coleta</div>
+    <div class="coleta-bloco">
+      <div class="coleta-rotulo">Quem está retirando</div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:10px">
+        <label class="coleta-radio"><input type="radio" name="coleta-tipo" value="transportadora" checked onchange="aoMudarTipoColeta()"> Transportadora</label>
+        <label class="coleta-radio"><input type="radio" name="coleta-tipo" value="cliente" onchange="aoMudarTipoColeta()"> O próprio cliente</label>
+      </div>
+      <div id="coleta-transp-wrap">
+        <select class="search-input" id="coleta-transportadora" style="width:100%;box-sizing:border-box" onchange="aoMudarTransportadora()"></select>
+        <div id="coleta-nova-transp-wrap" style="display:none;gap:8px;margin-top:8px">
+          <input class="search-input" id="coleta-nova-transp" style="flex:1;width:auto" placeholder="Nome da transportadora" onkeydown="if(event.key==='Enter'){event.preventDefault();salvarNovaTransportadora()}">
+          <button class="btn btn-outline btn-sm" onclick="salvarNovaTransportadora()">Salvar</button>
+        </div>
+      </div>
+    </div>
+    <div class="coleta-bloco">
+      <div class="coleta-rotulo">Pedidos e notas fiscais</div>
+      <input class="search-input" id="coleta-filtro" style="width:100%;box-sizing:border-box;margin-bottom:8px" placeholder="Filtrar por nº do pedido, cliente ou cidade" oninput="renderColetaLinhas()">
+      <div id="coleta-linhas" style="max-height:42vh;overflow-y:auto"></div>
+      <div id="coleta-resumo" style="font-size:13px;color:var(--muted);margin-top:6px"></div>
+    </div>
+    <div class="coleta-bloco">
+      <div class="coleta-rotulo">Quem está coletando</div>
+      <div class="form-row">
+        <div class="form-group"><label>Nome completo *</label><input type="text" id="coleta-coletor-nome" autocomplete="off"></div>
+        <div class="form-group"><label>RG ou CPF *</label><input type="text" id="coleta-coletor-doc" autocomplete="off"></div>
+      </div>
+      <div class="form-row single" id="coleta-placa-wrap">
+        <div class="form-group"><label>Placa do veículo (opcional)</label><input type="text" id="coleta-placa" autocomplete="off" style="text-transform:uppercase" maxlength="8"></div>
+      </div>
+    </div>
+    <div class="coleta-bloco">
+      <div class="coleta-rotulo" style="display:flex;justify-content:space-between;align-items:center">
+        <span>Assinatura de quem está coletando</span>
+        <button type="button" class="btn btn-outline btn-sm" onclick="limparAssinaturaColeta()">Limpar</button>
+      </div>
+      <canvas id="coleta-assinatura" class="coleta-assinatura"></canvas>
+      <div style="font-size:12px;color:var(--muted);margin-top:6px">Ao assinar, declara que retirou as mercadorias das notas acima, na quantidade de volumes indicada, com as embalagens em perfeito estado.</div>
+    </div>
+    <div class="form-actions" style="flex-wrap:wrap">
+      <button class="btn btn-outline btn-confirmar-coleta" onclick="confirmarColeta(true)" title="Contingência: registra e imprime o romaneio para assinar à caneta">🖨️ Assinar no papel</button>
+      <button class="btn btn-primary btn-confirmar-coleta" onclick="confirmarColeta(false)">✅ Confirmar coleta</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-scanner-nf">
+  <div class="modal" style="max-width:640px">
+    <button class="modal-close" onclick="fecharScannerNF()">×</button>
+    <div class="modal-title">📷 Ler código de barras da DANFE</div>
+    <div style="position:relative;background:#000;border-radius:10px;overflow:hidden">
+      <video id="scanner-video" playsinline muted style="width:100%;display:block;max-height:60vh;object-fit:cover"></video>
+      <div style="position:absolute;left:5%;right:5%;top:50%;height:24%;transform:translateY(-50%);border:2px solid rgba(255,255,255,.85);border-radius:8px;pointer-events:none"></div>
+    </div>
+    <div id="scanner-status" style="font-size:13px;color:var(--muted);margin-top:10px"></div>
+    <div class="form-actions"><button class="btn btn-outline" onclick="fecharScannerNF()">Cancelar</button></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-coleta-ver">
+  <div class="modal" style="max-width:820px">
+    <button class="modal-close" onclick="fecharModal('modal-coleta-ver')">×</button>
+    <div id="coleta-ver-conteudo"></div>
+  </div>
+</div>
+
 <!-- MODAL NOVA OP -->
 <div class="modal-overlay" id="modal-op">
   <div class="modal" style="max-width:640px">
@@ -2501,6 +2603,7 @@ const MODULOS_PERMISSAO = [
   { id:'promocoes',    label:'Promoções' },
   { id:'catalogo',     label:'Catálogo' },
   { id:'separacao',    label:'Separação' },
+  { id:'coleta',       label:'Coleta / Romaneio' },
   { id:'producao',     label:'Ordens de Produção' },
   { id:'compras',      label:'Pedidos de Compra' },
   { id:'garantias',    label:'Garantias com Fornecedor' },
@@ -2515,9 +2618,9 @@ const MODULOS_PERMISSAO = [
 // Módulos que um "vendedor" comum sempre vê (filtrado aos próprios registros nas telas)
 const MODULOS_VENDEDOR_PADRAO = ['pedidos','orcamentos','clientes','produtos','promocoes','catalogo','garantias_clientes'];
 // Módulos que o tipo Expedição pode VER
-const MODULOS_EXPEDICAO_VER = ['pedidos','catalogo','produtos','separacao','producao','compras','estoque','garantias_clientes'];
+const MODULOS_EXPEDICAO_VER = ['pedidos','catalogo','produtos','separacao','coleta','producao','compras','estoque','garantias_clientes'];
 // Módulos que o tipo Expedição pode EDITAR
-const MODULOS_EXPEDICAO_EDITAR = ['separacao','producao'];
+const MODULOS_EXPEDICAO_EDITAR = ['separacao','coleta','producao'];
 
 // Retorna true se o usuário logado é do tipo Expedição
 function ehExpedicao(){
@@ -3261,6 +3364,7 @@ function showTab(tab, el){
     renderProducao();
   }
   if(tab==='separacao') renderSeparacao();
+  if(tab==='coleta') renderColeta();
   if(tab==='estoque'){
     const btnLancar = document.getElementById('btn-lancar-movimento');
     if(btnLancar) btnLancar.style.display = temPermissaoEditar('estoque') ? '' : 'none';
@@ -4727,6 +4831,10 @@ async function verPedido(id){
         💰 Faturado em ${fmtData(p.data_faturamento)}
         ${usuarioLogado.admin?`<button style="background:none;border:none;color:#166534;text-decoration:underline;cursor:pointer;font-size:12px;padding:0" onclick="abrirModalFaturarPedido('${id}')">editar data</button>`:''}
       </div>` : ''}
+      ${p.coleta_id ? `<div style="font-size:12px;color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;display:inline-flex;align-items:center;gap:8px;padding:4px 10px;border-radius:6px;margin-bottom:10px">
+        📝 Coletado em ${fmtDataHoraColeta(p.coletado_em)}${p.nf_numero ? ' · NF '+esc(p.nf_numero) : ''}
+        <button style="background:none;border:none;color:#1e40af;text-decoration:underline;cursor:pointer;font-size:12px;padding:0" onclick="verComprovanteColeta('${p.coleta_id}')">ver comprovante</button>
+      </div>` : ''}
       ${p.veio_de_orcamento ? `<div style="font-size:12px;color:#7c3aed;background:#ede9fe;display:inline-block;padding:3px 10px;border-radius:6px;margin-bottom:10px">📋 Convertido do Orçamento #${p.numero_orcamento_origem||'—'}${p.data_orcamento_origem?', feito em '+fmtData(p.data_orcamento_origem):''}</div>` : ''}
       <div class="edit-lock ${bloqueado?'locked':'can-edit'}" style="margin-bottom:16px">
         ${bloqueado?'🔒 Bloqueado para edição':(tempoRestante>0?'✏️ Editável por mais '+tempoRestante+' min':'✏️ Editável (prazo normal de 1h já passou — liberado para Admin/Expedição)')}
@@ -4977,6 +5085,7 @@ async function cancelarBipagemPedido(id){
     toast(`Pedido #${p.numero} não está concluído — não há bipagem a cancelar`,'error');
     return;
   }
+  if(p.coleta_id && !confirm(`⚠️ O pedido #${p.numero} já saiu num romaneio de coleta (a mercadoria já foi retirada).\n\nContinuar mesmo assim?`)) return;
   if(!confirm(`Cancelar a bipagem do pedido #${p.numero}?\n\nIsso vai:\n- Devolver ${(p.itens||[]).length} item(ns) ao estoque\n- Voltar o status para "Aprovado"\n\nUse isso apenas se o pedido precisa ser editado após já ter sido finalizado por engano.`)) return;
 
   // Trava atomica: a virada CC -> AP acontece dentro de transaction(), entao so a
@@ -4989,6 +5098,9 @@ async function cancelarBipagemPedido(id){
     renderPedidos();
     return;
   }
+
+  // Sai da fila de coleta: o pedido voltou para Aprovado
+  db.ref('aguardando_coleta/'+id).remove().catch(()=>{});
 
   // Libera a trava da baixa. Ela era gravada na bipagem e NUNCA era apagada em lugar
   // nenhum: o pedido voltava para Aprovado mas a rebipagem sempre abortava em "ja teve
@@ -5376,6 +5488,7 @@ async function cancelarPedido(id){
     });
     if(!resCancel.committed){ toast('Este pedido já está cancelado','error'); return; }
     await db.ref('pedidos/'+id+'/status_antes_cancelamento').set(p?.status || 'AA');
+    if(p?.status === 'CC') db.ref('aguardando_coleta/'+id).remove().catch(()=>{});
 
     // Libera a reserva (só se não estava bipado — bipado já não tem reserva)
     if(p && p.status !== 'CC' && p.itens){
@@ -12819,6 +12932,10 @@ async function finalizarPedidoBipado(){
       ts_fim_bipagem: agoraTs(),
       bipado_por: usuarioLogado?.nome || ''
     });
+    // Entra na fila da Coleta (nó pequeno próprio: a tela de Coleta não varre os pedidos).
+    // Falha aqui não pode travar a bipagem — o botão "Buscar bipados recentes" recupera.
+    db.ref('aguardando_coleta/'+p.id).set(resumoPedidoColeta({ ...p, ts_fim_bipagem: agoraTs() }))
+      .catch(e => console.warn('Falha ao incluir na fila de coleta:', e));
     toast(`✅ Pedido #${p.numero} concluído! Estoque atualizado.`,'success');
 
     fecharModal('modal-separacao');
@@ -12836,6 +12953,827 @@ async function finalizarPedidoBipado(){
 
   } catch(e){ toast('Erro ao finalizar bipagem: '+e.message,'error'); }
 }
+
+// ══════════════════════════════════════════════
+// ══ COLETA / ROMANEIO — comprovante de retirada que substitui o canhoto da NF ══
+// A transportadora (ou o próprio cliente) retira no galpão os pedidos já bipados.
+// Quem coleta informa nome e documento e assina na tela; o romaneio fica salvo
+// para consulta e impressão. Existe também o modo "assinatura em papel" para
+// quando o tablet/celular ou a internet falharem.
+//
+// Economia de leitura no Firebase:
+// - A fila de pedidos esperando coleta é um nó pequeno próprio (aguardando_coleta),
+//   gravado na bipagem. A tela de Coleta não varre a coleção de pedidos.
+// - A assinatura (imagem) fica em coletas_assinaturas e só é baixada quando alguém
+//   abre ou imprime aquele comprovante específico.
+// - O histórico traz 20 romaneios por vez, paginado pela chave (não precisa de índice).
+// - coletas_nf/{numero da NF} aponta para o romaneio: buscar uma NF é 1 leitura minúscula.
+// ══════════════════════════════════════════════
+const CNPJ_CROW_DIGITOS = '13507419000186';
+let COLETA_PENDENTES = [];       // [{id, numero, cliente_nome, cliente_cidade, cliente_uf, volumes, bipado_em}]
+let COLETA_SELECAO = {};         // pedidoId -> { volumes, nf:{numero,serie,chave,outroEmitente}|null, nfTexto, nfErro }
+let TRANSPORTADORAS_DB = null;   // [{id, nome}] — carregado 1x por sessão
+let COLETA_HIST = [];
+let COLETA_HIST_FIM = false;
+let COLETA_ASSINATURAS_CACHE = {};
+let coletaEmGravacao = false;
+let assinaturaPadColeta = null;
+
+function fmtDataHoraColeta(iso){
+  if(!iso) return '';
+  const d = new Date(iso);
+  if(isNaN(d)) return '';
+  return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+}
+
+// Resumo leve do pedido que vai para a fila aguardando_coleta
+function resumoPedidoColeta(p){
+  return {
+    numero: p.numero || '',
+    cliente_nome: p.cliente_nome || '',
+    cliente_cidade: p.cliente_cidade || '',
+    cliente_uf: p.cliente_uf || '',
+    volumes: Number(p.volumes) || 1,
+    bipado_em: p.ts_fim_bipagem ? new Date(Number(p.ts_fim_bipagem)).toISOString() : ''
+  };
+}
+
+// ── Chave de acesso da NF-e (código de barras da DANFE) ──
+// 44 dígitos: UF(2) AAMM(4) CNPJ(14) modelo(2) série(3) número(9) tpEmis(1) código(8) DV(1)
+function analisarChaveNFe(valor){
+  const d = String(valor||'').replace(/\D/g,'');
+  if(d.length !== 44) return { ok:false, erro:'A chave da NF-e tem 44 dígitos.' };
+  let soma = 0, peso = 2;
+  for(let i = 42; i >= 0; i--){ soma += Number(d[i]) * peso; peso = peso === 9 ? 2 : peso + 1; }
+  const resto = soma % 11;
+  const dv = resto < 2 ? 0 : 11 - resto;
+  if(dv !== Number(d[43])) return { ok:false, erro:'Leitura inválida (dígito verificador não confere). Bipe de novo.' };
+  const modelo = d.substr(20,2);
+  if(modelo !== '55') return { ok:false, erro:'Esse código não é de uma NF-e (modelo '+modelo+').' };
+  return {
+    ok: true, chave: d,
+    serie: String(Number(d.substr(22,3))),
+    numero: String(Number(d.substr(25,9))),
+    outroEmitente: d.substr(6,14) !== CNPJ_CROW_DIGITOS
+  };
+}
+
+function cpfValidoColeta(cpf){
+  const d = String(cpf||'').replace(/\D/g,'');
+  if(d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false;
+  for(let t = 9; t < 11; t++){
+    let s = 0;
+    for(let i = 0; i < t; i++) s += Number(d[i]) * (t + 1 - i);
+    if(((10 * s) % 11) % 10 !== Number(d[t])) return false;
+  }
+  return true;
+}
+
+// ══ TELA PRINCIPAL ══
+async function renderColeta(){
+  if(!podeVer('coleta')){ toast('Acesso restrito — sem permissão nesta área','error'); return; }
+  const pode = temPermissaoEditar('coleta');
+  ['btn-nova-coleta','btn-buscar-bipados'].forEach(id => { const b = document.getElementById(id); if(b) b.style.display = pode ? '' : 'none'; });
+  try {
+    const snap = await db.ref('aguardando_coleta').once('value');
+    const v = snap.val() || {};
+    COLETA_PENDENTES = Object.keys(v).map(id => ({ id, ...v[id] }))
+      .sort((a,b) => (Number(a.numero)||0) - (Number(b.numero)||0));
+  } catch(e){ toast('Erro ao carregar pedidos aguardando coleta: '+e.message,'error'); }
+  renderColetaPendentes();
+  COLETA_HIST = []; COLETA_HIST_FIM = false;
+  try { await carregarHistoricoColetas(false); }
+  catch(e){ toast('Erro ao carregar romaneios: '+e.message,'error'); }
+}
+
+function renderColetaPendentes(){
+  const el = document.getElementById('coleta-pendentes');
+  if(!el) return;
+  const pode = temPermissaoEditar('coleta');
+  if(!COLETA_PENDENTES.length){
+    el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:28px">Nenhum pedido bipado aguardando coleta.</div>';
+    return;
+  }
+  const totVol = COLETA_PENDENTES.reduce((s,p) => s + (Number(p.volumes)||0), 0);
+  el.innerHTML = `
+    <div style="font-size:13px;color:var(--muted);margin-bottom:8px">${COLETA_PENDENTES.length} pedido(s) · ${totVol} volume(s)</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Pedido</th><th>Cliente</th><th>Cidade/UF</th><th style="text-align:center">Vol.</th><th>Bipado em</th>${pode?'<th></th>':''}</tr></thead>
+      <tbody>${COLETA_PENDENTES.map(p => `<tr>
+        <td><strong>#${esc(p.numero)}</strong></td>
+        <td>${esc(p.cliente_nome)}</td>
+        <td>${esc(p.cliente_cidade)}${p.cliente_uf?'/'+esc(p.cliente_uf):''}</td>
+        <td style="text-align:center">${Number(p.volumes)||1}</td>
+        <td style="font-size:12px;color:var(--muted)">${fmtDataHoraColeta(p.bipado_em)}</td>
+        ${pode?`<td style="text-align:right"><button class="btn btn-outline btn-sm" title="Tirar da lista (ex.: pedido já entregue antes do sistema de coleta)" onclick="removerDaFilaColeta('${esc(p.id)}')">✕</button></td>`:''}
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+}
+
+async function removerDaFilaColeta(pid){
+  if(!temPermissaoEditar('coleta')) return;
+  const p = COLETA_PENDENTES.find(x => x.id === pid);
+  if(!await confirmCustom(`Tirar o pedido #${esc(p?.numero||'')} da lista de coleta?\n\nUse só para pedidos que já saíram sem romaneio. O pedido em si não é alterado.`, 'Tirar da lista')) return;
+  try {
+    await db.ref('aguardando_coleta/'+pid).remove();
+    COLETA_PENDENTES = COLETA_PENDENTES.filter(x => x.id !== pid);
+    renderColetaPendentes();
+  } catch(e){ toast('Erro: '+e.message,'error'); }
+}
+
+// Inclui na fila os pedidos bipados recentes que não estão nela (ex.: bipados antes desta
+// tela existir). Lê só os pedidos dos últimos 20 dias pelo índice 'data', e só quando clicado.
+async function buscarBipadosRecentes(){
+  if(!temPermissaoEditar('coleta')){ toast('Sem permissão de edição na Coleta','error'); return; }
+  try {
+    toast('Buscando pedidos bipados dos últimos 20 dias…');
+    const ini = new Date(agoraTs() - 20*86400000).toISOString();
+    const snap = await db.ref('pedidos').orderByChild('data').startAt(ini).once('value');
+    const v = snap.val() || {};
+    const naFila = new Set(COLETA_PENDENTES.map(p => p.id));
+    const updates = {};
+    let n = 0;
+    Object.keys(v).forEach(id => {
+      const p = v[id];
+      if(p && p.status === 'CC' && !p.coleta_id && !naFila.has(id)){
+        updates['aguardando_coleta/'+id] = resumoPedidoColeta(p);
+        n++;
+      }
+    });
+    if(n) await db.ref().update(updates);
+    toast(n ? `✓ ${n} pedido(s) incluído(s) na lista de coleta` : 'Nenhum pedido bipado sem coleta nos últimos 20 dias', n ? 'success' : '');
+    await renderColeta();
+  } catch(e){ toast('Erro ao buscar pedidos: '+e.message,'error'); }
+}
+
+// ══ TRANSPORTADORAS ══
+async function carregarTransportadoras(forcar){
+  if(TRANSPORTADORAS_DB && !forcar) return TRANSPORTADORAS_DB;
+  const snap = await db.ref('transportadoras').once('value');
+  const v = snap.val() || {};
+  TRANSPORTADORAS_DB = Object.keys(v).map(id => ({ id, nome: v[id].nome || '' }))
+    .filter(t => t.nome)
+    .sort((a,b) => a.nome.localeCompare(b.nome,'pt-BR'));
+  return TRANSPORTADORAS_DB;
+}
+
+function renderSelectTransportadora(selecionada){
+  const sel = document.getElementById('coleta-transportadora');
+  if(!sel) return;
+  sel.innerHTML = '<option value="">Escolha a transportadora…</option>' +
+    (TRANSPORTADORAS_DB||[]).map(t => `<option value="${esc(t.id)}" ${t.id===selecionada?'selected':''}>${esc(t.nome)}</option>`).join('') +
+    '<option value="__nova">+ Cadastrar nova transportadora</option>';
+  document.getElementById('coleta-nova-transp-wrap').style.display = 'none';
+}
+
+function aoMudarTransportadora(){
+  const v = document.getElementById('coleta-transportadora').value;
+  const wrap = document.getElementById('coleta-nova-transp-wrap');
+  wrap.style.display = v === '__nova' ? 'flex' : 'none';
+  if(v === '__nova') document.getElementById('coleta-nova-transp').focus();
+}
+
+async function salvarNovaTransportadora(){
+  if(!temPermissaoEditar('coleta')) return;
+  const input = document.getElementById('coleta-nova-transp');
+  const nome = String(input.value||'').trim().replace(/\s+/g,' ');
+  if(nome.length < 2){ toast('Digite o nome da transportadora','error'); return; }
+  const norm = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/gi,'').toLowerCase();
+  await carregarTransportadoras(true);
+  const existente = TRANSPORTADORAS_DB.find(t => norm(t.nome) === norm(nome));
+  if(existente){
+    toast(`"${existente.nome}" já está cadastrada — selecionada na lista`);
+    renderSelectTransportadora(existente.id);
+    return;
+  }
+  try {
+    const ref = db.ref('transportadoras').push();
+    await ref.set({ nome, criado_em: agora().toISOString(), criado_por: usuarioLogado?.nome || '' });
+    TRANSPORTADORAS_DB.push({ id: ref.key, nome });
+    TRANSPORTADORAS_DB.sort((a,b) => a.nome.localeCompare(b.nome,'pt-BR'));
+    input.value = '';
+    renderSelectTransportadora(ref.key);
+    toast('✓ Transportadora cadastrada','success');
+  } catch(e){ toast('Erro ao cadastrar: '+e.message,'error'); }
+}
+
+function aoMudarTipoColeta(){
+  const tipo = document.querySelector('input[name="coleta-tipo"]:checked')?.value || 'transportadora';
+  document.getElementById('coleta-transp-wrap').style.display = tipo === 'transportadora' ? '' : 'none';
+  document.getElementById('coleta-placa-wrap').style.display = tipo === 'transportadora' ? '' : 'none';
+}
+
+// ══ REGISTRAR COLETA ══
+async function abrirModalColeta(){
+  if(!temPermissaoEditar('coleta')){ toast('Sem permissão de edição na Coleta','error'); return; }
+  if(!COLETA_PENDENTES.length){ toast('Não há pedidos bipados aguardando coleta','error'); return; }
+  try { await carregarTransportadoras(); } catch(e){ toast('Erro ao carregar transportadoras: '+e.message,'error'); return; }
+  COLETA_SELECAO = {};
+  document.querySelector('input[name="coleta-tipo"][value="transportadora"]').checked = true;
+  aoMudarTipoColeta();
+  renderSelectTransportadora('');
+  ['coleta-filtro','coleta-coletor-nome','coleta-coletor-doc','coleta-placa','coleta-nova-transp'].forEach(id => { const e = document.getElementById(id); if(e) e.value = ''; });
+  renderColetaLinhas();
+  abrirModal('modal-coleta');
+  // O quadro de assinatura só pode ser medido com o modal visível
+  requestAnimationFrame(() => {
+    assinaturaPadColeta = iniciarAssinaturaPad(document.getElementById('coleta-assinatura'));
+  });
+}
+
+function renderColetaLinhas(){
+  const el = document.getElementById('coleta-linhas');
+  if(!el) return;
+  const filtro = String(document.getElementById('coleta-filtro')?.value||'').trim().toLowerCase();
+  const lista = COLETA_PENDENTES.filter(p => {
+    if(COLETA_SELECAO[p.id]) return true; // selecionado nunca some pelo filtro
+    if(!filtro) return true;
+    return String(p.numero).includes(filtro) || String(p.cliente_nome||'').toLowerCase().includes(filtro)
+      || String(p.cliente_cidade||'').toLowerCase().includes(filtro);
+  });
+  el.innerHTML = lista.map(p => {
+    const s = COLETA_SELECAO[p.id];
+    let statusNF = '';
+    if(s){
+      if(s.nf){
+        const origem = s.nf.chave ? 'lida da DANFE' : 'digitada';
+        statusNF = `<div style="font-size:12px;color:#166534;margin-top:3px">✓ NF ${esc(s.nf.numero)}${s.nf.serie?' · série '+esc(s.nf.serie):''} (${origem})</div>`;
+        if(s.nf.outroEmitente) statusNF += `<div style="font-size:12px;color:#b45309">⚠ O CNPJ emitente dessa nota não é o da Crow</div>`;
+      } else if(s.nfErro){
+        statusNF = `<div style="font-size:12px;color:#dc2626;margin-top:3px">${esc(s.nfErro)}</div>`;
+      }
+    }
+    return `<div class="coleta-linha ${s?'sel':''}">
+      <label class="coleta-linha-topo">
+        <input type="checkbox" ${s?'checked':''} onchange="alternarPedidoColeta('${esc(p.id)}', this.checked)">
+        <div style="flex:1;min-width:0">
+          <div><strong>#${esc(p.numero)}</strong> — ${esc(p.cliente_nome)}</div>
+          <div style="font-size:12px;color:var(--muted)">${esc(p.cliente_cidade)}${p.cliente_uf?'/'+esc(p.cliente_uf):''}</div>
+        </div>
+      </label>
+      ${s ? `<div class="coleta-linha-campos">
+        <div style="flex:1;min-width:190px">
+          <input class="search-input" style="width:100%;box-sizing:border-box" id="coleta-nf-${esc(p.id)}" inputmode="numeric" autocomplete="off"
+            placeholder="Bipe a DANFE ou digite o nº da NF" value="${esc(s.nfTexto||'')}"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();aplicarNFColeta('${esc(p.id)}',this.value)}"
+            onchange="aplicarNFColeta('${esc(p.id)}',this.value)">
+          ${statusNF}
+        </div>
+        <button type="button" class="btn btn-outline btn-sm" style="font-size:18px;padding:6px 12px" title="Ler pela câmera" onclick="abrirScannerNF('${esc(p.id)}')">📷</button>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px">Vol.
+          <input type="number" min="1" class="search-input" style="width:70px" value="${Number(s.volumes)||1}"
+            oninput="COLETA_SELECAO['${esc(p.id)}'] && (COLETA_SELECAO['${esc(p.id)}'].volumes = parseInt(this.value)||0); atualizarResumoColeta()">
+        </label>
+      </div>` : ''}
+    </div>`;
+  }).join('') || '<div style="padding:16px;color:var(--muted);text-align:center">Nenhum pedido encontrado com esse filtro.</div>';
+  atualizarResumoColeta();
+}
+
+function atualizarResumoColeta(){
+  const el = document.getElementById('coleta-resumo');
+  if(!el) return;
+  const ids = Object.keys(COLETA_SELECAO);
+  const vol = ids.reduce((s,id) => s + (Number(COLETA_SELECAO[id].volumes)||0), 0);
+  el.textContent = ids.length ? `${ids.length} pedido(s) selecionado(s) · ${vol} volume(s)` : 'Marque os pedidos que estão sendo retirados';
+}
+
+function alternarPedidoColeta(pid, marcado){
+  if(marcado){
+    const p = COLETA_PENDENTES.find(x => x.id === pid);
+    COLETA_SELECAO[pid] = { volumes: Number(p?.volumes)||1, nf:null, nfTexto:'', nfErro:'' };
+  } else {
+    delete COLETA_SELECAO[pid];
+  }
+  renderColetaLinhas();
+  if(marcado) setTimeout(() => document.getElementById('coleta-nf-'+pid)?.focus(), 30);
+}
+
+function aplicarNFColeta(pid, valor){
+  const s = COLETA_SELECAO[pid];
+  if(!s) return;
+  const bruto = String(valor||'').trim();
+  // Evita reprocessar o mesmo valor (o "change" pode disparar depois do Enter)
+  if(s.nf && bruto === s.nfTexto) return;
+  const d = bruto.replace(/\D/g,'');
+  s.nf = null; s.nfErro = ''; s.nfTexto = bruto;
+  if(!d){
+    s.nfTexto = '';
+  } else if(d.length === 44){
+    const r = analisarChaveNFe(d);
+    if(r.ok){ s.nf = { numero:r.numero, serie:r.serie, chave:r.chave, outroEmitente:r.outroEmitente }; s.nfTexto = r.numero; }
+    else s.nfErro = r.erro;
+  } else if(d.length <= 9 && Number(d) > 0 && /^[\d.\s-]+$/.test(bruto)){
+    s.nf = { numero:String(Number(d)), serie:'', chave:'' };
+    s.nfTexto = String(Number(d));
+  } else {
+    s.nfErro = 'Digite só o número da NF ou bipe o código de barras da DANFE.';
+  }
+  renderColetaLinhas();
+  // Leitor USB: depois de uma leitura certa, já posiciona no próximo pedido sem NF
+  setTimeout(() => {
+    if(!s.nf){ document.getElementById('coleta-nf-'+pid)?.focus(); return; }
+    const prox = Object.keys(COLETA_SELECAO).find(id => !COLETA_SELECAO[id].nf);
+    if(prox) document.getElementById('coleta-nf-'+prox)?.focus();
+  }, 30);
+}
+
+// ══ QUADRO DE ASSINATURA ══
+function iniciarAssinaturaPad(canvas){
+  if(!canvas) return null;
+  const ctx = canvas.getContext('2d');
+  const pad = { pontos:0, desenhando:false, ultimo:null };
+  const ajustar = () => {
+    const r = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.round(r.width * dpr));
+    canvas.height = Math.max(1, Math.round(r.height * dpr));
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#111'; ctx.fillStyle = '#111';
+    pad.pontos = 0;
+  };
+  const pos = e => { const r = canvas.getBoundingClientRect(); return { x:e.clientX - r.left, y:e.clientY - r.top }; };
+  canvas.onpointerdown = e => {
+    e.preventDefault();
+    try { canvas.setPointerCapture(e.pointerId); } catch(_){}
+    pad.desenhando = true; pad.ultimo = pos(e);
+    ctx.beginPath(); ctx.arc(pad.ultimo.x, pad.ultimo.y, 1.2, 0, Math.PI*2); ctx.fill();
+  };
+  canvas.onpointermove = e => {
+    if(!pad.desenhando) return;
+    e.preventDefault();
+    const p = pos(e);
+    ctx.beginPath(); ctx.moveTo(pad.ultimo.x, pad.ultimo.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+    pad.ultimo = p; pad.pontos++;
+  };
+  const fim = () => { pad.desenhando = false; };
+  canvas.onpointerup = fim; canvas.onpointercancel = fim;
+  pad.limpar = ajustar;
+  pad.vazia = () => pad.pontos < 12;
+  // Reduz para no máximo 480px de largura, fundo branco: ~5–15 KB por assinatura
+  pad.exportar = () => {
+    const fator = Math.min(1, 480 / canvas.width);
+    const c = document.createElement('canvas');
+    c.width = Math.round(canvas.width * fator); c.height = Math.round(canvas.height * fator);
+    const x = c.getContext('2d');
+    x.fillStyle = '#fff'; x.fillRect(0,0,c.width,c.height);
+    x.drawImage(canvas, 0, 0, c.width, c.height);
+    return c.toDataURL('image/png');
+  };
+  ajustar();
+  return pad;
+}
+
+function limparAssinaturaColeta(){
+  if(assinaturaPadColeta) assinaturaPadColeta.limpar();
+}
+
+// ══ LEITOR PELA CÂMERA ══
+// Chrome/Android: BarcodeDetector nativo. iPad e outros: biblioteca ZXing, baixada só na
+// primeira vez que a câmera é usada.
+let SCANNER_STREAM = null, SCANNER_TIMER = null, SCANNER_ZXING = null, SCANNER_ATIVO = false;
+
+function carregarScriptColeta(url){
+  return new Promise((resolve, reject) => {
+    if(document.querySelector(`script[data-src="${url}"]`)) return resolve();
+    const s = document.createElement('script');
+    s.src = url; s.async = true; s.setAttribute('data-src', url);
+    s.onload = () => resolve();
+    s.onerror = () => { s.remove(); reject(new Error('não foi possível carregar o leitor de código de barras')); };
+    document.head.appendChild(s);
+  });
+}
+
+async function abrirScannerNF(pid){
+  const status = document.getElementById('scanner-status');
+  const video = document.getElementById('scanner-video');
+  abrirModal('modal-scanner-nf');
+  status.textContent = 'Abrindo a câmera…';
+  SCANNER_ATIVO = true;
+  const aoLer = texto => {
+    if(!SCANNER_ATIVO) return true;
+    const d = String(texto||'').replace(/\D/g,'');
+    if(d.length !== 44 || !analisarChaveNFe(d).ok) return false; // leitura parcial: continua tentando
+    pararScannerNF();
+    fecharModal('modal-scanner-nf');
+    if(navigator.vibrate) try { navigator.vibrate(80); } catch(_){}
+    aplicarNFColeta(pid, d);
+    return true;
+  };
+  const restricoes = { video:{ facingMode:{ ideal:'environment' }, width:{ ideal:1920 }, height:{ ideal:1080 } }, audio:false };
+  try {
+    if(!navigator.mediaDevices?.getUserMedia) throw new Error('este navegador não libera a câmera');
+    let nativo = false;
+    if('BarcodeDetector' in window){
+      try { nativo = (await BarcodeDetector.getSupportedFormats()).includes('code_128'); } catch(_){}
+    }
+    if(nativo){
+      SCANNER_STREAM = await navigator.mediaDevices.getUserMedia(restricoes);
+      if(!SCANNER_ATIVO){ pararScannerNF(); return; }
+      video.srcObject = SCANNER_STREAM;
+      await video.play();
+      const detector = new BarcodeDetector({ formats:['code_128'] });
+      status.textContent = 'Aponte para o código de barras da DANFE, com a nota deitada ocupando a largura da tela.';
+      const ciclo = async () => {
+        if(!SCANNER_ATIVO) return;
+        try {
+          const codigos = await detector.detect(video);
+          for(const c of codigos){ if(aoLer(c.rawValue)) return; }
+        } catch(_){}
+        SCANNER_TIMER = setTimeout(ciclo, 200);
+      };
+      ciclo();
+      return;
+    }
+    status.textContent = 'Carregando o leitor…';
+    await carregarScriptColeta('https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js');
+    if(!SCANNER_ATIVO) return;
+    const dicas = new Map();
+    dicas.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.CODE_128]);
+    dicas.set(ZXing.DecodeHintType.TRY_HARDER, true);
+    SCANNER_ZXING = new ZXing.BrowserMultiFormatReader(dicas, 250);
+    status.textContent = 'Aponte para o código de barras da DANFE, com a nota deitada ocupando a largura da tela.';
+    await SCANNER_ZXING.decodeFromConstraints(restricoes, video, res => { if(res) aoLer(res.getText()); });
+  } catch(e){
+    pararScannerNF();
+    status.textContent = 'Não foi possível usar a câmera (' + (e.message || e.name) + '). Feche esta janela e digite o número da NF.';
+  }
+}
+
+function pararScannerNF(){
+  SCANNER_ATIVO = false;
+  clearTimeout(SCANNER_TIMER); SCANNER_TIMER = null;
+  if(SCANNER_ZXING){ try { SCANNER_ZXING.reset(); } catch(_){} SCANNER_ZXING = null; }
+  if(SCANNER_STREAM){ SCANNER_STREAM.getTracks().forEach(t => t.stop()); SCANNER_STREAM = null; }
+  const v = document.getElementById('scanner-video');
+  if(v) v.srcObject = null;
+}
+
+function fecharScannerNF(){
+  pararScannerNF();
+  fecharModal('modal-scanner-nf');
+}
+
+// ══ GRAVAÇÃO ══
+// modoPapel = true: imprime o romaneio para assinar à caneta (contingência). A janela de
+// impressão é aberta no clique, antes de qualquer espera, para o navegador não bloquear.
+async function confirmarColeta(modoPapel){
+  if(coletaEmGravacao) return;
+  if(!temPermissaoEditar('coleta')){ toast('Sem permissão de edição na Coleta','error'); return; }
+
+  const tipo = document.querySelector('input[name="coleta-tipo"]:checked')?.value || 'transportadora';
+  const ids = Object.keys(COLETA_SELECAO);
+  if(!ids.length){ toast('Marque pelo menos um pedido','error'); return; }
+
+  let transp = null;
+  if(tipo === 'transportadora'){
+    const sid = document.getElementById('coleta-transportadora').value;
+    transp = (TRANSPORTADORAS_DB||[]).find(t => t.id === sid);
+    if(!transp){ toast('Escolha a transportadora','error'); document.getElementById('coleta-transportadora').focus(); return; }
+  }
+  for(const pid of ids){
+    const s = COLETA_SELECAO[pid];
+    const p = COLETA_PENDENTES.find(x => x.id === pid);
+    if(!s.nf){ toast(`Informe a NF do pedido #${p?.numero||''}`,'error'); document.getElementById('coleta-nf-'+pid)?.focus(); return; }
+    if(!(Number(s.volumes) >= 1)){ toast(`Informe os volumes do pedido #${p?.numero||''}`,'error'); return; }
+  }
+  const nome = String(document.getElementById('coleta-coletor-nome').value||'').trim().replace(/\s+/g,' ');
+  const doc = String(document.getElementById('coleta-coletor-doc').value||'').trim();
+  const placa = tipo === 'transportadora' ? String(document.getElementById('coleta-placa').value||'').trim().toUpperCase() : '';
+  if(nome.length < 3){ toast('Informe o nome de quem está coletando','error'); document.getElementById('coleta-coletor-nome').focus(); return; }
+  const docDig = doc.replace(/[^0-9a-z]/gi,'');
+  if(docDig.length < 5){ toast('Informe o RG ou CPF de quem está coletando','error'); document.getElementById('coleta-coletor-doc').focus(); return; }
+
+  let assinaturaPng = null;
+  if(!modoPapel){
+    if(!assinaturaPadColeta || assinaturaPadColeta.vazia()){ toast('Peça para quem está coletando assinar no quadro','error'); return; }
+    assinaturaPng = assinaturaPadColeta.exportar();
+  }
+
+  const win = modoPapel ? window.open('', '_blank') : null;
+  if(modoPapel){
+    if(!win){ toast('O navegador bloqueou a janela de impressão. Libere pop-ups para o sistema.','error'); return; }
+    win.document.write('<p style="font-family:Arial;padding:20px">Gerando romaneio…</p>');
+  }
+  const abortar = msg => { if(win) try { win.close(); } catch(_){} if(msg) toast(msg,'error'); };
+
+  // Avisos que pedem confirmação
+  const avisos = [];
+  if(/^\d{11}$/.test(docDig) && !cpfValidoColeta(docDig)) avisos.push('• O CPF digitado parece inválido.');
+  ids.forEach(pid => {
+    const s = COLETA_SELECAO[pid]; const p = COLETA_PENDENTES.find(x => x.id === pid);
+    if(s.nf.outroEmitente) avisos.push(`• NF ${s.nf.numero} (pedido #${p?.numero}): o CNPJ emitente não é o da Crow.`);
+  });
+
+  coletaEmGravacao = true;
+  document.querySelectorAll('.btn-confirmar-coleta').forEach(b => b.disabled = true);
+  try {
+    // 1) Revalida cada pedido direto no banco (sem cache): precisa estar bipado e ainda sem coleta
+    const problemas = [], sairDaFila = [];
+    await Promise.all(ids.map(async pid => {
+      const p = COLETA_PENDENTES.find(x => x.id === pid);
+      const [st, cid] = await Promise.all([
+        db.ref('pedidos/'+pid+'/status').once('value'),
+        db.ref('pedidos/'+pid+'/coleta_id').once('value')
+      ]);
+      if(!st.exists()){ problemas.push(`#${p?.numero}: o pedido não existe mais`); sairDaFila.push(pid); }
+      else if(st.val() !== 'CC'){ problemas.push(`#${p?.numero}: está "${statusInfo(st.val()).label}" — só pedido bipado pode sair`); if(st.val()==='Cancelado') sairDaFila.push(pid); }
+      else if(cid.val()){ problemas.push(`#${p?.numero}: já saiu em outro romaneio`); sairDaFila.push(pid); }
+    }));
+    if(problemas.length){
+      if(sairDaFila.length){
+        const up = {}; sairDaFila.forEach(pid => { up['aguardando_coleta/'+pid] = null; delete COLETA_SELECAO[pid]; });
+        await db.ref().update(up);
+        COLETA_PENDENTES = COLETA_PENDENTES.filter(x => !sairDaFila.includes(x.id));
+        renderColetaLinhas(); renderColetaPendentes();
+      }
+      abortar();
+      await confirmCustom('Não foi possível registrar a coleta:\n\n' + problemas.map(esc).join('\n') + (sairDaFila.length ? '\n\nEsses pedidos foram tirados da lista. Confira e confirme de novo.' : ''), 'OK');
+      return;
+    }
+
+    // 2) NF que já consta em outro romaneio
+    await Promise.all(ids.map(async pid => {
+      const s = COLETA_SELECAO[pid];
+      const snap = await db.ref('coletas_nf/'+s.nf.numero).once('value');
+      if(snap.exists()) avisos.push(`• A NF ${s.nf.numero} já consta em outro romaneio.`);
+    }));
+    if(avisos.length && !await confirmCustom('Confira antes de continuar:\n\n' + avisos.join('\n') + '\n\nRegistrar mesmo assim?', 'Registrar')){
+      abortar(); return;
+    }
+
+    // 3) Monta e grava tudo de uma vez (update multi-caminho é atômico)
+    const cid = db.ref('coletas').push().key;
+    const dataIso = agora().toISOString();
+    const notas = ids.map(pid => {
+      const p = COLETA_PENDENTES.find(x => x.id === pid) || {};
+      const s = COLETA_SELECAO[pid];
+      return {
+        pedido_id: pid, pedido_numero: p.numero || '', cliente_nome: p.cliente_nome || '',
+        cliente_cidade: p.cliente_cidade || '', cliente_uf: p.cliente_uf || '',
+        nf_numero: s.nf.numero, nf_serie: s.nf.serie || '', nf_chave: s.nf.chave || '',
+        volumes: Number(s.volumes) || 1
+      };
+    }).sort((a,b) => (Number(a.pedido_numero)||0) - (Number(b.pedido_numero)||0));
+
+    // Número sequencial do romaneio. Sem internet a transaction fica pendente: não travamos
+    // a impressão por isso — o número é gravado no romaneio assim que a conexão voltar.
+    const txNumero = db.ref('contador_coletas').transaction(v => (v||0) + 1)
+      .then(r => r.committed ? r.snapshot.val() : null).catch(() => null);
+    const numero = await Promise.race([txNumero, new Promise(r => setTimeout(() => r(null), 5000))]);
+
+    const coleta = {
+      numero: numero || null, data: dataIso, tipo,
+      transportadora_id: transp?.id || '', transportadora_nome: transp?.nome || '',
+      coletor_nome: nome, coletor_documento: doc, placa,
+      assinatura: modoPapel ? 'papel' : 'digital',
+      total_notas: notas.length,
+      total_volumes: notas.reduce((s,n) => s + n.volumes, 0),
+      registrado_por: usuarioLogado?.nome || '',
+      notas
+    };
+
+    const updates = {};
+    updates['coletas/'+cid] = coleta;
+    if(assinaturaPng) updates['coletas_assinaturas/'+cid] = assinaturaPng;
+    notas.forEach(n => {
+      updates['pedidos/'+n.pedido_id+'/coleta_id'] = cid;
+      updates['pedidos/'+n.pedido_id+'/coletado_em'] = dataIso;
+      updates['pedidos/'+n.pedido_id+'/nf_numero'] = n.nf_numero;
+      if(n.nf_serie) updates['pedidos/'+n.pedido_id+'/nf_serie'] = n.nf_serie;
+      if(n.nf_chave) updates['pedidos/'+n.pedido_id+'/nf_chave'] = n.nf_chave;
+      updates['aguardando_coleta/'+n.pedido_id] = null;
+      updates['coletas_nf/'+n.nf_numero+'/'+cid] = true;
+    });
+
+    if(modoPapel) escreverRomaneioNaJanela(win, { id:cid, ...coleta }, null);
+
+    const gravacao = db.ref().update(updates);
+    if(!numero) txNumero.then(n => { if(n) db.ref('coletas/'+cid+'/numero').set(n).catch(()=>{}); });
+    await gravacao;
+
+    if(assinaturaPng) COLETA_ASSINATURAS_CACHE[cid] = assinaturaPng;
+    toast(`✅ Coleta registrada${numero?' — romaneio Nº '+numero:''}`,'success');
+    fecharModal('modal-coleta');
+    COLETA_SELECAO = {};
+    await renderColeta();
+    if(!modoPapel) verComprovanteColeta(cid, { id:cid, ...coleta });
+  } catch(e){
+    abortar('Erro ao registrar a coleta: ' + e.message);
+  } finally {
+    coletaEmGravacao = false;
+    document.querySelectorAll('.btn-confirmar-coleta').forEach(b => b.disabled = false);
+  }
+}
+
+// ══ HISTÓRICO ══
+async function carregarHistoricoColetas(maisAntigos){
+  let q = db.ref('coletas').orderByKey();
+  if(maisAntigos && COLETA_HIST.length) q = q.endBefore(COLETA_HIST[COLETA_HIST.length-1].id);
+  const snap = await q.limitToLast(20).once('value');
+  const v = snap.val() || {};
+  const lote = Object.keys(v).map(id => ({ id, ...v[id] })).sort((a,b) => a.id < b.id ? 1 : -1);
+  COLETA_HIST_FIM = lote.length < 20;
+  COLETA_HIST = maisAntigos ? COLETA_HIST.concat(lote) : lote;
+  renderHistoricoColetas();
+}
+
+function renderHistoricoColetas(){
+  const el = document.getElementById('coleta-historico');
+  if(!el) return;
+  const filtro = String(document.getElementById('coleta-hist-busca')?.value||'').trim().toLowerCase();
+  const lista = COLETA_HIST.filter(c => {
+    if(!filtro) return true;
+    const alvo = [c.numero, c.transportadora_nome, c.coletor_nome, ...(c.notas||[]).flatMap(n => [n.nf_numero, n.pedido_numero, n.cliente_nome])]
+      .join(' ').toLowerCase();
+    return alvo.includes(filtro);
+  });
+  if(!lista.length){
+    el.innerHTML = `<div style="text-align:center;color:var(--muted);padding:24px">${filtro
+      ? `Nada encontrado nos romaneios carregados. ${/^\d+$/.test(filtro) ? `<button class="btn btn-outline btn-sm" onclick="buscarColetaPorNF('${esc(filtro)}')">Procurar a NF ${esc(filtro)} em todo o histórico</button>` : ''}`
+      : 'Nenhuma coleta registrada ainda.'}</div>`;
+    return;
+  }
+  el.innerHTML = `<div class="table-wrap" style="overflow-x:auto"><table>
+    <thead><tr><th>Nº</th><th>Data</th><th>Retirado por</th><th>Notas</th><th style="text-align:center">Vol.</th><th></th></tr></thead>
+    <tbody>${lista.map(c => `<tr>
+      <td><strong>${c.numero ? esc(c.numero) : '—'}</strong></td>
+      <td style="white-space:nowrap">${fmtDataHoraColeta(c.data)}</td>
+      <td>${c.tipo==='cliente' ? '<em>Retirada pelo cliente</em>' : esc(c.transportadora_nome)}<br>
+        <span style="font-size:12px;color:var(--muted)">${esc(c.coletor_nome)}${c.assinatura==='papel'?' · ✍️ papel':''}</span></td>
+      <td style="font-size:13px">${(c.notas||[]).map(n => 'NF '+esc(n.nf_numero)).join(', ')}</td>
+      <td style="text-align:center">${Number(c.total_volumes)||0}</td>
+      <td style="white-space:nowrap;text-align:right">
+        <button class="btn btn-outline btn-sm" onclick="verComprovanteColeta('${esc(c.id)}')">Ver</button>
+        <button class="btn btn-outline btn-sm" onclick="imprimirColeta('${esc(c.id)}')">🖨️</button>
+      </td>
+    </tr>`).join('')}</tbody>
+  </table></div>
+  ${!COLETA_HIST_FIM && !filtro ? `<div style="text-align:center;margin-top:10px"><button class="btn btn-outline btn-sm" onclick="carregarHistoricoColetas(true)">Carregar romaneios anteriores</button></div>` : ''}`;
+}
+
+async function buscarColetaPorNF(numeroNF){
+  try {
+    const snap = await db.ref('coletas_nf/'+String(Number(numeroNF))).once('value');
+    const ids = Object.keys(snap.val() || {});
+    if(!ids.length){ toast(`A NF ${numeroNF} não consta em nenhum romaneio`,'error'); return; }
+    const novos = [];
+    for(const id of ids){
+      if(COLETA_HIST.some(c => c.id === id)) continue;
+      const c = await obterColeta(id);
+      if(c) novos.push(c);
+    }
+    COLETA_HIST = COLETA_HIST.concat(novos).sort((a,b) => a.id < b.id ? 1 : -1);
+    renderHistoricoColetas();
+  } catch(e){ toast('Erro na busca: '+e.message,'error'); }
+}
+
+async function obterColeta(id, doBanco){
+  if(!doBanco){
+    const c = COLETA_HIST.find(x => x.id === id);
+    if(c) return c;
+  }
+  const snap = await db.ref('coletas/'+id).once('value');
+  return snap.exists() ? { id, ...snap.val() } : null;
+}
+
+async function obterAssinaturaColeta(id){
+  if(COLETA_ASSINATURAS_CACHE[id]) return COLETA_ASSINATURAS_CACHE[id];
+  const snap = await db.ref('coletas_assinaturas/'+id).once('value');
+  const v = snap.val();
+  if(v) COLETA_ASSINATURAS_CACHE[id] = v;
+  return v || null;
+}
+
+// ══ COMPROVANTE (tela e impressão usam o mesmo HTML) ══
+function htmlRomaneio(c, assinatura){
+  const notas = c.notas || [];
+  const quem = c.tipo === 'cliente' ? 'Retirada pelo próprio cliente' : esc(c.transportadora_nome);
+  const cel = 'border:1px solid #bbb;padding:5px 7px;font-size:12px';
+  const blocoAssinatura = c.assinatura === 'digital'
+    ? (assinatura ? `<img src="${assinatura}" alt="Assinatura" style="max-width:300px;max-height:110px;display:block;margin:0 auto">` : '<div style="height:60px;color:#999;font-size:11px;text-align:center;padding-top:24px">(assinatura não carregada)</div>')
+    : '<div style="height:70px"></div>';
+  const rodapeAssinatura = c.assinatura === 'digital'
+    ? `Assinado na tela em ${fmtDataHoraColeta(c.data)}`
+    : 'Assinatura à caneta';
+  return `<div style="font-family:Arial,sans-serif;color:#111;max-width:760px;margin:0 auto">
+    <table style="width:100%;border-collapse:collapse;margin-bottom:10px"><tr>
+      <td style="vertical-align:top;font-size:11px;line-height:1.5">
+        <strong style="font-size:13px">Crow importadora e distribuidora ltda</strong><br>
+        Av. Artur Guimarães, Nº 1036, Santa Cruz — CEP 31150-690 — Belo Horizonte/MG<br>
+        CNPJ: 13.507.419/0001-86
+      </td>
+      <td style="vertical-align:top;text-align:right;font-size:12px;white-space:nowrap">
+        <div style="font-size:15px;font-weight:700">Romaneio${c.numero ? ' Nº '+esc(c.numero) : ''}</div>
+        ${fmtDataHoraColeta(c.data)}
+      </td>
+    </tr></table>
+    <div style="font-size:16px;font-weight:700;text-align:center;margin:6px 0 12px">Comprovante de coleta de mercadorias</div>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-size:12px">
+      <tr><td style="${cel};width:26%;background:#f4f4f4">Retirado por</td><td style="${cel}" colspan="3"><strong>${quem}</strong></td></tr>
+      <tr><td style="${cel};background:#f4f4f4">Nome de quem coletou</td><td style="${cel}">${esc(c.coletor_nome)}</td>
+          <td style="${cel};width:16%;background:#f4f4f4">RG / CPF</td><td style="${cel}">${esc(c.coletor_documento)}</td></tr>
+      ${c.placa ? `<tr><td style="${cel};background:#f4f4f4">Placa do veículo</td><td style="${cel}" colspan="3">${esc(c.placa)}</td></tr>` : ''}
+    </table>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:6px">
+      <thead><tr style="background:#f4f4f4">
+        <th style="${cel};text-align:left">NF</th><th style="${cel};text-align:left">Pedido</th>
+        <th style="${cel};text-align:left">Cliente</th><th style="${cel};text-align:left">Cidade/UF</th>
+        <th style="${cel};text-align:center">Volumes</th>
+      </tr></thead>
+      <tbody>${notas.map(n => `<tr>
+        <td style="${cel}"><strong>${esc(n.nf_numero)}</strong>${n.nf_serie ? ' <span style="color:#666">série '+esc(n.nf_serie)+'</span>' : ''}</td>
+        <td style="${cel}">#${esc(n.pedido_numero)}</td>
+        <td style="${cel}">${esc(n.cliente_nome)}</td>
+        <td style="${cel}">${esc(n.cliente_cidade)}${n.cliente_uf ? '/'+esc(n.cliente_uf) : ''}</td>
+        <td style="${cel};text-align:center">${Number(n.volumes)||0}</td>
+      </tr>`).join('')}
+      <tr><td style="${cel};text-align:right;font-weight:700" colspan="4">${notas.length} nota(s) · total de volumes</td>
+          <td style="${cel};text-align:center;font-weight:700">${Number(c.total_volumes)||0}</td></tr>
+      </tbody>
+    </table>
+    <p style="font-size:12px;line-height:1.5;margin:14px 0 18px">
+      Declaro que retirei nesta data as mercadorias referentes às notas fiscais acima, na quantidade
+      de volumes indicada, com as embalagens em perfeito estado.
+    </p>
+    <div style="width:340px;max-width:100%;margin:0 auto;text-align:center">
+      ${blocoAssinatura}
+      <div style="border-top:1px solid #111;padding-top:4px;font-size:12px">
+        ${esc(c.coletor_nome)} — ${esc(c.coletor_documento)}<br>
+        <span style="font-size:10px;color:#555">${rodapeAssinatura}</span>
+      </div>
+    </div>
+    <div style="font-size:10px;color:#777;margin-top:18px;text-align:center">
+      Registrado por ${esc(c.registrado_por)} no Sistema Crow · código ${esc(c.id||'')}
+    </div>
+  </div>`;
+}
+
+function escreverRomaneioNaJanela(win, c, assinatura){
+  win.document.open();
+  win.document.write(`<html><head><title>Romaneio ${c.numero ? 'Nº '+esc(c.numero) : ''}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>@page{size:A4;margin:14mm} body{margin:0;padding:12px}</style></head>
+    <body>${htmlRomaneio(c, assinatura)}</body></html>`);
+  win.document.close();
+  setTimeout(() => { try { win.focus(); win.print(); } catch(_){} }, 400);
+}
+
+async function imprimirColeta(id){
+  const win = window.open('', '_blank');
+  if(!win){ toast('O navegador bloqueou a janela de impressão. Libere pop-ups para o sistema.','error'); return; }
+  win.document.write('<p style="font-family:Arial;padding:20px">Gerando romaneio…</p>');
+  try {
+    const c = await obterColeta(id);
+    if(!c){ win.close(); toast('Romaneio não encontrado','error'); return; }
+    const assin = c.assinatura === 'digital' ? await obterAssinaturaColeta(id) : null;
+    escreverRomaneioNaJanela(win, c, assin);
+  } catch(e){ try { win.close(); } catch(_){} toast('Erro ao gerar o romaneio: '+e.message,'error'); }
+}
+
+async function verComprovanteColeta(id, coletaPronta){
+  try {
+    const c = coletaPronta || await obterColeta(id);
+    if(!c){ toast('Romaneio não encontrado','error'); return; }
+    const assin = c.assinatura === 'digital' ? await obterAssinaturaColeta(id) : null;
+    document.getElementById('coleta-ver-conteudo').innerHTML = `
+      <div style="overflow-x:auto">${htmlRomaneio(c, assin)}</div>
+      <div class="form-actions" style="margin-top:16px">
+        ${usuarioLogado?.admin ? `<button class="btn btn-outline" style="color:#dc2626;border-color:#dc2626;margin-right:auto" onclick="desfazerColeta('${esc(id)}')">Desfazer romaneio</button>` : ''}
+        <button class="btn btn-outline" onclick="fecharModal('modal-coleta-ver')">Fechar</button>
+        <button class="btn btn-primary" onclick="imprimirColeta('${esc(id)}')">🖨️ Imprimir</button>
+      </div>`;
+    abrirModal('modal-coleta-ver');
+  } catch(e){ toast('Erro ao abrir o comprovante: '+e.message,'error'); }
+}
+
+// Só admin: apaga o romaneio (registrado por engano) e devolve os pedidos para a fila
+async function desfazerColeta(id){
+  if(!usuarioLogado?.admin){ toast('Só o administrador pode desfazer um romaneio','error'); return; }
+  try {
+    const c = await obterColeta(id, true);
+    if(!c){ toast('Romaneio não encontrado','error'); return; }
+    const notas = c.notas || [];
+    if(!await confirmCustom(`Desfazer o romaneio${c.numero ? ' Nº '+esc(c.numero) : ''}?\n\nOs ${notas.length} pedido(s) voltam para a lista de "aguardando coleta" e o comprovante assinado é apagado. Isso não pode ser revertido.`, 'Desfazer')) return;
+    const updates = { ['coletas/'+id]: null, ['coletas_assinaturas/'+id]: null };
+    notas.forEach(n => {
+      ['coleta_id','coletado_em','nf_numero','nf_serie','nf_chave'].forEach(campo => { updates['pedidos/'+n.pedido_id+'/'+campo] = null; });
+      updates['coletas_nf/'+n.nf_numero+'/'+id] = null;
+      updates['aguardando_coleta/'+n.pedido_id] = {
+        numero: n.pedido_numero || '', cliente_nome: n.cliente_nome || '',
+        cliente_cidade: n.cliente_cidade || '', cliente_uf: n.cliente_uf || '',
+        volumes: Number(n.volumes) || 1, bipado_em: ''
+      };
+    });
+    await db.ref().update(updates);
+    delete COLETA_ASSINATURAS_CACHE[id];
+    fecharModal('modal-coleta-ver');
+    toast('Romaneio desfeito — pedidos de volta na lista de coleta','success');
+    await renderColeta();
+  } catch(e){ toast('Erro ao desfazer: '+e.message,'error'); }
+}
+
 
 // ── Etiqueta de envio ──
 async function abrirModalEtiqueta(pedidoId){
@@ -12864,6 +13802,10 @@ async function gerarEImprimirEtiquetas(pedidoId){
   const p = snap.val();
   if(!p) return;
   const totalVolumes = Number(document.getElementById('etiqueta-volumes').value) || 1;
+  // Guarda os volumes para já virem preenchidos na Coleta. A fila só é atualizada se o
+  // pedido ainda estiver nela (transaction aborta se o nó não existe — sem registro fantasma).
+  db.ref('pedidos/'+pedidoId+'/volumes').set(totalVolumes).catch(()=>{});
+  db.ref('aguardando_coleta/'+pedidoId).transaction(atual => atual ? { ...atual, volumes: totalVolumes } : undefined).catch(()=>{});
 
   let etiquetasHtml = '';
   for(let vol = 1; vol <= totalVolumes; vol++){
