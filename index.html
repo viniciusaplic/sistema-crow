@@ -5113,6 +5113,7 @@ async function cancelarBipagemPedido(id){
   // presa. Guardamos a data da reversao em outro campo para o historico nao se perder.
   await db.ref('pedidos/'+id).update({
     baixa_estoque_ts: null,
+    baixa_itens: null,
     baixa_revertida_ts: agoraTs(),
     baixa_revertida_por: usuarioLogado?.nome || ''
   });
@@ -12482,6 +12483,7 @@ async function renderSeparacao(){
           </div>
           <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">${statusBadge(p.status)} ${badgeImpressao(p)}</div>
         </div>
+        ${p.baixa_estoque_ts ? `<div style="color:#dc2626;font-weight:700;font-size:13px;margin-top:4px">⚠️ Finalização interrompida — abra e clique em "Concluir pedido"</div>` : ''}
         <div class="pedido-card-info">📦 Itens separados: <span>${separados} / ${totalItens}</span> (${pct}%)</div>
         ${p.obs ? `<div style="font-size:12px;margin-top:6px;padding:6px 10px;background:#fffbea;border-left:3px solid #f59e0b;border-radius:0 6px 6px 0;color:#92400e"><strong>⚠️ Obs:</strong> ${p.obs}</div>` : ''}
         <div style="background:#f0f0f0;border-radius:6px;height:6px;margin-top:8px;overflow:hidden">
@@ -12577,7 +12579,13 @@ function renderModalSeparacao(){
     <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:18px">
       ${linhasItens}
     </div>
-    ${!bloqueiaBipagem
+    ${(p.baixa_estoque_ts && p.status !== 'CC')
+      ? `<div style="background:#fef2f2;border:2px solid #dc2626;border-radius:8px;padding:12px 14px;margin-bottom:10px;color:#991b1b;font-size:13px">
+          <div style="font-weight:700;font-size:14px">⚠️ Finalização interrompida</div>
+          A bipagem deste pedido já foi feita, mas a baixa de estoque foi interrompida (página atualizada ou fechada no meio). Clique abaixo para terminar: o sistema baixa só o que faltou e conclui o pedido.
+        </div>
+        <button class="btn btn-primary" style="width:100%;background:#16a34a;border-color:#16a34a" onclick="finalizarPedidoBipado()">✅ Concluir pedido (terminar baixa)</button>`
+    : !bloqueiaBipagem
       ? `<button class="btn btn-primary" style="width:100%" onclick="irParaBipagem()">📷 Iniciar Bipagem Final</button>`
       : `<div style="text-align:center;color:#dc2626;font-size:13px;padding:8px;background:#fef2f2;border-radius:8px">⚠️ Há itens sem estoque suficiente e sem OP de produção em andamento. Gere a OP para liberar a bipagem.</div>`
     }
@@ -12785,7 +12793,8 @@ function renderModalBipagem(){
         ${(()=>{ const l = String(PRODUTOS_DB.find(x=>x.codigo===itemAtual.codigo)?.localizacao||'').trim(); return l ? `<div style="margin-top:6px"><span style="background:#1F3A5F;color:#fff;border-radius:5px;padding:2px 10px;font-weight:700;font-size:13px">📍 ${esc(l)}</span></div>` : ''; })()}
         <div style="font-size:28px;font-weight:900;font-family:'DM Sans',sans-serif;color:#d97706;margin-top:8px">${Number(itemAtual.qtd_bipada||0)} / ${itemAtual.qtd}</div>
       </div>
-    ` : '<div style="text-align:center;color:var(--success);font-weight:700;padding:12px">✅ Todos os itens bipados!</div>'}
+    ` : `<div style="text-align:center;color:var(--success);font-weight:700;padding:12px">✅ Todos os itens bipados!</div>
+      <button class="btn btn-primary" style="width:100%;margin-bottom:16px;background:#16a34a;border-color:#16a34a" onclick="finalizarPedidoBipado()">✅ Concluir pedido</button>`}
 
     <input type="text" id="input-bipagem" placeholder="Aponte o leitor aqui e bipe o produto..."
       autofocus autocomplete="off"
@@ -12878,17 +12887,152 @@ function confirmarReiniciarBipagem(){
   });
 }
 
+// ── Finalização da bipagem (baixa de estoque) ─────────────────────────────
+// Retomável: cada item do pedido ganha uma marca em pedidos/{id}/baixa_itens/{codigo}.
+// A marca é "reservada" com transaction() ANTES da baixa (ok:false) e confirmada depois
+// (ok:true). Se a página for atualizada no meio, a próxima finalização pula o que já saiu
+// e baixa só o que faltou — sem baixa em dobro, mesmo com duas abas abertas.
+let FINALIZANDO_BIPAGEM = false;
+function avisoSaidaFinalizacao(e){ e.preventDefault(); e.returnValue = ''; return ''; }
+
+function overlayFinalizacao(texto){
+  let el = document.getElementById('overlay-finalizacao');
+  if(texto === null){ if(el) el.remove(); return; }
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'overlay-finalizacao';
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.75);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
+    document.body.appendChild(el);
+  }
+  el.innerHTML = `<div style="background:#fff;border-radius:14px;padding:26px 28px;max-width:440px;width:100%;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+    <div style="font-size:18px;font-weight:700;margin-bottom:10px">⏳ Finalizando pedido</div>
+    <div style="font-size:15px;margin-bottom:14px">${texto}</div>
+    <div style="font-size:13px;font-weight:700;color:#dc2626">NÃO feche nem atualize a página</div>
+  </div>`;
+}
+
+// Prefixo de chave push() a partir de um horário: as chaves do Firebase começam pelo
+// timestamp, então dá para ler só uma janela de tempo de movimentos_estoque (sem índice).
+function chavePushDoTs(ts){
+  const C = '-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz';
+  let n = Math.max(0, Math.floor(Number(ts)||0)), s = '';
+  for(let i = 0; i < 8; i++){ s = C.charAt(n % 64) + s; n = Math.floor(n / 64); }
+  return s;
+}
+
+function movimentoEhDaBaixaDoPedido(m, p){
+  return m && m.origem_id === p.id && m.origem_tipo === 'pedido' && m.tipo === 'saida'
+    && String(m.motivo||'').startsWith(`Pedido #${p.numero} `);
+}
+
+// Pedidos travados pela versão anterior (baixa interrompida, sem marca por item):
+// lê no histórico SÓ a janela de tempo da baixa e descobre quais itens já saíram.
+async function reconstruirMarcasBaixa(p, baixaTs){
+  const ini = chavePushDoTs(Number(baixaTs) - 10*60*1000);
+  const fim = chavePushDoTs(Number(baixaTs) + 60*60*1000);
+  const snap = await db.ref('movimentos_estoque').orderByKey().startAt(ini).endAt(fim).once('value');
+  const marcas = {};
+  Object.entries(snap.val() || {}).forEach(([k, m]) => {
+    if(!movimentoEhDaBaixaDoPedido(m, p) || m.falhou) return;
+    if(!m.pendente) marcas[m.codigo] = { ts: m.ts || agoraTs(), ok: true, mov: k, reconstruido: true };
+    else if(!marcas[m.codigo]) marcas[m.codigo] = { ts: m.ts || agoraTs(), ok: false, mov: k, reconstruido: true };
+  });
+  await db.ref('pedidos/'+p.id+'/baixa_itens').transaction(atual => atual ? undefined : marcas);
+}
+
+async function baixarMovimentoItemPedido(p, item){
+  return movimentarEstoque('produto', item.codigo, { codigo:item.codigo, nome:item.nome, delta:-item.qtd,
+    motivo:`Pedido #${p.numero} — ${esc(p.cliente_nome)}`, origemTipo:'pedido', origemId:p.id });
+}
+
+async function liberarReservaItemPedido(p, item){
+  await liberarReservaEstoquePedido([item]);
+  await db.ref('pedidos/'+p.id+'/baixa_itens/'+item.codigo).update({ reserva_ok: true });
+}
+
+// Baixa de UM item. Devolve 'ok', 'ja' (já tinha saído), 'duvida' ou 'erro'
+async function baixarItemPedidoBipado(p, item){
+  const ref = db.ref('pedidos/'+p.id+'/baixa_itens/'+item.codigo);
+  const claim = await ref.transaction(a => a ? undefined : { ts: agoraTs(), ok: false, usuario: usuarioLogado?.nome || '' });
+  if(!claim.committed){
+    const m = claim.snapshot.val() || {};
+    if(!m.ok) return 'duvida';
+    if(!m.reserva_ok) await liberarReservaItemPedido(p, item);
+    return 'ja';
+  }
+  let antesDaBaixa = true;
+  try {
+    const prodSnap = await db.ref('produtos/'+item.codigo).once('value');
+    if(!prodSnap.exists()){ await ref.update({ ok: true, sem_produto: true }); return 'ok'; }
+    antesDaBaixa = false;
+    const r = await baixarMovimentoItemPedido(p, item);
+    await ref.update({ ok: true, mov: r.movKey });
+    await liberarReservaItemPedido(p, item);
+    return 'ok';
+  } catch(e){
+    console.warn('Falha na baixa do item', item.codigo, e);
+    // Nada foi alterado no saldo: libera a marca para a próxima tentativa refazer
+    if(antesDaBaixa || String(e?.message||'').startsWith('Movimento de estoque não confirmado')){
+      await ref.remove().catch(()=>{});
+    } else {
+      await ref.update({ erro: String(e?.message||e) }).catch(()=>{});
+    }
+    return 'erro';
+  }
+}
+
+// Item cuja baixa foi cortada no meio (página atualizada naquele instante).
+// Tenta decidir sozinho pelo histórico do produto; se não der, pergunta.
+async function resolverItemDuvidoso(p, item, baixaTs){
+  const ref = db.ref('pedidos/'+p.id+'/baixa_itens/'+item.codigo);
+  const snap = await db.ref('movimentos_estoque').orderByChild('codigo').equalTo(item.codigo).once('value');
+  const movs = Object.entries(snap.val() || {}).map(([k, m]) => ({ k, ...m }));
+  const doPedido = movs.filter(m => movimentoEhDaBaixaDoPedido(m, p) && !m.falhou && Number(m.ts) >= Number(baixaTs) - 10*60*1000);
+
+  const confirmado = doPedido.find(m => !m.pendente);
+  if(confirmado){ await ref.update({ ok: true, mov: confirmado.k }); await liberarReservaItemPedido(p, item); return; }
+
+  const pend = doPedido.find(m => m.pendente);
+  const saldoAtual = Number((await db.ref('produtos/'+item.codigo+'/quantidade').once('value')).val()) || 0;
+
+  const refazer = async () => {
+    if(pend) await db.ref('movimentos_estoque/'+pend.k).update({ pendente: null, falhou: true, erro: 'Baixa interrompida (página atualizada) — refeita' });
+    const r = await baixarMovimentoItemPedido(p, item);
+    await ref.update({ ok: true, mov: r.movKey });
+    await liberarReservaItemPedido(p, item);
+  };
+  const jaSaiu = async (anterior) => {
+    if(pend && anterior !== undefined){
+      await db.ref('movimentos_estoque/'+pend.k).update({ pendente: null, saldo_antes: anterior, saldo_apos: anterior - item.qtd });
+    }
+    await ref.update({ ok: true, manual: anterior === undefined, mov: pend ? pend.k : null });
+    await liberarReservaItemPedido(p, item);
+  };
+
+  if(!pend){ await refazer(); return; } // nenhum movimento chegou a ser gravado: a baixa nem começou
+
+  const ultimos = movs.filter(m => !m.pendente && !m.falhou && m.saldo_apos !== undefined)
+    .sort((a, b) => Number(a.ts) - Number(b.ts));
+  const ult = ultimos[ultimos.length - 1];
+  if(ult && Number(ult.ts) <= Number(pend.ts)){
+    const base = Number(ult.saldo_apos) || 0;
+    if(saldoAtual === base){ await refazer(); return; }                  // saldo não mudou: a baixa não entrou
+    if(saldoAtual === base - item.qtd){ await jaSaiu(base); return; }    // saldo caiu exatamente a qtd: entrou
+  }
+
+  overlayFinalizacao(null);
+  const saiu = confirm(`⚠️ Item ${item.codigo} — ${item.nome} (${item.qtd} un.)\n\nA baixa deste item foi interrompida e o sistema não conseguiu confirmar se ela entrou.\n\nSaldo atual no sistema: ${saldoAtual}\n\nOK = a baixa JÁ entrou (não baixar de novo)\nCancelar = a baixa NÃO entrou (baixar ${item.qtd} agora)\n\nNa dúvida, clique em OK e confira o produto com uma contagem.`);
+  if(saiu) await jaSaiu(undefined); else await refazer();
+}
+
 async function finalizarPedidoBipado(){
+  if(FINALIZANDO_BIPAGEM) return;
+  FINALIZANDO_BIPAGEM = true;
+  window.addEventListener('beforeunload', avisoSaidaFinalizacao);
+  overlayFinalizacao('Preparando a baixa de estoque...');
   try {
     const p = pedidoSeparacaoAtual;
 
-    // ── Trava de baixa única ──────────────────────────────────────────────
-    // A baixa de um pedido só pode acontecer UMA vez. Sem isso, qualquer
-    // disparo em duplicidade (duas abas com o mesmo pedido aberto, dois
-    // leitores, evento repetido, reinício de bipagem de pedido já concluído)
-    // tira o dobro do estoque. A marca é gravada com transaction() no próprio
-    // pedido: se duas execuções correrem juntas, só a primeira recebe a chave
-    // livre e as demais abortam sem tocar no saldo.
     const statusSnap = await db.ref('pedidos/'+p.id+'/status').once('value');
     if(statusSnap.val() === 'CC'){
       toast(`Pedido #${p.numero} já está concluído — nenhuma baixa foi refeita`,'error');
@@ -12897,20 +13041,20 @@ async function finalizarPedidoBipado(){
       return;
     }
 
-    let jaBaixado = false;
-    await db.ref('pedidos/'+p.id+'/baixa_estoque_ts').transaction(atual => {
-      if(atual){ jaBaixado = true; return atual; }
-      return agoraTs();
-    });
-    if(jaBaixado){
-      toast(`Pedido #${p.numero} já teve baixa de estoque — nada foi alterado`,'error');
-      fecharModal('modal-separacao');
-      await renderSeparacao();
-      return;
+    // Marca de início da baixa. Se já existir, esta execução é uma RETOMADA de uma
+    // finalização interrompida: as marcas por item garantem que nada sai duas vezes.
+    let retomada = false;
+    const travaRes = await db.ref('pedidos/'+p.id+'/baixa_estoque_ts').transaction(a => { retomada = !!a; return a || agoraTs(); });
+    const baixaTs = travaRes.snapshot.val();
+    if(retomada){
+      const mSnap = await db.ref('pedidos/'+p.id+'/baixa_itens').once('value');
+      if(!mSnap.exists()){
+        overlayFinalizacao('Conferindo no histórico o que já saiu do estoque...');
+        await reconstruirMarcasBaixa(p, baixaTs);
+      }
     }
 
-    // Consolida por código antes de baixar: se o mesmo produto aparecer em mais
-    // de uma linha do pedido, sai um movimento só, com a soma das quantidades.
+    // Consolida por código: o mesmo produto em mais de uma linha vira um movimento só
     const porCodigo = {};
     for(const item of (p.itens||[])){
       if(!item.codigo) continue;
@@ -12919,30 +13063,48 @@ async function finalizarPedidoBipado(){
     }
     const itensBaixa = Object.values(porCodigo);
 
-    // Dar baixa no estoque de cada item do pedido
-    for(const item of itensBaixa){
-      const prodSnap = await db.ref('produtos/'+item.codigo).once('value');
-      if(prodSnap.exists()){
-        await movimentarEstoque('produto', item.codigo, { codigo:item.codigo, nome:item.nome, delta:-item.qtd,
-          motivo:`Pedido #${p.numero} — ${esc(p.cliente_nome)}`, origemTipo:'pedido', origemId:p.id });
+    // Baixa com 6 itens em paralelo (antes era um por um e pedidos grandes demoravam muito)
+    const total = itensBaixa.length;
+    let feitos = 0;
+    const duvidas = [];
+    const fila = itensBaixa.slice();
+    const trabalhador = async () => {
+      while(fila.length){
+        const item = fila.shift();
+        const r = await baixarItemPedidoBipado(p, item);
+        if(r === 'duvida') duvidas.push(item);
+        feitos++;
+        overlayFinalizacao(`Dando baixa no estoque<br><strong style="font-size:24px">${feitos} / ${total}</strong> itens`);
       }
+    };
+    await Promise.all(Array.from({ length: Math.min(6, total) }, trabalhador));
+
+    for(const item of duvidas){
+      overlayFinalizacao(`Conferindo item interrompido: ${esc(item.codigo)}...`);
+      await resolverItemDuvidoso(p, item, baixaTs);
     }
 
-    // Libera a reserva, já que a baixa física definitiva acabou de ser feita
-    await liberarReservaEstoquePedido(itensBaixa);
+    // Só conclui se TODOS os itens estiverem confirmados
+    const marcas = (await db.ref('pedidos/'+p.id+'/baixa_itens').once('value')).val() || {};
+    const faltando = itensBaixa.filter(i => !marcas[i.codigo] || !marcas[i.codigo].ok);
+    if(faltando.length){
+      throw new Error(`${faltando.length} item(ns) sem baixa confirmada (${faltando.map(i=>i.codigo).join(', ')}). Abra o pedido e clique em "Concluir pedido" de novo`);
+    }
 
-    // Finalizar pedido
     await db.ref('pedidos/'+p.id).update({
       status: 'CC',
       ts_fim_bipagem: agoraTs(),
       bipado_por: usuarioLogado?.nome || ''
     });
+    invalidarCachePedidos();
     // Entra na fila da Coleta (nó pequeno próprio: a tela de Coleta não varre os pedidos).
     // Falha aqui não pode travar a bipagem — o botão "Buscar bipados recentes" recupera.
     db.ref('aguardando_coleta/'+p.id).set(resumoPedidoColeta({ ...p, ts_fim_bipagem: agoraTs() }))
       .catch(e => console.warn('Falha ao incluir na fila de coleta:', e));
     toast(`✅ Pedido #${p.numero} concluído! Estoque atualizado.`,'success');
 
+    window.removeEventListener('beforeunload', avisoSaidaFinalizacao);
+    overlayFinalizacao(null);
     fecharModal('modal-separacao');
     await renderSeparacao();
 
@@ -12956,7 +13118,13 @@ async function finalizarPedidoBipado(){
       abrirModalEtiqueta(p.id);
     }
 
-  } catch(e){ toast('Erro ao finalizar bipagem: '+e.message,'error'); }
+  } catch(e){
+    toast('Erro ao finalizar bipagem: '+e.message,'error');
+  } finally {
+    FINALIZANDO_BIPAGEM = false;
+    window.removeEventListener('beforeunload', avisoSaidaFinalizacao);
+    overlayFinalizacao(null);
+  }
 }
 
 // ══════════════════════════════════════════════
