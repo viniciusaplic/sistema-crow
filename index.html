@@ -2438,7 +2438,10 @@ tbody td{padding:11px 16px;font-size:14px}
     </div>
     <div class="form-actions" style="flex-wrap:wrap">
       <button class="btn btn-outline" onclick="fecharScannerNF()">Cancelar</button>
-      <label class="btn btn-primary" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer" onclick="pararScannerNF()">📸 Tirar foto da DANFE
+      <label class="btn btn-outline" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">🖼️ Escolher foto
+        <input type="file" id="scanner-galeria-input" accept="image/*" style="display:none" onchange="lerFotoDanfe(this)">
+      </label>
+      <label class="btn btn-primary" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">📸 Tirar foto da DANFE
         <input type="file" id="scanner-foto-input" accept="image/*" capture="environment" style="display:none" onchange="lerFotoDanfe(this)">
       </label>
     </div>
@@ -13542,16 +13545,21 @@ function limparAssinaturaColeta(){
 }
 
 // ══ LEITOR PELA CÂMERA ══
-// Chrome/Android: BarcodeDetector nativo. iPad/iPhone (todo navegador usa o motor do Safari):
-// biblioteca ZXing, baixada só na primeira vez (fica no cache do navegador, não usa Firebase).
-// Cuidados para iPad antigo: um único canvas reaproveitado (o Safari tem limite de memória
-// de canvas e falha em silêncio quando estoura), imagens limitadas a ~2600 px, dois métodos
-// de binarização (um deles lida melhor com foto desfocada/sombra) e o status sempre visível
-// no topo, com contagem de tentativas, para diagnosticar quando não ler.
+// Motor de leitura, nesta ordem:
+//  1. BarcodeDetector nativo (Chrome/Android).
+//  2. zxing-cpp compilado em WebAssembly (pacote barcode-detector) — iPhone/iPad e qualquer
+//     navegador sem leitor nativo. Bem mais robusto que a versão JavaScript para código longo
+//     e fino como o da DANFE. Baixa ~1 MB na primeira vez e fica no cache (não usa Firebase).
+//  3. ZXing JavaScript, só se o WebAssembly não carregar.
+// O código da DANFE é ~8x mais largo que alto: com a nota inclinada só uns 5°, nenhuma linha
+// horizontal atravessa o código inteiro e nenhum leitor consegue ler. Por isso a imagem é
+// testada endireitada em vários ângulos.
+const POLYFILL_URL_COLETA = 'https://cdn.jsdelivr.net/npm/barcode-detector@2.3.1/dist/iife/pure.js';
 const ZXING_URL_COLETA = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
 let SCANNER_STREAM = null, SCANNER_TIMER = null, SCANNER_ATIVO = false, SCANNER_PID = null;
-let ZXING_LEITOR_COLETA = null;
+let DETECTOR_COLETA = null, MOTOR_COLETA = '', ZXING_LEITOR_COLETA = null;
 let CANVAS_LEITOR_COLETA = null;
+let ULTIMA_LEITURA_INVALIDA_COLETA = '';
 
 function statusScanner(msg, tipo){
   const el = document.getElementById('scanner-status');
@@ -13560,55 +13568,77 @@ function statusScanner(msg, tipo){
   el.style.color = tipo === 'erro' ? '#dc2626' : (tipo === 'ok' ? '#166534' : 'var(--text)');
 }
 
-function carregarScriptColeta(url){
+function carregarScriptColeta(url, pronto){
   return new Promise((resolve, reject) => {
-    if(window.ZXing) return resolve();
+    if(pronto()) return resolve();
     const antigo = document.querySelector(`script[data-src="${url}"]`);
     if(antigo) antigo.remove();
     const s = document.createElement('script');
     s.src = url; s.async = true; s.setAttribute('data-src', url);
-    const limite = setTimeout(() => reject(new Error('o leitor demorou demais para carregar — verifique a internet')), 20000);
-    s.onload = () => { clearTimeout(limite); window.ZXing ? resolve() : reject(new Error('o leitor carregou com erro')); };
+    const limite = setTimeout(() => reject(new Error('o leitor demorou demais para carregar — verifique a internet')), 25000);
+    s.onload = () => { clearTimeout(limite); pronto() ? resolve() : reject(new Error('o leitor carregou com erro')); };
     s.onerror = () => { clearTimeout(limite); s.remove(); reject(new Error('não foi possível baixar o leitor — verifique a internet')); };
     document.head.appendChild(s);
   });
 }
 
-async function detectorNativoColeta(){
-  if(!('BarcodeDetector' in window)) return null;
+async function prepararLeitorColeta(){
+  if(DETECTOR_COLETA || ZXING_LEITOR_COLETA) return MOTOR_COLETA;
+  if('BarcodeDetector' in window){
+    try {
+      if((await BarcodeDetector.getSupportedFormats()).includes('code_128')){
+        DETECTOR_COLETA = new BarcodeDetector({ formats:['code_128'] });
+        MOTOR_COLETA = 'nativo';
+        return MOTOR_COLETA;
+      }
+    } catch(_){}
+  }
   try {
-    if(!(await BarcodeDetector.getSupportedFormats()).includes('code_128')) return null;
-    return new BarcodeDetector({ formats:['code_128'] });
-  } catch(_){ return null; }
-}
-
-async function obterLeitorZXingColeta(){
-  if(ZXING_LEITOR_COLETA) return ZXING_LEITOR_COLETA;
-  await carregarScriptColeta(ZXING_URL_COLETA);
+    await carregarScriptColeta(POLYFILL_URL_COLETA, () => !!window.BarcodeDetectionAPI);
+    const det = new window.BarcodeDetectionAPI.BarcodeDetector({ formats:['code_128'] });
+    const c = document.createElement('canvas'); c.width = 8; c.height = 8;
+    await det.detect(c); // baixa e inicializa o WebAssembly agora, para o erro aparecer cedo
+    DETECTOR_COLETA = det;
+    MOTOR_COLETA = 'wasm';
+    return MOTOR_COLETA;
+  } catch(e){ console.warn('Leitor WebAssembly indisponível:', e); }
+  await carregarScriptColeta(ZXING_URL_COLETA, () => !!window.ZXing);
   const leitor = new ZXing.MultiFormatReader();
   const dicas = new Map();
   dicas.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.CODE_128]);
   dicas.set(ZXing.DecodeHintType.TRY_HARDER, true);
   leitor.setHints(dicas);
   ZXING_LEITOR_COLETA = leitor;
-  return leitor;
+  MOTOR_COLETA = 'js';
+  return MOTOR_COLETA;
 }
 
-// Desenha um recorte da fonte (vídeo ou foto) no canvas único, limitando a largura final
-// e girando 90° se pedido (nota fotografada de lado).
-function desenharRecorteColeta(fonte, sx, sy, sw, sh, larguraMax, girar){
-  const fator = Math.min(1, larguraMax / (girar ? sh : sw));
+function nomeMotorColeta(){
+  return { nativo:'leitor nativo', wasm:'leitor WebAssembly', js:'leitor JavaScript' }[MOTOR_COLETA] || '';
+}
+
+// Recorte da fonte (vídeo ou foto) num canvas único reaproveitado (o Safari tem limite de
+// memória de canvas e falha em silêncio quando estoura), girado alguns graus se pedido.
+function desenharRecorteColeta(fonte, sx, sy, sw, sh, larguraMax, graus){
+  const fator = Math.min(1, larguraMax / sw);
   const w = Math.max(1, Math.round(sw * fator)), h = Math.max(1, Math.round(sh * fator));
+  const a = (graus || 0) * Math.PI / 180;
+  const cw = a ? Math.round(w * Math.abs(Math.cos(a)) + h * Math.abs(Math.sin(a))) : w;
+  const ch = a ? Math.round(w * Math.abs(Math.sin(a)) + h * Math.abs(Math.cos(a))) : h;
   if(!CANVAS_LEITOR_COLETA) CANVAS_LEITOR_COLETA = document.createElement('canvas');
   const c = CANVAS_LEITOR_COLETA;
-  const cw = girar ? h : w, ch = girar ? w : h;
   if(c.width !== cw) c.width = cw;
   if(c.height !== ch) c.height = ch;
   const ctx = c.getContext('2d', { willReadFrequently:true });
   if(!ctx) throw new Error('o aparelho ficou sem memória para processar a imagem');
   ctx.setTransform(1,0,0,1,0,0);
-  if(girar){ ctx.translate(cw, 0); ctx.rotate(Math.PI/2); }
-  ctx.drawImage(fonte, sx, sy, sw, sh, 0, 0, w, h);
+  if(a){
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cw, ch);
+    ctx.translate(cw/2, ch/2); ctx.rotate(a);
+    ctx.drawImage(fonte, sx, sy, sw, sh, -w/2, -h/2, w, h);
+  } else {
+    ctx.drawImage(fonte, sx, sy, sw, sh, 0, 0, w, h);
+  }
   return c;
 }
 
@@ -13616,13 +13646,18 @@ function liberarCanvasColeta(){
   if(CANVAS_LEITOR_COLETA){ CANVAS_LEITOR_COLETA.width = 0; CANVAS_LEITOR_COLETA.height = 0; }
 }
 
-// Tenta ler uma chave válida no canvas. Devolve a chave (44 dígitos) ou null.
-async function lerChaveNoCanvas(canvas, detector, usarZXing){
-  const valida = t => { const d = String(t||'').replace(/\D/g,''); return d.length === 44 && analisarChaveNFe(d).ok ? d : null; };
-  if(detector){
-    try { for(const c of await detector.detect(canvas)){ const v = valida(c.rawValue); if(v) return v; } } catch(_){}
+async function lerChaveNoCanvas(canvas){
+  const valida = t => {
+    const d = String(t||'').replace(/\D/g,'');
+    if(d.length === 44 && analisarChaveNFe(d).ok) return d;
+    if(t) ULTIMA_LEITURA_INVALIDA_COLETA = String(t).slice(0, 50);
+    return null;
+  };
+  if(DETECTOR_COLETA){
+    try { for(const c of await DETECTOR_COLETA.detect(canvas)){ const v = valida(c.rawValue); if(v) return v; } } catch(_){}
+    return null;
   }
-  if(usarZXing && ZXING_LEITOR_COLETA){
+  if(ZXING_LEITOR_COLETA){
     const fonte = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
     for(const Binarizador of [ZXing.HybridBinarizer, ZXing.GlobalHistogramBinarizer]){
       try {
@@ -13645,15 +13680,14 @@ function leituraConcluidaColeta(chave){
 
 async function abrirScannerNF(pid){
   SCANNER_PID = pid;
+  ULTIMA_LEITURA_INVALIDA_COLETA = '';
   const video = document.getElementById('scanner-video');
-  document.getElementById('scanner-foto-input').value = '';
+  ['scanner-foto-input','scanner-galeria-input'].forEach(id => { const e = document.getElementById(id); if(e) e.value = ''; });
   abrirModal('modal-scanner-nf');
-  statusScanner('Preparando o leitor…');
+  statusScanner('Preparando o leitor… (na primeira vez pode levar alguns segundos)');
   SCANNER_ATIVO = true;
   try {
-    const detector = await detectorNativoColeta();
-    // ZXing sempre carregado: no iPad é o único leitor; no Android reforça o nativo
-    try { await obterLeitorZXingColeta(); } catch(e){ if(!detector) throw e; }
+    await prepararLeitorColeta();
     if(!SCANNER_ATIVO) return;
     if(!navigator.mediaDevices?.getUserMedia) throw new Error('este navegador não libera a câmera ao vivo');
     statusScanner('Abrindo a câmera…');
@@ -13671,19 +13705,19 @@ async function abrirScannerNF(pid){
       if(vw && vh){
         analises++;
         try {
-          const faixa = desenharRecorteColeta(video, 0, Math.round(vh*0.3), vw, Math.round(vh*0.4), 1280, false);
-          const usarZX = !detector || analises % 3 === 0;
-          const chave = await lerChaveNoCanvas(faixa, detector, usarZX);
+          const graus = [0, -4, 4, -8, 8][analises % 5];
+          const faixa = desenharRecorteColeta(video, 0, Math.round(vh*0.2), vw, Math.round(vh*0.6), 1600, graus);
+          const chave = await lerChaveNoCanvas(faixa);
           if(chave && SCANNER_ATIVO){ leituraConcluidaColeta(chave); return; }
         } catch(e){
           statusScanner('Erro na leitura ao vivo: ' + e.message + '. Use "Tirar foto".', 'erro');
           return;
         }
-        if(analises % 4 === 1){
-          statusScanner(`Procurando… (câmera ${vw}×${vh}, ${analises} tentativas). Encaixe o código de barras no retângulo, nota deitada. Se não ler em poucos segundos, use "Tirar foto".`);
+        if(analises % 5 === 1){
+          statusScanner(`Procurando… (${nomeMotorColeta()}, câmera ${vw}×${vh}, ${analises} tentativas${ULTIMA_LEITURA_INVALIDA_COLETA ? ', leu "'+ULTIMA_LEITURA_INVALIDA_COLETA+'"' : ''}). Afaste um pouco se estiver desfocado. Se não ler, use "Tirar foto".`);
         }
       }
-      SCANNER_TIMER = setTimeout(ciclo, detector ? 150 : 200);
+      SCANNER_TIMER = setTimeout(ciclo, 150);
     };
     ciclo();
   } catch(e){
@@ -13697,48 +13731,38 @@ function carregarImagemColeta(arquivo){
     const url = URL.createObjectURL(arquivo);
     const img = new Image();
     img.onload = () => resolve({ img, url });
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('não foi possível abrir a foto')); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('não foi possível abrir a foto (formato '+(arquivo.type||'desconhecido')+')')); };
     img.src = url;
   });
 }
 
-// Foto pela câmera nativa: procura o código na foto inteira (reta e girada) e depois em
-// faixas horizontais, que é onde um código longo e fino aparece com mais detalhe.
 async function lerFotoDanfe(input){
   const arquivo = input.files && input.files[0];
   if(!arquivo){ statusScanner('Nenhuma foto recebida. Toque em "Tirar foto da DANFE" de novo.', 'erro'); return; }
+  pararScannerNF();
+  ULTIMA_LEITURA_INVALIDA_COLETA = '';
   statusScanner('Foto recebida. Preparando o leitor…');
   let url = null;
   try {
-    const detector = await detectorNativoColeta();
-    try { await obterLeitorZXingColeta(); } catch(e){ if(!detector) throw e; }
+    await prepararLeitorColeta();
     const carregada = await carregarImagemColeta(arquivo);
     url = carregada.url;
     const img = carregada.img;
     const W = img.naturalWidth, H = img.naturalHeight;
     if(!W || !H) throw new Error('a foto veio vazia');
-    const tentativas = [
-      [0, 0, W, H, 2400, false], [0, 0, W, H, 1500, false],
-      [0, 0, W, H, 2400, true],  [0, 0, W, H, 1500, true]
-    ];
-    const NF = 7, altura = 0.28;
-    for(let i = 0; i < NF; i++){
-      const ini = i * (1 - altura) / (NF - 1);
-      tentativas.push([0, Math.round(H*ini), W, Math.round(H*altura), 2600, false]);
-    }
-    for(let i = 0; i < NF; i++){
-      const ini = i * (1 - altura) / (NF - 1);
-      tentativas.push([Math.round(W*ini), 0, Math.round(W*altura), H, 2600, true]);
-    }
+    const tentativas = [];
+    for(const g of [0, -3, 3, -6, 6, -9, 9, -12, 12]) tentativas.push([0, 0, W, H, 2400, g]);
+    for(const g of [0, -4, 4, -8, 8]) tentativas.push([0, 0, W, H, 3400, g]);
+    for(const g of [0, -5, 5]) tentativas.push([0, 0, W, H, 1500, g]);
+    for(const g of [90, -90]) tentativas.push([0, 0, W, H, 2400, g]); // foto de lado
     for(let i = 0; i < tentativas.length; i++){
-      statusScanner(`Procurando o código na foto (${W}×${H})… ${i+1}/${tentativas.length}`);
-      await new Promise(r => setTimeout(r, 0)); // deixa a tela atualizar
-      const [sx, sy, sw, sh, larg, girar] = tentativas[i];
-      const c = desenharRecorteColeta(img, sx, sy, sw, sh, larg, girar);
-      const chave = await lerChaveNoCanvas(c, detector, true);
+      statusScanner(`Procurando o código na foto (${nomeMotorColeta()}, ${W}×${H})… ${i+1}/${tentativas.length}`);
+      await new Promise(r => setTimeout(r, 0));
+      const [sx, sy, sw, sh, larg, graus] = tentativas[i];
+      const chave = await lerChaveNoCanvas(desenharRecorteColeta(img, sx, sy, sw, sh, larg, graus));
       if(chave){ leituraConcluidaColeta(chave); return; }
     }
-    statusScanner('Não encontrei o código nessa foto. Tire outra mais de perto (o código ocupando quase toda a largura), com boa luz e a nota bem reta — ou digite o número da NF.', 'erro');
+    statusScanner(`Não encontrei o código nessa foto (${nomeMotorColeta()}, ${W}×${H}${ULTIMA_LEITURA_INVALIDA_COLETA ? ', leu "'+ULTIMA_LEITURA_INVALIDA_COLETA+'"' : ''}). Tire outra com o código de barras ocupando boa parte da foto, boa luz e nota reta — ou digite o número da NF.`, 'erro');
   } catch(e){
     statusScanner('Erro ao ler a foto: ' + (e.message || e) + '. Digite o número da NF.', 'erro');
   } finally {
