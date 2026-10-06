@@ -13209,7 +13209,7 @@ function resumoPedidoColeta(p){
     cliente_cidade: p.cliente_cidade || '',
     cliente_uf: p.cliente_uf || '',
     volumes: Number(p.volumes) || 1,
-    bipado_em: p.ts_fim_bipagem ? new Date(Number(p.ts_fim_bipagem)).toISOString() : ''
+    bipado_em: p.ts_fim_bipagem ? new Date(Number(p.ts_fim_bipagem)).toISOString() : (p.data || '')
   };
 }
 
@@ -13245,6 +13245,28 @@ function cpfValidoColeta(cpf){
 }
 
 // ══ TELA PRINCIPAL ══
+// Por padrão a Coleta mostra só pedidos bipados no mês atual. Os de meses anteriores
+// continuam na fila e aparecem pelo link "mostrar meses anteriores".
+let COLETA_TODOS = [];
+let COLETA_MOSTRAR_ANTERIORES = false;
+function inicioMesColeta(){ const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString(); }
+function filtrarMesColeta(){
+  const ini = inicioMesColeta();
+  COLETA_PENDENTES = COLETA_MOSTRAR_ANTERIORES ? COLETA_TODOS.slice()
+    : COLETA_TODOS.filter(p => p.bipado_em && p.bipado_em >= ini);
+}
+function alternarAnterioresColeta(){
+  COLETA_MOSTRAR_ANTERIORES = !COLETA_MOSTRAR_ANTERIORES;
+  filtrarMesColeta();
+  renderColetaPendentes();
+}
+function avisoAnterioresColeta(){
+  const ini = inicioMesColeta();
+  const n = COLETA_TODOS.filter(p => !(p.bipado_em && p.bipado_em >= ini)).length;
+  if(!n) return '';
+  return `<div style="font-size:13px;margin:8px 0"><a href="javascript:void(0)" onclick="alternarAnterioresColeta()" style="color:var(--accent)">${COLETA_MOSTRAR_ANTERIORES ? 'Mostrar só o mês atual' : `Mostrar meses anteriores (${n} pedido(s))`}</a></div>`;
+}
+
 async function renderColeta(){
   if(!podeVer('coleta')){ toast('Acesso restrito — sem permissão nesta área','error'); return; }
   const pode = temPermissaoEditar('coleta');
@@ -13252,9 +13274,10 @@ async function renderColeta(){
   try {
     const snap = await db.ref('aguardando_coleta').once('value');
     const v = snap.val() || {};
-    COLETA_PENDENTES = Object.keys(v).map(id => ({ id, ...v[id] }))
+    COLETA_TODOS = Object.keys(v).map(id => ({ id, ...v[id] }))
       .sort((a,b) => (Number(a.numero)||0) - (Number(b.numero)||0));
   } catch(e){ toast('Erro ao carregar pedidos aguardando coleta: '+e.message,'error'); }
+  filtrarMesColeta();
   renderColetaPendentes();
   COLETA_HIST = []; COLETA_HIST_FIM = false;
   try { await carregarHistoricoColetas(false); }
@@ -13266,12 +13289,13 @@ function renderColetaPendentes(){
   if(!el) return;
   const pode = temPermissaoEditar('coleta');
   if(!COLETA_PENDENTES.length){
-    el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:28px">Nenhum pedido bipado aguardando coleta.</div>';
+    el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:28px">Nenhum pedido bipado aguardando coleta neste mês.</div>' + avisoAnterioresColeta();
     return;
   }
   const totVol = COLETA_PENDENTES.reduce((s,p) => s + (Number(p.volumes)||0), 0);
   el.innerHTML = `
-    <div style="font-size:13px;color:var(--muted);margin-bottom:8px">${COLETA_PENDENTES.length} pedido(s) · ${totVol} volume(s)</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:8px">${COLETA_PENDENTES.length} pedido(s) · ${totVol} volume(s)${COLETA_MOSTRAR_ANTERIORES ? '' : ' · bipados neste mês'}</div>
+    ${avisoAnterioresColeta()}
     <div class="table-wrap"><table>
       <thead><tr><th>Pedido</th><th>Cliente</th><th>Cidade/UF</th><th style="text-align:center">Vol.</th><th>Bipado em</th>${pode?'<th></th>':''}</tr></thead>
       <tbody>${COLETA_PENDENTES.map(p => `<tr>
@@ -13292,20 +13316,21 @@ async function removerDaFilaColeta(pid){
   try {
     await db.ref('aguardando_coleta/'+pid).remove();
     COLETA_PENDENTES = COLETA_PENDENTES.filter(x => x.id !== pid);
+    COLETA_TODOS = COLETA_TODOS.filter(x => x.id !== pid);
     renderColetaPendentes();
   } catch(e){ toast('Erro: '+e.message,'error'); }
 }
 
 // Inclui na fila os pedidos bipados recentes que não estão nela (ex.: bipados antes desta
-// tela existir). Lê só os pedidos dos últimos 20 dias pelo índice 'data', e só quando clicado.
+// tela existir). Lê só os pedidos do mês atual pelo índice 'data', e só quando clicado.
 async function buscarBipadosRecentes(){
   if(!temPermissaoEditar('coleta')){ toast('Sem permissão de edição na Coleta','error'); return; }
   try {
-    toast('Buscando pedidos bipados dos últimos 20 dias…');
-    const ini = new Date(agoraTs() - 20*86400000).toISOString();
+    toast('Buscando pedidos bipados deste mês…');
+    const ini = inicioMesColeta();
     const snap = await db.ref('pedidos').orderByChild('data').startAt(ini).once('value');
     const v = snap.val() || {};
-    const naFila = new Set(COLETA_PENDENTES.map(p => p.id));
+    const naFila = new Set(COLETA_TODOS.map(p => p.id));
     const updates = {};
     let n = 0;
     Object.keys(v).forEach(id => {
@@ -13316,7 +13341,7 @@ async function buscarBipadosRecentes(){
       }
     });
     if(n) await db.ref().update(updates);
-    toast(n ? `✓ ${n} pedido(s) incluído(s) na lista de coleta` : 'Nenhum pedido bipado sem coleta nos últimos 20 dias', n ? 'success' : '');
+    toast(n ? `✓ ${n} pedido(s) incluído(s) na lista de coleta` : 'Nenhum pedido bipado sem coleta neste mês', n ? 'success' : '');
     await renderColeta();
   } catch(e){ toast('Erro ao buscar pedidos: '+e.message,'error'); }
 }
@@ -14134,7 +14159,7 @@ async function desfazerColeta(id){
       updates['aguardando_coleta/'+n.pedido_id] = {
         numero: n.pedido_numero || '', cliente_nome: n.cliente_nome || '',
         cliente_cidade: n.cliente_cidade || '', cliente_uf: n.cliente_uf || '',
-        volumes: Number(n.volumes) || 1, bipado_em: ''
+        volumes: Number(n.volumes) || 1, bipado_em: agora().toISOString()
       };
     });
     await db.ref().update(updates);
