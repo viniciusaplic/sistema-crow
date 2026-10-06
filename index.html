@@ -5750,6 +5750,7 @@ async function buscarProdutoPedido(){
   // Buscar histórico de preços deste cliente para os produtos encontrados
   const clienteCod = pedidoAtual.cliente?.codigo;
   const historicoPrecos = (clienteCod && HISTORICO_PRECOS_CACHE[clienteCod]) || {};
+  const comprometidoBusca = mapaInsumoComprometido();
 
   lista.innerHTML = res.map(p=>{
     const estqFisico = Number(p.quantidade||0);
@@ -5761,21 +5762,10 @@ async function buscarProdutoPedido(){
     let capacidadeProducao = 0;
     let gargalhoTooltip = '';
     const receita = RECEITAS_DB[p.codigo];
-    const itensReceitaSemEmbalagem = (receita?.itens||[]).filter(ri => {
-      const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
-      return insumo?.categoria !== 'Embalagens';
-    });
-    if(itensReceitaSemEmbalagem.length){
-      let minCap = Infinity;
-      let gargalho = null;
-      for(const ri of itensReceitaSemEmbalagem){
-        const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
-        const estoqueInsumo = Number(insumo?.estoque_atual||0);
-        const cap = ri.qtd > 0 ? Math.floor(estoqueInsumo / ri.qtd) : Infinity;
-        if(cap < minCap){ minCap = cap; gargalho = { codigo: ri.codigo, nome: ri.nome, estoque: estoqueInsumo }; }
-      }
-      capacidadeProducao = minCap === Infinity ? 0 : minCap;
-      if(gargalho) gargalhoTooltip = `Gargalo: ${gargalho.codigo} (${gargalho.estoque} un)`;
+    if(receita?.itens?.length){
+      const r = capacidadeProducaoLivre(p.codigo, comprometidoBusca);
+      capacidadeProducao = r.cap;
+      if(r.gargalho) gargalhoTooltip = `Gargalo: ${r.gargalho.codigo} (${r.gargalho.livre} un livres de ${r.gargalho.estoque})`;
     }
 
     const estqTotal = dispFisico + capacidadeProducao;
@@ -8990,6 +8980,49 @@ function estoqueDisponivel(produto){
   return Number(produto.quantidade||0) - Number(produto.reservado||0);
 }
 
+// ── CAPACIDADE DE PRODUÇÃO COM INSUMO COMPARTILHADO ──
+// Um insumo pode compor vários produtos (ex: M0329 → 9872 e 9872B). Antes, cada produto
+// via o estoque INTEIRO do insumo, então a mesma peça era contada duas vezes.
+// Agora: o insumo que vai cobrir produto já vendido sem estoque (reservado > físico)
+// fica comprometido com aquele produto e sai da conta dos outros.
+// Tudo calculado em memória — nenhuma leitura extra no Firebase.
+function mapaInsumoComprometido(){
+  const mapa = {};
+  for(const p of PRODUTOS_DB){
+    const deficit = Number(p.reservado||0) - Number(p.quantidade||0);
+    if(deficit <= 0) continue;
+    const receita = RECEITAS_DB[p.codigo];
+    for(const ri of (receita?.itens||[])){
+      const q = Number(ri.qtd)||0;
+      if(q <= 0) continue;
+      mapa[ri.codigo] = (mapa[ri.codigo]||0) + deficit*q;
+    }
+  }
+  return mapa;
+}
+
+// Retorna { cap, gargalho } — cap = quantas unidades do produto ainda dá pra montar,
+// contando o insumo livre + a parte do insumo já comprometida com ele mesmo.
+// Embalagem/etiqueta não conta como gargalo (mesma regra de antes).
+function capacidadeProducaoLivre(codigo, comprometido){
+  comprometido = comprometido || mapaInsumoComprometido();
+  const prod = PRODUTOS_DB.find(p=>p.codigo===codigo);
+  const deficitProprio = prod ? Math.max(0, Number(prod.reservado||0) - Number(prod.quantidade||0)) : 0;
+  const receita = RECEITAS_DB[codigo];
+  let minCap = Infinity, gargalho = null;
+  for(const ri of (receita?.itens||[])){
+    const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
+    if(insumo?.categoria === 'Embalagens') continue;
+    const q = Number(ri.qtd)||0;
+    if(q <= 0) continue;
+    const estoqueInsumo = Number(insumo?.estoque_atual||0);
+    const livre = estoqueInsumo - (comprometido[ri.codigo]||0) + deficitProprio*q;
+    const cap = Math.max(0, Math.floor(livre / q));
+    if(cap < minCap){ minCap = cap; gargalho = { codigo: ri.codigo, nome: ri.nome, estoque: estoqueInsumo, livre: Math.max(0, livre), qtdReceita: q }; }
+  }
+  return { cap: minCap === Infinity ? 0 : minCap, gargalho };
+}
+
 async function registrarMovimentoEstoque(codigo, nome, tipo, qtd, motivo, origemTipo=null, origemId=null){
   invalidarCacheNo('movimentos_estoque'); // saldo mudou: proximo relatorio le do banco
   const key = db.ref('movimentos_estoque').push().key;
@@ -9171,9 +9204,12 @@ async function exportarEstoqueExcel(){
 
   const todos = [...itensVendaveis, ...itensInsumo].sort((a,b)=>(a.codigo||'').localeCompare(b.codigo||''));
 
+  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
+  const comprometidoExport = mapaInsumoComprometido();
   const dados = todos.map(p=>{
     const estqFisico = Number(p.quantidade||0);
     const reservado = Number(p.reservado||0);
+    const capProd = (p._tipo==='vendavel' && RECEITAS_DB[p.codigo]?.itens?.length) ? capacidadeProducaoLivre(p.codigo, comprometidoExport).cap : 0;
     return {
       'Código': p.codigo,
       'Nome': p.nome,
@@ -9182,7 +9218,7 @@ async function exportarEstoqueExcel(){
       'Localização': p.localizacao||'',
       'Estoque Físico': estqFisico,
       'Reservado': reservado,
-      'Disponível': estqFisico - reservado,
+      'Disponível': estqFisico - reservado + capProd,
       'Estoque Mínimo': Number(p.estoque_minimo||0)
     };
   });
@@ -9198,6 +9234,7 @@ async function exportarEstoqueExcel(){
 async function renderEstoque(){
   if(!podeVer('estoque')){ toast('Acesso restrito — sem permissão nesta área','error'); return; }
   if(!INSUMOS_DB.length) await carregarInsumosFirebase();
+  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
 
   const busca = (document.getElementById('search-estoque')?.value||'').toLowerCase();
   const filtroStatus = document.getElementById('filter-status-estoque')?.value||'ativos';
@@ -9221,6 +9258,7 @@ async function renderEstoque(){
 
   const total = filtrado.length, inicio=(paginaEstoque-1)*POR_PAGINA;
   const pagina = filtrado.slice(inicio, inicio+POR_PAGINA);
+  const comprometidoEstoque = mapaInsumoComprometido();
 
   document.getElementById('estoque-lista').innerHTML = `
     <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -9230,13 +9268,14 @@ async function renderEstoque(){
         <th style="padding:10px;text-align:left">Localização</th>
         <th style="padding:10px" title="Quantidade física real no estoque">Estoque Físico</th>
         <th style="padding:10px" title="Quantidade já comprometida em pedidos confirmados (AA/AP/EX), ainda não bipados">Reservado (vendido)</th>
-        <th style="padding:10px" title="Físico menos Reservado — o que realmente pode ser vendido agora">Disponível p/ Venda</th>
+        <th style="padding:10px" title="Físico menos Reservado + o que ainda dá pra montar com insumo livre (insumo já comprometido com outro código não conta)">Disponível p/ Venda</th>
         <th style="padding:10px"></th>
       </tr></thead>
       <tbody>${pagina.map(p=>{
         const estqFisico = Number(p.quantidade||0);
         const reservado = Number(p.reservado||0);
-        const disponivel = estqFisico - reservado;
+        const capProd = (p._tipo==='vendavel' && RECEITAS_DB[p.codigo]?.itens?.length) ? capacidadeProducaoLivre(p.codigo, comprometidoEstoque).cap : 0;
+        const disponivel = estqFisico - reservado + capProd;
         const estMin = Number(p.estoque_minimo||0);
         const corDisp = disponivel<=estMin ? 'estoque-low' : disponivel>5 ? 'estoque-ok' : 'estoque-low';
         const dispLabel = disponivel<=0 ? `<span class="estoque-zero">${disponivel.toLocaleString('pt-BR')}</span>` : `<span class="${corDisp}">${disponivel.toLocaleString('pt-BR')}</span>`;
@@ -14896,6 +14935,7 @@ async function renderProdutos(){
   const total=filtrado.length, inicio=(paginaProdutos-1)*POR_PAGINA;
   produtosFiltradosAtual = filtrado; // usado pela reativação em massa
   const pagina=filtrado.slice(inicio,inicio+POR_PAGINA);
+  const comprometidoLista = mapaInsumoComprometido();
   const linhas = pagina.map(p=>{
     const estq=Number(p.quantidade||0);
     const reservado=Number(p.reservado||0);
@@ -14908,22 +14948,11 @@ async function renderProdutos(){
     let gargalhoInfo = '';
     if(p._tipo==='vendavel'){
       const receita = RECEITAS_DB[p.codigo];
-      const itensReceitaSemEmbalagem = (receita?.itens||[]).filter(ri => {
-        const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
-        return insumo?.categoria !== 'Embalagens';
-      });
       if(receita?.itens?.length){
-        let minCap = Infinity;
-        let gargalho = null;
-        for(const ri of itensReceitaSemEmbalagem){
-          const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
-          const estoqueInsumo = Number(insumo?.estoque_atual||0);
-          const cap = ri.qtd > 0 ? Math.floor(estoqueInsumo / ri.qtd) : Infinity;
-          if(cap < minCap){ minCap = cap; gargalho = { nome: ri.nome, codigo: ri.codigo, estoque: estoqueInsumo, qtdReceita: ri.qtd }; }
-        }
-        capacidadeProducao = minCap === Infinity ? 0 : minCap;
-        if(gargalho) gargalhoInfo = `Gargalo: ${gargalho.codigo} — ${esc(gargalho.nome)} (${gargalho.estoque} un em estoque, usa ${gargalho.qtdReceita}/un)`;
-        else if(!itensReceitaSemEmbalagem.length) gargalhoInfo = 'Receita contém só embalagem/etiqueta — sem insumo de produção real cadastrado';
+        const r = capacidadeProducaoLivre(p.codigo, comprometidoLista);
+        capacidadeProducao = r.cap;
+        if(r.gargalho) gargalhoInfo = `Gargalo: ${r.gargalho.codigo} — ${esc(r.gargalho.nome)} (${r.gargalho.estoque} un em estoque, ${r.gargalho.livre} livres, usa ${r.gargalho.qtdReceita}/un)`;
+        else gargalhoInfo = 'Receita contém só embalagem/etiqueta — sem insumo de produção real cadastrado';
       }
     }
 
@@ -18936,6 +18965,7 @@ async function relSugestaoJornal(pedidos, el){
     return;
   }
 
+  const comprometidoJornal = mapaInsumoComprometido();
   const lista = Object.values(vendas).map(v=>{
     const prod = PRODUTOS_DB.find(p=>p.codigo===v.codigo);
     const dispFisico = prod ? Number(prod.quantidade||0)-Number(prod.reservado||0) : 0;
@@ -18951,15 +18981,10 @@ async function relSugestaoJornal(pedidos, el){
       return insumo?.categoria !== 'Embalagens';
     });
     if(itensReceitaSemEmbalagem.length){
-      let minCap = Infinity;
       for(const ri of itensReceitaSemEmbalagem){
-        const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
-        const estoqueInsumo = Number(insumo?.estoque_atual||0);
-        const cap = ri.qtd > 0 ? Math.floor(estoqueInsumo / ri.qtd) : Infinity;
-        if(cap < minCap) minCap = cap;
         if(codigosEmTransito.has(ri.codigo)) insumoEmTransito = true;
       }
-      capacidadeProducao = minCap === Infinity ? 0 : minCap;
+      capacidadeProducao = capacidadeProducaoLivre(v.codigo, comprometidoJornal).cap;
     }
 
     const disponivel = dispFisico + capacidadeProducao;
