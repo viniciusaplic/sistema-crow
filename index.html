@@ -18698,6 +18698,16 @@ async function calcularMRP(){
 
   const desdeTs = agoraTs() - diasHistorico*24*60*60*1000;
   const consumoPorCodigo = {}; // codigo -> total consumido/vendido no período
+  // Data do primeiro consumo de cada item DENTRO da janela. Item que passou a girar há
+  // poucos dias (importado que acabou de chegar, produto novo) nao pode ter o consumo
+  // dividido pela janela inteira: isso subestima o CMD proporcionalmente ao tempo que
+  // ele ainda nao existia, e atrasa a compra exatamente dos itens mais criticos.
+  const primeiroConsumoPorCodigo = {};
+  const PISO_DIAS_CMD = 30; // historico curto demais gera CMD instavel: nunca divide por menos que isso
+  const marcarPrimeiroConsumo = (codigo, ts) => {
+    if(!codigo || !ts || isNaN(ts)) return;
+    if(!primeiroConsumoPorCodigo[codigo] || ts < primeiroConsumoPorCodigo[codigo]) primeiroConsumoPorCodigo[codigo] = ts;
+  };
   const emTransitoPorCodigo = {};
 
   if(tipoMrp === 'insumo'){
@@ -18711,6 +18721,7 @@ async function calcularMRP(){
       const motivoLower = (m.motivo||'').toLowerCase();
       if(motivoLower.includes('balanço') || motivoLower.includes('balanco') || motivoLower.includes('estorno')) return;
       consumoPorCodigo[m.codigo] = (consumoPorCodigo[m.codigo]||0) + Number(m.qtd||0);
+      marcarPrimeiroConsumo(m.codigo, Number(m.ts||0));
     });
 
     // Em trânsito: pedidos de compra de insumo já saíram da negociação (Separação em diante),
@@ -18734,6 +18745,7 @@ async function calcularMRP(){
       if(isNaN(dataPedido) || dataPedido < desdeTs) return;
       (p.itens||[]).forEach(it=>{
         consumoPorCodigo[it.codigo] = (consumoPorCodigo[it.codigo]||0) + Number(it.qtd||0);
+        marcarPrimeiroConsumo(it.codigo, dataPedido);
       });
     });
 
@@ -18756,8 +18768,17 @@ async function calcularMRP(){
   const baseItens = tipoMrp === 'insumo' ? INSUMOS_DB : PRODUTOS_DB;
   const linhas = baseItens.filter(i=>!i.inativo).map(i=>{
     const consumoTotal = consumoPorCodigo[i.codigo] || 0;
-    const cmd = consumoTotal / diasHistorico;
-    const estoqueAtual = Number((tipoMrp==='insumo' ? i.estoque_atual : i.quantidade) || 0);
+    // Divide pelos dias em que o item realmente girou, limitado pela janela e pelo piso.
+    const primeiroTs = primeiroConsumoPorCodigo[i.codigo];
+    const diasDeGiro = primeiroTs ? Math.ceil((agoraTs() - primeiroTs) / (24*60*60*1000)) : diasHistorico;
+    const diasEfetivos = Math.min(diasHistorico, Math.max(PISO_DIAS_CMD, diasDeGiro));
+    const historicoCurto = diasDeGiro < diasEfetivos; // gira ha menos tempo que o piso: CMD ainda subestimado
+    const cmd = consumoTotal / diasEfetivos;
+    // Reservado = comprometido em pedido confirmado, ainda nao bipado. Nao esta disponivel
+    // para atender demanda futura, entao nao pode contar como cobertura.
+    const reservado = tipoMrp==='insumo' ? 0 : Number(i.reservado||0);
+    const estoqueFisico = Number((tipoMrp==='insumo' ? i.estoque_atual : i.quantidade) || 0);
+    const estoqueAtual = estoqueFisico - reservado;
     const emTransito = emTransitoPorCodigo[i.codigo] || 0;
 
     let nomeFornecedor, prazoEntrega;
@@ -18794,6 +18815,7 @@ async function calcularMRP(){
 
     return {
       codigo: i.codigo, nome: i.nome, cmd, estoqueAtual, emTransito,
+      reservado, estoqueFisico, diasEfetivos, historicoCurto,
       coberturaAtualDias, prazoEntrega, fornecedor: nomeFornecedor || (temReceita?'(produção própria)':'(sem fornecedor)'),
       temReceita, diasAteComprar, statusMrp, corStatus, qtdSugerida, dataSugerida,
       urgente: cmd > 0 && diasAteComprar <= 7
@@ -18826,7 +18848,8 @@ async function calcularMRP(){
         <th style="padding:7px 9px;text-align:left">${tipoMrp==='insumo'?'Insumo':'Produto'}</th>
         <th style="padding:7px 9px;text-align:left">Fornecedor</th>
         <th style="padding:7px 9px;text-align:center">${tipoMrp==='insumo'?'Consumo':'Venda'}/dia</th>
-        <th style="padding:7px 9px;text-align:center">Estoque</th>
+        <th style="padding:7px 9px;text-align:center" title="Estoque físico menos o que já está reservado em pedidos confirmados">Disponível</th>
+        <th style="padding:7px 9px;text-align:center" title="Comprometido em pedidos confirmados, ainda não bipado">Reservado</th>
         <th style="padding:7px 9px;text-align:center">A Caminho</th>
         <th style="padding:7px 9px;text-align:center">Prazo</th>
         <th style="padding:7px 9px;text-align:center">${colunaAcao}</th>
@@ -18839,8 +18862,9 @@ async function calcularMRP(){
             <td style="padding:6px 9px;font-weight:700">${l.codigo}</td>
             <td style="padding:6px 9px">${esc(l.nome)}</td>
             <td style="padding:6px 9px">${esc(l.fornecedor)}</td>
-            <td style="padding:6px 9px;text-align:center">${l.cmd.toFixed(2)}</td>
-            <td style="padding:6px 9px;text-align:center">${l.estoqueAtual.toLocaleString('pt-BR')}</td>
+            <td style="padding:6px 9px;text-align:center" title="Consumo apurado sobre ${l.diasEfetivos} dia(s)${l.historicoCurto?' — item gira há menos tempo que isso, consumo real tende a ser maior':''}">${l.cmd.toFixed(2)}${l.historicoCurto?' <span style="color:#b45309;font-weight:700" title="Histórico curto: CMD provavelmente subestimado">*</span>':''}</td>
+            <td style="padding:6px 9px;text-align:center;${l.estoqueAtual<=0?'color:#dc2626;font-weight:700':''}">${l.estoqueAtual.toLocaleString('pt-BR')}</td>
+            <td style="padding:6px 9px;text-align:center;${l.reservado>0?'color:#b45309':'color:var(--muted)'}">${l.reservado ? l.reservado.toLocaleString('pt-BR') : '—'}</td>
             <td style="padding:6px 9px;text-align:center">${l.emTransito.toLocaleString('pt-BR')}</td>
             <td style="padding:6px 9px;text-align:center">${l.prazoEntrega ? l.prazoEntrega+'d' : (l.temReceita?'—':'<span style="color:#dc2626">sem prazo</span>')}</td>
             <td style="padding:6px 9px;text-align:center">${l.dataSugerida ? l.dataSugerida.toLocaleDateString('pt-BR') : '—'}</td>
@@ -18862,7 +18886,8 @@ let mrpCache = [];
 function exportarMRPExcel(){
   const dados = mrpCache.map(l=>({
     'Código': l.codigo, 'Insumo': l.nome, 'Fornecedor': l.fornecedor,
-    'Consumo Médio/Dia': Number(l.cmd.toFixed(2)), 'Estoque Atual': l.estoqueAtual,
+    'Consumo Médio/Dia': Number(l.cmd.toFixed(2)), 'Dias Apurados': l.diasEfetivos,
+    'Estoque Físico': l.estoqueFisico, 'Reservado': l.reservado, 'Disponível': l.estoqueAtual,
     'A Caminho': l.emTransito, 'Prazo Entrega (dias)': l.prazoEntrega,
     'Comprar Até': l.dataSugerida ? l.dataSugerida.toLocaleDateString('pt-BR') : '',
     'Quantidade Sugerida': l.qtdSugerida, 'Situação': l.statusMrp
