@@ -13208,7 +13208,7 @@ function resumoPedidoColeta(p){
     cliente_nome: p.cliente_nome || '',
     cliente_cidade: p.cliente_cidade || '',
     cliente_uf: p.cliente_uf || '',
-    volumes: Number(p.volumes) || 1,
+    volumes: Number(p.volumes) || null, // sem volume conhecido fica vazio e é exigido na coleta
     bipado_em: p.ts_fim_bipagem ? new Date(Number(p.ts_fim_bipagem)).toISOString() : (p.data || '')
   };
 }
@@ -13302,7 +13302,7 @@ function renderColetaPendentes(){
         <td><strong>#${esc(p.numero)}</strong></td>
         <td>${esc(p.cliente_nome)}</td>
         <td>${esc(p.cliente_cidade)}${p.cliente_uf?'/'+esc(p.cliente_uf):''}</td>
-        <td style="text-align:center">${Number(p.volumes)||1}</td>
+        <td style="text-align:center">${Number(p.volumes) ? Number(p.volumes) : '<span style="color:#dc2626" title="Volume não informado na expedição">?</span>'}</td>
         <td style="font-size:12px;color:var(--muted)">${fmtDataHoraColeta(p.bipado_em)}</td>
         ${pode?`<td style="text-align:right"><button class="btn btn-outline btn-sm" title="Tirar da lista (ex.: pedido já entregue antes do sistema de coleta)" onclick="removerDaFilaColeta('${esc(p.id)}')">✕</button></td>`:''}
       </tr>`).join('')}</tbody>
@@ -13461,7 +13461,7 @@ function renderColetaLinhas(){
         </div>
         <button type="button" class="btn btn-outline btn-sm" style="font-size:18px;padding:6px 12px" title="Ler pela câmera" onclick="abrirScannerNF('${esc(p.id)}')">📷</button>
         <label style="display:flex;align-items:center;gap:6px;font-size:13px">Vol.
-          <input type="number" min="1" class="search-input" style="width:70px" value="${Number(s.volumes)||1}"
+          <input type="number" min="1" inputmode="numeric" class="search-input" value="${Number(s.volumes)||''}" placeholder="?" style="width:70px;${Number(s.volumes)?'':'border-color:#dc2626'}"
             oninput="COLETA_SELECAO['${esc(p.id)}'] && (COLETA_SELECAO['${esc(p.id)}'].volumes = parseInt(this.value)||0); atualizarResumoColeta()">
         </label>
       </div>` : ''}
@@ -13481,7 +13481,7 @@ function atualizarResumoColeta(){
 function alternarPedidoColeta(pid, marcado){
   if(marcado){
     const p = COLETA_PENDENTES.find(x => x.id === pid);
-    COLETA_SELECAO[pid] = { volumes: Number(p?.volumes)||1, nf:null, nfTexto:'', nfErro:'' };
+    COLETA_SELECAO[pid] = { volumes: Number(p?.volumes)||0, nf:null, nfTexto:'', nfErro:'' };
   } else {
     delete COLETA_SELECAO[pid];
   }
@@ -14159,7 +14159,7 @@ async function desfazerColeta(id){
       updates['aguardando_coleta/'+n.pedido_id] = {
         numero: n.pedido_numero || '', cliente_nome: n.cliente_nome || '',
         cliente_cidade: n.cliente_cidade || '', cliente_uf: n.cliente_uf || '',
-        volumes: Number(n.volumes) || 1, bipado_em: agora().toISOString()
+        volumes: Number(n.volumes) || null, bipado_em: agora().toISOString()
       };
     });
     await db.ref().update(updates);
@@ -14181,27 +14181,49 @@ async function abrirModalEtiqueta(pedidoId){
     <div class="modal-title">🏷️ Etiqueta de Envio — Pedido #${p.numero}</div>
     <div class="form-row single">
       <div class="form-group">
-        <label>Quantidade de volumes (caixas/pacotes)</label>
-        <input type="number" id="etiqueta-volumes" value="1" min="1" max="20">
+        <label>Quantidade de volumes (caixas/pacotes) *</label>
+        <input type="number" id="etiqueta-volumes" value="${Number(p.volumes)||''}" min="1" max="99" inputmode="numeric" placeholder="Conte as caixas/pacotes">
+        <div style="font-size:12px;color:var(--muted);margin-top:4px">Esse número vai para o romaneio de coleta.</div>
       </div>
     </div>
     <div class="form-actions">
-      <button class="btn btn-outline" onclick="fecharModal('modal-etiqueta')">Pular</button>
+      <button class="btn btn-outline" onclick="salvarVolumesSemEtiqueta('${pedidoId}')">Salvar sem imprimir</button>
       <button class="btn btn-primary" onclick="gerarEImprimirEtiquetas('${pedidoId}')">🖨️ Gerar e Imprimir</button>
     </div>
   `;
   abrirModal('modal-etiqueta');
 }
 
+// Volume informado na etiqueta: obrigatório, sem valor padrão (um "1" automático vira erro no romaneio)
+function lerVolumesEtiqueta(){
+  const el = document.getElementById('etiqueta-volumes');
+  const v = parseInt(el && el.value, 10);
+  if(!(v >= 1)){ toast('Informe a quantidade de volumes','error'); if(el) el.focus(); return null; }
+  return v;
+}
+
+// Guarda os volumes no pedido e na fila da Coleta. A fila só é atualizada se o pedido
+// ainda estiver nela (transaction aborta se o nó não existe — sem registro fantasma).
+function gravarVolumesPedido(pedidoId, totalVolumes){
+  db.ref('pedidos/'+pedidoId+'/volumes').set(totalVolumes).catch(()=>{});
+  db.ref('aguardando_coleta/'+pedidoId).transaction(atual => atual ? { ...atual, volumes: totalVolumes } : undefined).catch(()=>{});
+}
+
+function salvarVolumesSemEtiqueta(pedidoId){
+  const v = lerVolumesEtiqueta();
+  if(!v) return;
+  gravarVolumesPedido(pedidoId, v);
+  fecharModal('modal-etiqueta');
+  toast(`✓ ${v} volume(s) registrado(s)`,'success');
+}
+
 async function gerarEImprimirEtiquetas(pedidoId){
+  const totalVolumes = lerVolumesEtiqueta();
+  if(!totalVolumes) return;
   const snap = await db.ref('pedidos/'+pedidoId).once('value');
   const p = snap.val();
   if(!p) return;
-  const totalVolumes = Number(document.getElementById('etiqueta-volumes').value) || 1;
-  // Guarda os volumes para já virem preenchidos na Coleta. A fila só é atualizada se o
-  // pedido ainda estiver nela (transaction aborta se o nó não existe — sem registro fantasma).
-  db.ref('pedidos/'+pedidoId+'/volumes').set(totalVolumes).catch(()=>{});
-  db.ref('aguardando_coleta/'+pedidoId).transaction(atual => atual ? { ...atual, volumes: totalVolumes } : undefined).catch(()=>{});
+  gravarVolumesPedido(pedidoId, totalVolumes);
 
   let etiquetasHtml = '';
   for(let vol = 1; vol <= totalVolumes; vol++){
