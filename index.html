@@ -1232,6 +1232,7 @@ tbody td{padding:11px 16px;font-size:14px}
         .coleta-linha-topo input[type=checkbox]{width:22px;height:22px;margin-top:1px;flex-shrink:0;accent-color:var(--accent)}
         .coleta-linha-campos{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-top:10px;padding-left:34px}
         .coleta-bloco{margin-bottom:18px}
+        .coleta-incluir{display:inline-flex;gap:4px;align-items:center}
         .coleta-rotulo{font-weight:600;font-size:14px;margin-bottom:8px}
         .coleta-radio{display:flex;align-items:center;gap:8px;font-size:15px;cursor:pointer}
         .coleta-radio input{width:20px;height:20px;accent-color:var(--accent)}
@@ -1241,7 +1242,11 @@ tbody td{padding:11px 16px;font-size:14px}
       <div class="section-header">
         <div class="section-title">📝 Coleta de Pedidos</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-outline btn-sm" id="btn-buscar-bipados" onclick="buscarBipadosRecentes()" title="Inclui na lista pedidos bipados antes desta tela existir">🔄 Buscar bipados recentes</button>
+          <span id="coleta-incluir-wrap" class="coleta-incluir">
+            <input class="search-input" id="coleta-incluir-num" inputmode="numeric" placeholder="Nº do pedido" style="width:120px" onkeydown="if(event.key==='Enter'){event.preventDefault();incluirPedidoNaColeta()}">
+            <button class="btn btn-outline btn-sm" onclick="incluirPedidoNaColeta()" title="Inclui um pedido bipado na lista, ou mostra por que ele não pode entrar">Incluir</button>
+          </span>
+          <button class="btn btn-outline btn-sm" id="btn-buscar-bipados" onclick="buscarBipadosRecentes()" title="Inclui na lista os pedidos faturados neste mês, já bipados, que ainda não estão nela">🔄 Buscar faturados do mês</button>
           <button class="btn btn-primary" id="btn-nova-coleta" onclick="abrirModalColeta()">+ Registrar coleta</button>
         </div>
       </div>
@@ -4587,6 +4592,7 @@ async function aplicarFaturarRetroativo(){
         alteracoes: [`💰 Faturado retroativamente, usando a data do próprio pedido (${fmtData(dataFaturamento)})`]
       });
       await db.ref('pedidos/'+p.id).update({ faturado: true, data_faturamento: dataFaturamento, historico_edicoes: historico });
+      atualizarFaturamentoFilaColeta(p.id, dataFaturamento);
       count++;
     } catch(e){ /* segue pros próximos mesmo se um falhar */ }
   }
@@ -5034,6 +5040,7 @@ async function confirmarFaturamentoPedido(){
             : `💰 Pedido marcado como Faturado em lote, em ${fmtData(dataEscolhida)}`]
         });
         await db.ref('pedidos/'+id).update({ faturado: true, data_faturamento: dataEscolhida, historico_edicoes: historico });
+        atualizarFaturamentoFilaColeta(id, dataEscolhida);
         count++;
       } catch(e){ /* segue pros próximos mesmo se um falhar */ }
     }
@@ -5061,6 +5068,7 @@ async function confirmarFaturamentoPedido(){
         : `💰 Pedido marcado como Faturado em ${fmtData(dataEscolhida)}`]
     });
     await db.ref('pedidos/'+id).update({ faturado: true, data_faturamento: dataEscolhida, historico_edicoes: historico });
+    atualizarFaturamentoFilaColeta(id, dataEscolhida);
     fecharModal('modal-faturar-pedido');
     toast('✓ Faturamento registrado','success');
     verPedido(id);
@@ -5451,6 +5459,9 @@ async function reativarPedido(id){
   try {
     // Restaura o status anterior (ou AA se não tiver registro)
     await db.ref('pedidos/'+id+'/status').set(statusAnterior);
+    if(statusAnterior === 'CC' && !p.coleta_id){
+      db.ref('aguardando_coleta/'+id).set(resumoPedidoColeta(p)).catch(()=>{});
+    }
 
     // Só status abertos (AA/AP/EX) têm reserva. Pedido que estava bipado (CC) já teve a
     // baixa física: reservar aqui criaria uma reserva fantasma que nunca seria liberada.
@@ -13238,7 +13249,8 @@ function resumoPedidoColeta(p){
     cliente_cidade: p.cliente_cidade || '',
     cliente_uf: p.cliente_uf || '',
     volumes: Number(p.volumes) || null, // sem volume conhecido fica vazio e é exigido na coleta
-    bipado_em: p.ts_fim_bipagem ? new Date(Number(p.ts_fim_bipagem)).toISOString() : (p.data || '')
+    bipado_em: p.ts_fim_bipagem ? new Date(Number(p.ts_fim_bipagem)).toISOString() : (p.data || ''),
+    data_faturamento: p.data_faturamento || ''
   };
 }
 
@@ -13274,15 +13286,35 @@ function cpfValidoColeta(cpf){
 }
 
 // ══ TELA PRINCIPAL ══
-// Por padrão a Coleta mostra só pedidos bipados no mês atual. Os de meses anteriores
-// continuam na fila e aparecem pelo link "mostrar meses anteriores".
+// Por padrão a Coleta mostra só os pedidos FATURADOS no mês atual (data_faturamento).
+// Os faturados em meses anteriores e os ainda sem faturamento continuam na fila e
+// aparecem pelo link "mostrar os outros".
 let COLETA_TODOS = [];
 let COLETA_MOSTRAR_ANTERIORES = false;
-function inicioMesColeta(){ const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString(); }
+function inicioMesColeta(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-01'; }
+function faturadoNoMesColeta(p){ return !!p.data_faturamento && String(p.data_faturamento) >= inicioMesColeta(); }
 function filtrarMesColeta(){
-  const ini = inicioMesColeta();
-  COLETA_PENDENTES = COLETA_MOSTRAR_ANTERIORES ? COLETA_TODOS.slice()
-    : COLETA_TODOS.filter(p => p.bipado_em && p.bipado_em >= ini);
+  COLETA_PENDENTES = COLETA_MOSTRAR_ANTERIORES ? COLETA_TODOS.slice() : COLETA_TODOS.filter(faturadoNoMesColeta);
+}
+// Mantém a data de faturamento da fila em dia quando o pedido é faturado ou a data muda.
+// Só mexe se o pedido estiver na fila (transaction aborta se o nó não existe).
+function atualizarFaturamentoFilaColeta(pedidoId, dataFat){
+  db.ref('aguardando_coleta/'+pedidoId).transaction(atual => atual ? { ...atual, data_faturamento: dataFat || '' } : undefined).catch(()=>{});
+}
+// Itens que entraram na fila antes deste campo existir: busca só a data de faturamento de
+// cada um (leitura mínima, 1 campo por pedido) e grava na fila. Roda uma vez por item.
+async function completarFaturamentoFilaColeta(){
+  const faltando = COLETA_TODOS.filter(p => p.data_faturamento === undefined);
+  if(!faltando.length) return;
+  const updates = {};
+  await Promise.all(faltando.map(async p => {
+    try {
+      const df = (await db.ref('pedidos/'+p.id+'/data_faturamento').once('value')).val() || '';
+      p.data_faturamento = df;
+      updates['aguardando_coleta/'+p.id+'/data_faturamento'] = df;
+    } catch(_){}
+  }));
+  if(Object.keys(updates).length) db.ref().update(updates).catch(()=>{});
 }
 function alternarAnterioresColeta(){
   COLETA_MOSTRAR_ANTERIORES = !COLETA_MOSTRAR_ANTERIORES;
@@ -13290,22 +13322,27 @@ function alternarAnterioresColeta(){
   renderColetaPendentes();
 }
 function avisoAnterioresColeta(){
-  const ini = inicioMesColeta();
-  const n = COLETA_TODOS.filter(p => !(p.bipado_em && p.bipado_em >= ini)).length;
-  if(!n) return '';
-  return `<div style="font-size:13px;margin:8px 0"><a href="javascript:void(0)" onclick="alternarAnterioresColeta()" style="color:var(--accent)">${COLETA_MOSTRAR_ANTERIORES ? 'Mostrar só o mês atual' : `Mostrar meses anteriores (${n} pedido(s))`}</a></div>`;
+  const fora = COLETA_TODOS.filter(p => !faturadoNoMesColeta(p));
+  if(!fora.length) return '';
+  const semFat = fora.filter(p => !p.data_faturamento).length;
+  const antigos = fora.length - semFat;
+  const partes = [];
+  if(antigos) partes.push(`${antigos} faturado(s) em meses anteriores`);
+  if(semFat) partes.push(`${semFat} ainda sem faturamento`);
+  return `<div style="font-size:13px;margin:8px 0"><a href="javascript:void(0)" onclick="alternarAnterioresColeta()" style="color:var(--accent)">${COLETA_MOSTRAR_ANTERIORES ? 'Mostrar só os faturados neste mês' : `Mostrar os outros (${partes.join(', ')})`}</a></div>`;
 }
 
 async function renderColeta(){
   if(!podeVer('coleta')){ toast('Acesso restrito — sem permissão nesta área','error'); return; }
   const pode = temPermissaoEditar('coleta');
-  ['btn-nova-coleta','btn-buscar-bipados'].forEach(id => { const b = document.getElementById(id); if(b) b.style.display = pode ? '' : 'none'; });
+  ['btn-nova-coleta','btn-buscar-bipados','coleta-incluir-wrap'].forEach(id => { const b = document.getElementById(id); if(b) b.style.display = pode ? '' : 'none'; });
   try {
     const snap = await db.ref('aguardando_coleta').once('value');
     const v = snap.val() || {};
     COLETA_TODOS = Object.keys(v).map(id => ({ id, ...v[id] }))
       .sort((a,b) => (Number(a.numero)||0) - (Number(b.numero)||0));
   } catch(e){ toast('Erro ao carregar pedidos aguardando coleta: '+e.message,'error'); }
+  await completarFaturamentoFilaColeta();
   filtrarMesColeta();
   renderColetaPendentes();
   COLETA_HIST = []; COLETA_HIST_FIM = false;
@@ -13318,21 +13355,21 @@ function renderColetaPendentes(){
   if(!el) return;
   const pode = temPermissaoEditar('coleta');
   if(!COLETA_PENDENTES.length){
-    el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:28px">Nenhum pedido bipado aguardando coleta neste mês.</div>' + avisoAnterioresColeta();
+    el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:28px">Nenhum pedido faturado neste mês aguardando coleta.</div>' + avisoAnterioresColeta();
     return;
   }
   const totVol = COLETA_PENDENTES.reduce((s,p) => s + (Number(p.volumes)||0), 0);
   el.innerHTML = `
-    <div style="font-size:13px;color:var(--muted);margin-bottom:8px">${COLETA_PENDENTES.length} pedido(s) · ${totVol} volume(s)${COLETA_MOSTRAR_ANTERIORES ? '' : ' · bipados neste mês'}</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:8px">${COLETA_PENDENTES.length} pedido(s) · ${totVol} volume(s)${COLETA_MOSTRAR_ANTERIORES ? '' : ' · faturados neste mês'}</div>
     ${avisoAnterioresColeta()}
     <div class="table-wrap"><table>
-      <thead><tr><th>Pedido</th><th>Cliente</th><th>Cidade/UF</th><th style="text-align:center">Vol.</th><th>Bipado em</th>${pode?'<th></th>':''}</tr></thead>
+      <thead><tr><th>Pedido</th><th>Cliente</th><th>Cidade/UF</th><th style="text-align:center">Vol.</th><th>Faturado em</th>${pode?'<th></th>':''}</tr></thead>
       <tbody>${COLETA_PENDENTES.map(p => `<tr>
         <td><strong>#${esc(p.numero)}</strong></td>
         <td>${esc(p.cliente_nome)}</td>
         <td>${esc(p.cliente_cidade)}${p.cliente_uf?'/'+esc(p.cliente_uf):''}</td>
         <td style="text-align:center">${Number(p.volumes) ? Number(p.volumes) : '<span style="color:#dc2626" title="Volume não informado na expedição">?</span>'}</td>
-        <td style="font-size:12px;color:var(--muted)">${fmtDataHoraColeta(p.bipado_em)}</td>
+        <td style="font-size:12px;color:var(--muted)">${p.data_faturamento ? fmtData(p.data_faturamento) : '<span style="color:#b45309">não faturado</span>'}</td>
         ${pode?`<td style="text-align:right"><button class="btn btn-outline btn-sm" title="Tirar da lista (ex.: pedido já entregue antes do sistema de coleta)" onclick="removerDaFilaColeta('${esc(p.id)}')">✕</button></td>`:''}
       </tr>`).join('')}</tbody>
     </table></div>`;
@@ -13350,29 +13387,73 @@ async function removerDaFilaColeta(pid){
   } catch(e){ toast('Erro: '+e.message,'error'); }
 }
 
-// Inclui na fila os pedidos bipados recentes que não estão nela (ex.: bipados antes desta
-// tela existir). Lê só os pedidos do mês atual pelo índice 'data', e só quando clicado.
+// Inclui na fila os pedidos FATURADOS neste mês, já bipados e ainda não coletados. Usa o
+// índice 'data_faturamento' (já publicado): lê só os faturados do mês. Só roda no clique.
 async function buscarBipadosRecentes(){
   if(!temPermissaoEditar('coleta')){ toast('Sem permissão de edição na Coleta','error'); return; }
   try {
-    toast('Buscando pedidos bipados deste mês…');
-    const ini = inicioMesColeta();
-    const snap = await db.ref('pedidos').orderByChild('data').startAt(ini).once('value');
+    toast('Buscando pedidos faturados neste mês…');
+    const snap = await db.ref('pedidos').orderByChild('data_faturamento').startAt(inicioMesColeta()).once('value');
     const v = snap.val() || {};
-    const naFila = new Set(COLETA_TODOS.map(p => p.id));
+    const naFila = {};
+    COLETA_TODOS.forEach(p => { naFila[p.id] = p; });
     const updates = {};
-    let n = 0;
+    let n = 0, naoBipados = 0;
     Object.keys(v).forEach(id => {
       const p = v[id];
-      if(p && p.status === 'CC' && !p.coleta_id && !naFila.has(id)){
-        updates['aguardando_coleta/'+id] = resumoPedidoColeta(p);
-        n++;
+      if(!p || p.coleta_id || p.status === 'Cancelado') return;
+      if(p.status !== 'CC'){ naoBipados++; return; }
+      if(naFila[id]){
+        // já está na fila: só acerta a data de faturamento, se mudou
+        if(naFila[id].data_faturamento !== p.data_faturamento) updates['aguardando_coleta/'+id+'/data_faturamento'] = p.data_faturamento;
+        return;
       }
+      updates['aguardando_coleta/'+id] = resumoPedidoColeta(p);
+      n++;
     });
-    if(n) await db.ref().update(updates);
-    toast(n ? `✓ ${n} pedido(s) incluído(s) na lista de coleta` : 'Nenhum pedido bipado sem coleta neste mês', n ? 'success' : '');
+    if(Object.keys(updates).length) await db.ref().update(updates);
+    const avisoNaoBip = naoBipados ? ` · ${naoBipados} faturado(s) ainda não bipado(s)` : '';
+    toast((n ? `✓ ${n} pedido(s) incluído(s) na lista de coleta` : 'Nenhum pedido faturado neste mês faltando na lista') + avisoNaoBip, n ? 'success' : '');
     await renderColeta();
   } catch(e){ toast('Erro ao buscar pedidos: '+e.message,'error'); }
+}
+
+// Inclui um pedido pelo número e, quando não dá, explica o motivo (ainda não bipado,
+// já coletado, cancelado). Lê só aquele pedido, pelo índice 'numero'.
+async function incluirPedidoNaColeta(){
+  if(!temPermissaoEditar('coleta')){ toast('Sem permissão de edição na Coleta','error'); return; }
+  const el = document.getElementById('coleta-incluir-num');
+  const num = parseInt(String(el?.value||'').replace(/\D/g,''), 10);
+  if(!num){ toast('Digite o número do pedido','error'); el?.focus(); return; }
+  try {
+    let snap = await db.ref('pedidos').orderByChild('numero').equalTo(num).once('value');
+    if(!snap.exists()) snap = await db.ref('pedidos').orderByChild('numero').equalTo(String(num)).once('value');
+    const v = snap.val() || {};
+    const id = Object.keys(v)[0];
+    if(!id){ toast(`Pedido #${num} não encontrado`,'error'); return; }
+    const p = v[id];
+    if(p.status === 'Cancelado'){ toast(`Pedido #${num} está cancelado`,'error'); return; }
+    if(p.status !== 'CC'){
+      toast(`Pedido #${num} ainda não foi bipado (está "${statusInfo(p.status).label}"). Conclua a bipagem na Separação.`,'error');
+      return;
+    }
+    if(p.coleta_id){
+      const c = await obterColeta(p.coleta_id, true);
+      toast(`Pedido #${num} já saiu no romaneio${c?.numero ? ' Nº '+c.numero : ''} em ${fmtDataHoraColeta(p.coletado_em)}`,'error');
+      return;
+    }
+    const resumo = resumoPedidoColeta(p);
+    const visivelNoMes = faturadoNoMesColeta(resumo);
+    if(!COLETA_TODOS.some(x => x.id === id)){
+      await db.ref('aguardando_coleta/'+id).set(resumo);
+      toast(`✓ Pedido #${num} incluído na lista de coleta`,'success');
+    } else {
+      toast(`Pedido #${num} já estava na lista de coleta`);
+    }
+    if(!visivelNoMes) COLETA_MOSTRAR_ANTERIORES = true; // sem faturamento ou faturado antes: mostra para não "sumir"
+    if(el) el.value = '';
+    await renderColeta();
+  } catch(e){ toast('Erro ao buscar o pedido: '+e.message,'error'); }
 }
 
 // ══ TRANSPORTADORAS ══
@@ -13537,6 +13618,26 @@ function aplicarNFColeta(pid, valor){
     s.nfTexto = String(Number(d));
   } else {
     s.nfErro = 'Digite só o número da NF ou bipe o código de barras da DANFE.';
+  }
+  // A mesma NF não pode entrar em dois pedidos do mesmo romaneio
+  if(s.nf){
+    const outroId = Object.keys(COLETA_SELECAO).find(id => id !== pid && COLETA_SELECAO[id].nf && COLETA_SELECAO[id].nf.numero === s.nf.numero);
+    if(outroId){
+      const outro = COLETA_PENDENTES.find(x => x.id === outroId);
+      s.nfErro = `A NF ${s.nf.numero} já foi lida no pedido #${outro?.numero||''} desta coleta.`;
+      s.nf = null; s.nfTexto = '';
+    }
+  }
+  // Nem em outro romaneio já registrado (1 leitura pequena no índice coletas_nf)
+  if(s.nf){
+    const numero = s.nf.numero;
+    db.ref('coletas_nf/'+numero).once('value').then(snap => {
+      if(!snap.exists() || !COLETA_SELECAO[pid] || COLETA_SELECAO[pid].nf?.numero !== numero) return;
+      COLETA_SELECAO[pid].nf = null;
+      COLETA_SELECAO[pid].nfTexto = '';
+      COLETA_SELECAO[pid].nfErro = `A NF ${numero} já saiu em outro romaneio.`;
+      renderColetaLinhas();
+    }).catch(()=>{});
   }
   renderColetaLinhas();
   // Leitor USB: depois de uma leitura certa, já posiciona no próximo pedido sem NF
@@ -13918,12 +14019,24 @@ async function confirmarColeta(modoPapel){
       return;
     }
 
-    // 2) NF que já consta em outro romaneio
+    // 2) NF repetida nesta coleta ou já registrada em outro romaneio: bloqueia
+    const nfsRepetidas = [];
+    const vistas = {};
+    ids.forEach(pid => {
+      const n = COLETA_SELECAO[pid].nf.numero;
+      if(vistas[n]) nfsRepetidas.push(`• A NF ${n} foi informada em mais de um pedido desta coleta.`);
+      vistas[n] = true;
+    });
     await Promise.all(ids.map(async pid => {
       const s = COLETA_SELECAO[pid];
       const snap = await db.ref('coletas_nf/'+s.nf.numero).once('value');
-      if(snap.exists()) avisos.push(`• A NF ${s.nf.numero} já consta em outro romaneio.`);
+      if(snap.exists()) nfsRepetidas.push(`• A NF ${s.nf.numero} já saiu em outro romaneio.`);
     }));
+    if(nfsRepetidas.length){
+      abortar();
+      await confirmCustom('Não foi possível registrar a coleta:\n\n' + nfsRepetidas.map(esc).join('\n') + '\n\nConfira o número das notas.', 'OK');
+      return;
+    }
     if(avisos.length && !await confirmCustom('Confira antes de continuar:\n\n' + avisos.join('\n') + '\n\nRegistrar mesmo assim?', 'Registrar')){
       abortar(); return;
     }
@@ -20438,6 +20551,7 @@ async function finalizarPedidosEmMassa(){
     updates['pedidos/'+id+'/status'] = 'CC';
     updates['pedidos/'+id+'/ts_fim_bipagem'] = agoraTs();
     updates['pedidos/'+id+'/bipado_por'] = (usuarioLogado?.nome||'') + ' (finalização em massa)';
+    if(!p.coleta_id) updates['aguardando_coleta/'+id] = resumoPedidoColeta({ ...p, ts_fim_bipagem: agoraTs() });
     finalizados++;
   }
 
