@@ -4433,6 +4433,7 @@ async function renderPedidos(usarCache){
         </div>
         <div class="pedido-card-info">👤 <span>${esc(p.cliente_nome)}</span></div>
         <div class="pedido-card-info">📦 <span>${(p.itens||[]).length} iten(s)</span> · ${p.condicao||''}</div>
+        ${htmlAlertaClientePedido(p, true)}
         ${p.obs ? `<div style="margin-top:6px;padding:5px 10px;background:#fffbeb;border-left:3px solid #fde68a;border-radius:0 6px 6px 0;font-size:12px;color:#92400e">⚠️ ${p.obs}</div>` : ''}
         <div class="pedido-card-actions">
           <button class="btn btn-outline btn-sm" onclick="verPedido('${p.id}')">Ver detalhes</button>
@@ -4468,6 +4469,7 @@ async function renderPedidos(usarCache){
           ${usuarioLogado.admin&&p.status!=='Cancelado'?`<button class="btn btn-sm btn-danger" onclick="cancelarPedido('${p.id}')">Cancelar</button>`:''}
         </div>
       </div>
+      ${htmlAlertaClientePedido(p, true)}
       ${p.obs ? `<div style="margin-top:6px;padding:4px 10px;background:#fffbeb;border-left:3px solid #fde68a;border-radius:0 4px 4px 0;font-size:11px;color:#92400e">⚠️ ${p.obs}</div>` : ''}
     </div>`;
   }).join('') || '<div style="text-align:center;color:var(--muted);padding:24px">Nenhum pedido encontrado</div>';
@@ -4822,6 +4824,29 @@ async function corrigirVendedorPedidosW3EmMassa(){
   toast(`✓ ${count} pedido(s) corrigido(s)`,'success');
 }
 
+// Alerta ao Vender do cadastro do cliente, gravado no próprio pedido (cliente_alerta).
+// Ao salvar: se o cliente foi escolhido agora, usa o alerta do cadastro; se o pedido está
+// sendo editado sem trocar o cliente, mantém o que já estava gravado no pedido.
+function alertaClienteParaSalvar(c, original){
+  const mesmoCliente = original && original.cliente_codigo === c?.codigo;
+  if(mesmoCliente && original.cliente_alerta !== undefined) return original.cliente_alerta || '';
+  const cad = CLIENTES_DB.find(x=>x.codigo===c?.codigo);
+  return (cad ? cad.alerta : c?.alerta) || '';
+}
+// Pedidos antigos (salvos antes deste campo existir) usam o cadastro já carregado em memória — sem leitura extra no Firebase.
+function alertaClienteDoPedido(p){
+  if(!p) return '';
+  if(p.cliente_alerta !== undefined) return p.cliente_alerta || '';
+  return CLIENTES_DB.find(x=>x.codigo===p.cliente_codigo)?.alerta || '';
+}
+function htmlAlertaClientePedido(p, compacto){
+  const a = alertaClienteDoPedido(p);
+  if(!a) return '';
+  return compacto
+    ? `<div style="margin-top:6px;padding:4px 10px;background:#fef3c7;border-left:3px solid #d97706;border-radius:0 6px 6px 0;font-size:12px;color:#92400e"><strong>⚠️ Cliente:</strong> ${esc(a)}</div>`
+    : `<div style="margin:-8px 0 16px;border:2px solid #d97706;background:#fef3c7;padding:10px 14px;border-radius:8px"><div style="font-weight:700;color:#92400e">⚠️ Atenção a este cliente:</div><div style="color:#92400e;margin-top:2px">${esc(a)}</div></div>`;
+}
+
 async function verPedido(id){
   try {
     const snap = await db.ref('pedidos/'+id).once('value');
@@ -4851,6 +4876,7 @@ async function verPedido(id){
         <strong>${esc(p.cliente_nome)}</strong><br>
         <span style="font-size:13px;color:var(--muted)">${p.cliente_cpf||''} · ${p.cliente_cidade||''}/${p.cliente_uf||''}</span>
       </div>
+      ${htmlAlertaClientePedido(p)}
       ${(() => {
         const ocultarVal = usuarioLogado && ehExpedicao();
         return `
@@ -7039,6 +7065,7 @@ async function confirmarPedido(){
       cliente_cidade:c.cidade||'', cliente_uf:c.uf||'',
       cliente_endereco: c.endereco||c.end||'', cliente_cep: c.cep||'',
       cliente_telefone: c.telefone||c.tel||'',
+      cliente_alerta: alertaClienteParaSalvar(c, pedidoOriginal),
       vendedor_id: vendedorIdFinal,
       vendedor_nome: vendedorNomeFinal,
       digitado_por_id: usuarioLogado.id, digitado_por_nome: usuarioLogado.nome,
@@ -7216,6 +7243,7 @@ async function salvarComoOrcamento(){
       cliente_cidade:c.cidade||'', cliente_uf:c.uf||'',
       cliente_endereco: c.endereco||c.end||'', cliente_cep: c.cep||'',
       cliente_telefone: c.telefone||c.tel||'',
+      cliente_alerta: alertaClienteParaSalvar(c, dadosOriginais),
       vendedor_id: vendedorIdFinalOrc,
       vendedor_nome: vendedorNomeFinalOrc,
       digitado_por_id: dadosOriginais.digitado_por_id || usuarioLogado.id,
@@ -12527,6 +12555,7 @@ async function renderSeparacao(){
         </div>
         ${p.baixa_estoque_ts ? `<div style="color:#dc2626;font-weight:700;font-size:13px;margin-top:4px">⚠️ Finalização interrompida — abra e clique em "Concluir pedido"</div>` : ''}
         <div class="pedido-card-info">📦 Itens separados: <span>${separados} / ${totalItens}</span> (${pct}%)</div>
+        ${htmlAlertaClientePedido(p, true)}
         ${p.obs ? `<div style="font-size:12px;margin-top:6px;padding:6px 10px;background:#fffbea;border-left:3px solid #f59e0b;border-radius:0 6px 6px 0;color:#92400e"><strong>⚠️ Obs:</strong> ${p.obs}</div>` : ''}
         <div style="background:#f0f0f0;border-radius:6px;height:6px;margin-top:8px;overflow:hidden">
           <div style="background:#7c3aed;height:100%;width:${pct}%"></div>
