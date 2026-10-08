@@ -687,6 +687,7 @@ tbody td{padding:11px 16px;font-size:14px}
           <select id="filter-fornecedor-produto" onchange="paginaProdutos=1;renderProdutos()" class="search-input" style="width:auto">
             <option value="">Todos os fornecedores</option>
           </select>
+          <button class="btn btn-outline btn-sm" onclick="abrirEtiquetasPorLocalizacao()" title="Escolher várias etiquetas de prateleira e imprimir de uma vez">🏷️ Etiquetas por Localização</button>
           <button class="btn btn-outline btn-sm admin-only" onclick="abrirModalNovoProdutoVendavel()">+ Novo Produto</button>
           <button class="btn btn-primary admin-only" onclick="abrirModalNovoItem()">+ Novo Insumo</button>
           <button class="btn btn-outline btn-sm admin-only" style="display:none;color:#d97706;border-color:#d97706" onclick="verificarReceitasSemProduto()">🔍 Receitas sem Cadastro</button>
@@ -1219,6 +1220,7 @@ tbody td{padding:11px 16px;font-size:14px}
     <div id="tab-separacao" style="display:none">
       <div class="section-header">
         <div class="section-title">📦 Separação de Pedidos</div>
+        <button class="btn btn-outline btn-sm" onclick="abrirEtiquetasPorLocalizacao()" title="Escolher várias etiquetas de prateleira e imprimir de uma vez">🏷️ Etiquetas por Localização</button>
       </div>
       <div id="separacao-lista"></div>
     </div>
@@ -8693,6 +8695,7 @@ async function concluirOP(key){
     INSUMOS_DB = []; // força recarregar com novos saldos
     await renderProducao();
     toast(`✅ OP #${op.numero} concluída! Estoque atualizado.`,'success');
+    mostrarOndeGuardar(`Produção concluída — OP #${op.numero}`, [{ codigo:op.produto_codigo, nome:op.produto_nome, qtd:qtdProduzida, tipo:'produto' }]);
   } catch(e){
     if(!baixaIniciada){
       // Nada foi movimentado: libera a trava para poder tentar de novo
@@ -9686,6 +9689,94 @@ function imprimirEtiquetaEstoque(codigo, tipo){
   setTimeout(()=>win.print(), 300);
 }
 
+// ══════════════════════════════════════════════
+// ETIQUETAS POR LOCALIZAÇÃO — lista produtos/insumos COM endereço em ordem de rota,
+// filtro por endereço (ex.: "R1-P01") ou nome/código, marca e imprime em lote
+// (mesmo layout 100x60 da etiqueta de estoque, uma por página).
+// Usa só PRODUTOS_DB/INSUMOS_DB da memória — insumos só são baixados se ainda não estiverem carregados.
+// ══════════════════════════════════════════════
+let ETQ_LOC_LISTA = [], ETQ_LOC_MARCADOS = new Set();
+async function abrirEtiquetasPorLocalizacao(){
+  if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
+  if(!INSUMOS_DB.length){ try { await carregarInsumosFirebase(); } catch(_){} }
+  const itens = [];
+  PRODUTOS_DB.forEach(p => { const l = String(p.localizacao||'').trim(); if(l && !p._temp) itens.push({ codigo:p.codigo, nome:p.nome||'', loc:l, tipo:'produto' }); });
+  INSUMOS_DB.forEach(i => { const l = String(i.localizacao||'').trim(); if(l) itens.push({ codigo:i.codigo, nome:i.nome||'', loc:l, tipo:'insumo' }); });
+  itens.sort((a,b) => a.loc.localeCompare(b.loc,'pt-BR',{numeric:true}) || a.codigo.localeCompare(b.codigo));
+  ETQ_LOC_LISTA = itens; ETQ_LOC_MARCADOS = new Set();
+  document.getElementById('etqloc-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'etqloc-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.innerHTML = `<div style="background:var(--surface,#fff);color:var(--text,#111);border-radius:12px;max-width:720px;width:100%;max-height:88vh;display:flex;flex-direction:column;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,.4)">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;margin-bottom:4px">🏷️ Etiquetas por Localização</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${itens.length} item(ns) com endereço, em ordem de rota. Digite um endereço (ex.: <strong>R1-P01</strong> = prateleira inteira, <strong>R1-P01-V2</strong> = um vão) ou nome/código.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <input id="etqloc-filtro" class="search-input" style="flex:1;min-width:180px" placeholder="Filtrar: R1-P01, torneira, TOR-1001..." oninput="renderEtiquetasPorLocalizacao()">
+        <button class="btn btn-outline btn-sm" onclick="marcarEtiquetasFiltradas(true)">☑ Marcar filtrados</button>
+        <button class="btn btn-outline btn-sm" onclick="marcarEtiquetasFiltradas(false)">☐ Desmarcar</button>
+      </div>
+      <div id="etqloc-lista" style="flex:1;overflow:auto;border:1px solid var(--border,#ddd);border-radius:8px"></div>
+      <div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:14px">
+        <span id="etqloc-contador" style="font-size:13px;color:var(--muted)">0 marcada(s)</span>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm" onclick="document.getElementById('etqloc-overlay').remove()">Fechar</button>
+          <button class="btn btn-primary btn-sm" onclick="imprimirEtiquetasLocalizacaoMarcadas()">🖨️ Imprimir marcadas</button>
+        </div>
+      </div></div>`;
+  document.body.appendChild(ov);
+  renderEtiquetasPorLocalizacao();
+  document.getElementById('etqloc-filtro').focus();
+}
+function etiquetasLocFiltradas(){
+  const f = String(document.getElementById('etqloc-filtro')?.value||'').trim().toUpperCase().replace(/\s+/g,'');
+  const fTexto = String(document.getElementById('etqloc-filtro')?.value||'').trim().toLowerCase();
+  if(!f) return ETQ_LOC_LISTA;
+  return ETQ_LOC_LISTA.filter(it => it.loc.toUpperCase().replace(/\s+/g,'').startsWith(f)
+    || it.codigo.toUpperCase().includes(f) || it.nome.toLowerCase().includes(fTexto));
+}
+function chaveEtq(it){ return it.tipo+'|'+it.codigo; }
+function renderEtiquetasPorLocalizacao(){
+  const el = document.getElementById('etqloc-lista'); if(!el) return;
+  const lista = etiquetasLocFiltradas();
+  el.innerHTML = !lista.length ? '<div style="padding:16px;color:var(--muted);font-size:13px">Nenhum item com esse filtro.</div>'
+    : lista.map(it => { const k = chaveEtq(it); return `<label style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid var(--border,#eee);cursor:pointer;font-size:13px">
+        <input type="checkbox" ${ETQ_LOC_MARCADOS.has(k)?'checked':''} onchange="alternarEtiquetaLoc('${esc(k).replace(/'/g,"\\'")}',this.checked)">
+        <span style="background:#1F3A5F;color:#fff;border-radius:5px;padding:2px 8px;font-weight:700;white-space:nowrap">${esc(it.loc)}</span>
+        <span><strong>${esc(it.codigo)}</strong> — ${esc(it.nome)}${it.tipo==='insumo'?' <em style="color:#888">(insumo)</em>':''}</span></label>`; }).join('');
+  atualizarContadorEtqLoc();
+}
+function alternarEtiquetaLoc(k, marcado){ marcado ? ETQ_LOC_MARCADOS.add(k) : ETQ_LOC_MARCADOS.delete(k); atualizarContadorEtqLoc(); }
+function marcarEtiquetasFiltradas(marcar){
+  etiquetasLocFiltradas().forEach(it => marcar ? ETQ_LOC_MARCADOS.add(chaveEtq(it)) : ETQ_LOC_MARCADOS.delete(chaveEtq(it)));
+  renderEtiquetasPorLocalizacao();
+}
+function atualizarContadorEtqLoc(){
+  const c = document.getElementById('etqloc-contador'); if(c) c.textContent = ETQ_LOC_MARCADOS.size + ' marcada(s)';
+}
+function imprimirEtiquetasLocalizacaoMarcadas(){
+  const sel = ETQ_LOC_LISTA.filter(it => ETQ_LOC_MARCADOS.has(chaveEtq(it)));
+  if(!sel.length){ toast('Marque ao menos uma etiqueta','error'); return; }
+  const win = window.open('', '_blank'); if(!win){ toast('O navegador bloqueou a janela de impressão','error'); return; }
+  win.document.write(`<html><head><title>Etiquetas de Estoque (${sel.length})</title>
+    <style>
+      @page { size: 100mm 60mm; margin: 0; }
+      body { margin: 0; font-family: Arial, sans-serif; }
+      .etq { width: 100mm; height: 60mm; box-sizing: border-box; padding: 5mm; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; break-after: page; overflow: hidden; }
+      .etq:last-child { page-break-after: auto; break-after: auto; }
+      .nome { font-size: 16px; font-weight: 700; line-height: 1.25; }
+      .loc-label { font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 0.5px; }
+      .loc-valor { font-size: 18px; font-weight: 700; }
+      .codigo { font-size: 42px; font-weight: 900; text-align: center; letter-spacing: 1px; }
+    </style></head><body>
+    ${sel.map(it => `<div class="etq"><div class="nome">${esc(it.nome)}</div>
+      <div><div class="loc-label">Localização</div><div class="loc-valor">${esc(it.loc)}</div></div>
+      <div class="codigo">${esc(it.codigo)}</div></div>`).join('')}
+    </body></html>`);
+  win.document.close();
+  setTimeout(()=>win.print(), 300);
+}
+
 // Etiqueta de PRODUTO (50mm x 30mm) — colada na embalagem: nome, código de barras, código do item
 function imprimirEtiquetaLogoAplic(){
   const win = window.open('', '_blank');
@@ -10393,6 +10484,46 @@ function chaveItemCompra(item, idx){
   return idx + '_' + (item.tipo==='insumo'?'i':'v') + '_' + String(item.codigo||'').replace(/[.#$\[\]\/]/g,'-');
 }
 
+// ══════════════════════════════════════════════
+// ONDE GUARDAR — depois de uma ENTRADA (OP concluída / compra recebida) mostra para onde
+// cada item vai na prateleira, em ordem de rota. Só exibição, zero leitura no Firebase.
+// ══════════════════════════════════════════════
+function mostrarOndeGuardar(titulo, itens){
+  if(!itens || !itens.length) return;
+  const linhas = itens.map((it, i) => {
+    const base = it.tipo === 'insumo' ? INSUMOS_DB.find(x=>x.codigo===it.codigo) : PRODUTOS_DB.find(x=>x.codigo===it.codigo);
+    return { ...it, i, loc: String(base?.localizacao||'').trim() };
+  }).sort((a,b) => (!a.loc - !b.loc) || a.loc.localeCompare(b.loc,'pt-BR',{numeric:true}) || (a.i-b.i));
+  const semEnd = linhas.filter(l => !l.loc).length;
+  const tabela = (imp) => `<table style="width:100%;border-collapse:collapse;font-size:${imp?'12px':'13px'}">
+      <thead><tr style="background:#1F3A5F;color:#fff"><th style="padding:7px;text-align:left">📍 Guardar em</th><th style="padding:7px;text-align:left">Item</th><th style="padding:7px;text-align:center">Qtd</th>${imp?'<th style="padding:7px">✓</th>':''}</tr></thead>
+      <tbody>${linhas.map(l => `<tr style="border-bottom:1px solid #ddd">
+        <td style="padding:7px;white-space:nowrap">${l.loc ? `<span style="background:#1F3A5F;color:#fff;border-radius:5px;padding:3px 9px;font-weight:700;font-size:${imp?'13px':'15px'}">${esc(l.loc)}</span>` : '<span style="color:#dc2626;font-weight:700">SEM ENDEREÇO</span>'}</td>
+        <td style="padding:7px"><strong>${esc(l.codigo)}</strong> — ${esc(l.nome||'')}${l.tipo==='insumo'?' <em style="color:#888">(insumo)</em>':''}</td>
+        <td style="padding:7px;text-align:center;font-weight:700">${Number(l.qtd||0).toLocaleString('pt-BR')}</td>${imp?'<td style="padding:7px;width:30px;border:1px solid #999"></td>':''}</tr>`).join('')}</tbody></table>`;
+  document.getElementById('ondeguardar-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'ondeguardar-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.innerHTML = `<div style="background:var(--surface,#fff);color:var(--text,#111);border-radius:12px;max-width:640px;width:100%;max-height:85vh;overflow:auto;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,.4)">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;margin-bottom:4px">📦 Onde guardar</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:14px">${esc(titulo)} · ${linhas.length} item(ns) em ordem de rota</div>
+      ${tabela(false)}
+      ${semEnd ? `<div style="margin-top:10px;font-size:12px;color:#dc2626">⚠️ ${semEnd} item(ns) sem endereço — defina a localização no cadastro antes de guardar.</div>` : ''}
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+        <button class="btn btn-sm" id="ondeguardar-imprimir">🖨️ Imprimir lista de guarda</button>
+        <button class="btn btn-primary btn-sm" onclick="document.getElementById('ondeguardar-overlay').remove()">OK</button>
+      </div></div>`;
+  document.body.appendChild(ov);
+  document.getElementById('ondeguardar-imprimir').onclick = () => {
+    const w = window.open('', '_blank'); if(!w) return;
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Lista de guarda</title></head>
+      <body style="font-family:Arial,sans-serif;padding:20px"><h2 style="margin:0 0 4px">Lista de guarda</h2>
+      <div style="color:#555;margin-bottom:12px">${esc(titulo)} · ${new Date().toLocaleString('pt-BR')}</div>${tabela(true)}</body></html>`);
+    w.document.close(); w.focus(); setTimeout(()=>w.print(), 300);
+  };
+}
+
 async function darEntradaEstoqueCompra(compraId, compra, statusAnterior){
   const snapAplicado = await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado').once('value');
   const aplicados = snapAplicado.val() || {};
@@ -10418,6 +10549,7 @@ async function darEntradaEstoqueCompra(compraId, compra, statusAnterior){
 
   let entraram = 0, pulados = 0;
   const naoLocalizados = [];
+  const paraGuardar = [];
 
   for(let idx = 0; idx < compra.itens.length; idx++){
     const item = compra.itens[idx];
@@ -10446,7 +10578,9 @@ async function darEntradaEstoqueCompra(compraId, compra, statusAnterior){
     // exatamente de onde parou.
     await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado/'+chaveItem).set({ qtd:item.qtd, ts:agoraTs() });
     entraram++;
+    paraGuardar.push({ codigo:item.codigo, nome:item.nome, qtd:item.qtd, tipo: item.tipo==='insumo' ? 'insumo' : 'produto' });
   }
+  mostrarOndeGuardar(`Compra recebida — ${compra.fornecedor||''}${compra.nf ? ' · NF '+compra.nf : ''}`, paraGuardar);
 
   if(pulados){
     toast(`✓ ${entraram} item(ns) lançados · ${pulados} já haviam entrado antes`,'success');
@@ -15545,6 +15679,10 @@ async function salvarEdicaoProduto(codigoAntigo){
 
   const existente = PRODUTOS_DB.find(x=>x.codigo===codigoAntigo);
   const isNovo = !existente || codigoAntigo === '__NOVO__';
+  if(localizacao && normEndereco(localizacao) !== normEndereco(existente?.localizacao)){
+    const ocupante = produtoNoEndereco(localizacao, codigoAntigo);
+    if(ocupante){ avisoEnderecoOcupado(localizacao, ocupante); return; }
+  }
   // O saldo NÃO vai no update do cadastro. O número do formulário foi lido quando o modal
   // abriu: regravá-lo apagaria em silêncio toda venda, produção ou entrada feita no
   // intervalo. Produto novo nasce com o saldo digitado; produto existente só muda o saldo
@@ -15726,6 +15864,11 @@ async function salvarNovoProdutoVendavel(codigoTemp){
   if(conflito){ toast(`Código "${novoCodigo}" já existe — ${conflito.nome}`,'error'); return; }
   const conflitoInsumo = INSUMOS_DB.find(x=>x.codigo===novoCodigo);
   if(conflitoInsumo){ toast(`O código "${novoCodigo}" já está em uso pelo INSUMO "${conflitoInsumo.nome}". Use outro.`,'error'); return; }
+  const locNovo = document.getElementById('pd-localizacao')?.value.trim()||'';
+  if(locNovo){
+    const ocupante = produtoNoEndereco(locNovo, codigoTemp);
+    if(ocupante){ avisoEnderecoOcupado(locNovo, ocupante); return; }
+  }
   const gtin = document.getElementById('pd-gtin')?.value.trim()||'';
   if(gtin){
     const dup = PRODUTOS_DB.find(x=>!x._temp && x.gtin && x.gtin===gtin) || INSUMOS_DB.find(x=>x.gtin && x.gtin===gtin);
@@ -20922,6 +21065,20 @@ function importarCadastroCompletoProdutos(){
 }
 
 // ══════════════════════════════════════════════
+// BLOQUEIO DE ENDEREÇO DUPLICADO — um endereço = um produto.
+// Checagem na memória (PRODUTOS_DB): zero leitura extra no Firebase.
+// Só barra quando o endereço é NOVO/ALTERADO.
+// ══════════════════════════════════════════════
+function normEndereco(v){ return String(v||'').trim().toUpperCase().replace(/\s+/g,''); }
+function produtoNoEndereco(endereco, ignorarCodigo){
+  const e = normEndereco(endereco); if(!e) return null;
+  return PRODUTOS_DB.find(x => !x._temp && x.codigo!==ignorarCodigo && normEndereco(x.localizacao)===e) || null;
+}
+function avisoEnderecoOcupado(endereco, ocupante){
+  toast(`O endereço "${endereco}" já está ocupado por ${ocupante.codigo} – ${ocupante.nome}. Tire o endereço desse produto antes ou escolha outro.`,'error');
+}
+
+// ══════════════════════════════════════════════
 // ENDEREÇOS DO ESTOQUE — grava SÓ produtos/<codigo>/localizacao, num único update() multi-caminho.
 // Zero leituras extras no Firebase (usa PRODUTOS_DB da memória) e só escreve o que mudou.
 // Código que não existe no cadastro é ignorado — nunca cria nó novo em produtos/.
@@ -20974,10 +21131,23 @@ async function importarEnderecosEstoque(){
       enderecoPorCodigo[prod.codigo] = end;
     }
 
-    // Endereço usado por mais de um produto — só avisa (pode ser intencional)
+    // BLOQUEIO: simula o cadastro depois da importação e barra se algum endereço da planilha
+    // acabar com 2+ produtos (repetido na planilha OU já usado por produto fora dela).
     const usoEndereco = {};
-    Object.entries(enderecoPorCodigo).forEach(([c,e]) => { (usoEndereco[e] = usoEndereco[e] || []).push(c); });
-    const enderecosRepetidos = Object.entries(usoEndereco).filter(([,cs]) => cs.length > 1);
+    PRODUTOS_DB.forEach(p => {
+      if(p._temp) return;
+      const loc = enderecoPorCodigo[p.codigo] !== undefined ? enderecoPorCodigo[p.codigo] : (limparAusentes ? '' : (p.localizacao||''));
+      const e = normEndereco(loc); if(!e) return;
+      (usoEndereco[e] = usoEndereco[e] || []).push(p.codigo);
+    });
+    const conflitos = Object.entries(usoEndereco)
+      .filter(([, cs]) => cs.length > 1 && cs.some(c => enderecoPorCodigo[c] !== undefined));
+    if(conflitos.length){
+      resultEl.innerHTML = `<span style="color:#dc2626;font-weight:700">⛔ Importação bloqueada — ${conflitos.length} endereço(s) ficariam com mais de um produto. Nada foi gravado.</span><br>`
+        + `<span style="color:#dc2626">${conflitos.slice(0,30).map(([e,cs]) => esc(e)+': '+cs.map(esc).join(', ')).join('<br>')}${conflitos.length>30?'<br>…':''}</span>`
+        + `<br><span style="color:var(--muted)">Corrija a planilha${limparAusentes ? '' : ' ou marque "Apagar a localização dos produtos que NÃO estão na planilha"'} e importe de novo.</span>`;
+      return;
+    }
 
     const updates = {};
     let alterados = 0, iguais = 0, limpos = 0;
@@ -21013,7 +21183,6 @@ async function importarEnderecosEstoque(){
     let html = `<span style="color:var(--success)">✓ ${alterados} endereço(s) gravado(s)` + (limpos ? ` · 🧹 ${limpos} localização(ões) apagada(s)` : '') + (iguais ? ` · ${iguais} já estavam iguais` : '') + '</span>';
     if(naoEncontrados.length) html += `<br><span style="color:#d97706">⚠️ ${naoEncontrados.length} código(s) não existem no cadastro e foram ignorados: ${naoEncontrados.slice(0,30).map(esc).join(', ')}${naoEncontrados.length>30?'…':''}</span>`;
     if(codigosRepetidos.length) html += `<br><span style="color:#d97706">⚠️ Código(s) repetido(s) na planilha (valeu a última linha): ${[...new Set(codigosRepetidos)].map(esc).join(', ')}</span>`;
-    if(enderecosRepetidos.length) html += `<br><span style="color:#d97706">⚠️ ${enderecosRepetidos.length} endereço(s) com mais de um produto: ${enderecosRepetidos.slice(0,15).map(([e,cs]) => esc(e)+' ('+cs.map(esc).join(', ')+')').join(' · ')}${enderecosRepetidos.length>15?'…':''}</span>`;
     resultEl.innerHTML = html;
     toast(`✓ ${alterados} endereço(s) atualizado(s)`, 'success');
   } catch(err){
