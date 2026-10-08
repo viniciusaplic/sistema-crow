@@ -8521,25 +8521,6 @@ function confirmarImpressaoEtiquetasOP(){
   imprimirEtiquetasProdutoEmLote(opContextoEtiquetas.codigo, opContextoEtiquetas.tipo, qtd);
 }
 
-// ── Etiqueta de produto (50x30mm) ──
-// Código de barras com tamanho FÍSICO fixo, nunca encolhido para caber texto:
-// - módulo (barra mais fina) = 0,375mm = exatamente 3 pontos numa térmica de 203dpi (barras sem distorção)
-// - zonas de silêncio (área branca) dos dois lados, exigidas pelo leitor — antes o código do produto
-//   ficava colado nas barras e o código inteiro tinha só ~30mm, por isso vários itens não liam.
-const ETQ_MODULO_MM = 0.375;
-function gerarSvgCodigoBarrasEtiqueta(gtinLimpo){
-  const svgTemp = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  JsBarcode(svgTemp, gtinLimpo, { format: "EAN13", displayValue: true, font: "Arial", fontSize: 9, width: 1, height: 30, margin: 0, marginRight: 7, marginTop: 0, marginBottom: 0, textMargin: 1, background: "#ffffff", lineColor: "#000000" });
-  const vb = (svgTemp.getAttribute('viewBox')||'').split(/\s+/).map(Number);
-  const w = vb[2] || parseFloat(svgTemp.getAttribute('width')) || 114;
-  const h = vb[3] || parseFloat(svgTemp.getAttribute('height')) || 40;
-  svgTemp.setAttribute('width', (w*ETQ_MODULO_MM).toFixed(2)+'mm');
-  svgTemp.setAttribute('height', (h*ETQ_MODULO_MM).toFixed(2)+'mm');
-  svgTemp.setAttribute('shape-rendering', 'crispEdges');
-  svgTemp.removeAttribute('style');
-  return svgTemp.outerHTML;
-}
-
 // Imprime múltiplas etiquetas do mesmo item numa única página/janela (evita bloqueio de pop-up por excesso de janelas)
 function imprimirEtiquetasProdutoEmLote(codigo, tipo, quantidade){
   const item = buscarItemParaEtiqueta(codigo, tipo);
@@ -8549,11 +8530,15 @@ function imprimirEtiquetasProdutoEmLote(codigo, tipo, quantidade){
     toast(`Este item não tem um código de barras válido cadastrado (GTIN/EAN deve ter 12 ou 13 dígitos). Valor atual: "${item.gtin||'vazio'}". Edite o item antes de imprimir.`, 'error');
     return;
   }
-  quantidade = Math.max(1, Number(quantidade)||1);
 
   let svgBarcode;
   try {
-    svgBarcode = gerarSvgCodigoBarrasEtiqueta(gtinLimpo);
+    const svgTemp = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    JsBarcode(svgTemp, gtinLimpo, { format: "EAN13", displayValue: true, fontSize: 9, width: 0.9, height: 22, margin: 0, textMargin: 2 });
+    svgTemp.setAttribute('width', '30mm');
+    svgTemp.setAttribute('height', '13mm');
+    svgTemp.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    svgBarcode = svgTemp.outerHTML;
   } catch(e){
     toast('Erro ao gerar código de barras: GTIN inválido (' + e.message + ')', 'error');
     return;
@@ -8561,36 +8546,29 @@ function imprimirEtiquetasProdutoEmLote(codigo, tipo, quantidade){
 
   const etiquetaHtml = `
     <div class="etq">
-      <div class="topo">
-        <div class="nome">${esc(item.nome)}</div>
-        <div class="cod">${esc(codigo)}</div>
+      <div class="nome">${esc(item.nome)}</div>
+      <div class="linha-inferior">
+        <div class="barcode-wrap">${svgBarcode}</div>
+        <div class="codigo-lateral">${codigo}</div>
       </div>
-      <div class="barcode-wrap">${svgBarcode}</div>
     </div>`;
 
   const win = window.open('', '_blank');
-  if(!win){ toast('O navegador bloqueou a janela de impressão — libere pop-ups para o sistema.', 'error'); return; }
   win.document.write(`
-    <html><head><title>Etiqueta${quantidade>1?'s':''} de Produto — ${esc(codigo)}${quantidade>1?` (${quantidade}x)`:''}</title>
+    <html><head><title>Etiquetas de Produto — ${codigo} (${quantidade}x)</title>
     <style>
       @page { size: 50mm 30mm; margin: 0; }
-      * { box-sizing: border-box; margin: 0; padding: 0; }
-      html, body { width: 50mm; background: #fff; font-family: Arial, sans-serif; }
+      body { margin: 0; font-family: Arial, sans-serif; }
       .etq {
-        width: 50mm; height: 30mm; padding: 1.5mm 2mm 1.2mm;
-        display: flex; flex-direction: column; justify-content: space-between;
-        overflow: hidden; page-break-after: always; break-after: page;
+        width: 44mm; height: 28mm; box-sizing: border-box; padding: 1mm;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        overflow: hidden; page-break-after: always;
       }
-      .etq:last-child { page-break-after: auto; break-after: auto; }
-      .topo { display: flex; align-items: flex-start; gap: 1.5mm; min-height: 0; }
-      .nome {
-        flex: 1 1 auto; min-width: 0;
-        font-size: 7.5px; font-weight: 700; line-height: 1.15; text-transform: uppercase; word-break: break-word;
-        display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
-      }
-      .cod { flex: 0 0 auto; font-size: 11px; font-weight: 900; white-space: nowrap; color: #000; }
-      .barcode-wrap { flex: 0 0 auto; display: flex; justify-content: center; background: #fff; }
-      .barcode-wrap svg { display: block; flex: 0 0 auto; }
+      .etq:last-child { page-break-after: auto; }
+      .nome { width: 100%; font-size: 10px; font-weight: 700; line-height: 1.1; text-align: center; overflow: hidden; margin-bottom: 0.5mm; }
+      .linha-inferior { width: 100%; display: flex; align-items: center; flex-shrink: 0; }
+      .barcode-wrap { width: 30mm; flex-shrink: 0; overflow: hidden; }
+      .codigo-lateral { width: 10mm; flex-shrink: 0; font-size: 10px; font-weight: 900; white-space: nowrap; text-align: right; padding-left: 1mm; }
     </style>
     </head><body>
       ${etiquetaHtml.repeat(quantidade)}
@@ -9757,8 +9735,70 @@ function imprimirEtiquetaLogoAplic(){
 }
 
 function imprimirEtiquetaProduto(codigo, tipo){
-  // Mesmo layout e mesmo tamanho de código de barras da impressão em lote
-  imprimirEtiquetasProdutoEmLote(codigo, tipo, 1);
+  const item = buscarItemParaEtiqueta(codigo, tipo);
+  if(!item) return;
+  const gtinLimpo = (item.gtin||'').replace(/\D/g,'');
+  if(!gtinLimpo || (gtinLimpo.length!==12 && gtinLimpo.length!==13)){
+    toast(`Este item não tem um código de barras válido cadastrado (GTIN/EAN deve ter 12 ou 13 dígitos). Valor atual: "${item.gtin||'vazio'}". Edite o item antes de imprimir.`, 'error');
+    return;
+  }
+
+  // Gera o código de barras na página principal (onde JsBarcode está carregado)
+  let svgBarcode;
+  try {
+    const svgTemp = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    // Código de barras reduzido para sobrar mais espaço para o nome completo do item
+    JsBarcode(svgTemp, gtinLimpo, { format: "EAN13", displayValue: true, fontSize: 9, width: 1.4, height: 32, margin: 1, textMargin: 2 });
+    svgBarcode = svgTemp.outerHTML;
+  } catch(e){
+    toast('Erro ao gerar código de barras: GTIN inválido (' + e.message + ')', 'error');
+    return;
+  }
+
+  const win = window.open('', '_blank');
+  win.document.write(`
+    <html><head><title>Etiqueta — ${codigo}</title>
+    <style>
+      @page { size: 50mm 30mm; margin: 0; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body {
+        width: 50mm; height: 30mm; overflow: hidden;
+        display: flex; align-items: center; justify-content: center;
+        font-family: Arial, sans-serif; background: #fff;
+      }
+      .etq {
+        width: 46mm; height: 26mm; overflow: hidden;
+        padding: 1mm;
+        display: flex; flex-direction: column; justify-content: space-between;
+      }
+      .nome {
+        font-size: 7.5px; font-weight: 700; line-height: 1.2;
+        text-transform: uppercase; word-break: break-word;
+        display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical;
+        overflow: hidden; flex-shrink: 0;
+      }
+      .cod {
+        font-size: 10px; font-weight: 900;
+        white-space: nowrap; overflow-wrap: break-word;
+        color: #000; width: 100%; text-align: right;
+        flex-shrink: 0;
+      }
+      .barcode-wrap {
+        flex: 1 1 auto; min-height: 0; overflow: hidden;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .barcode-wrap svg { display: block; width: 100% !important; height: 100% !important; max-width: 100%; max-height: 100%; }
+    </style>
+    </head><body>
+      <div class="etq">
+        <div class="nome">${esc(item.nome)}</div>
+        <div class="cod">${codigo}</div>
+        <div class="barcode-wrap">${svgBarcode}</div>
+      </div>
+      <script>window.onload=function(){setTimeout(function(){window.print();},300)};<\/script>
+    </body></html>
+  `);
+  win.document.close();
 }
 
 async function abrirHistoricoEstoque(codigo){
