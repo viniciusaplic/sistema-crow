@@ -1232,7 +1232,6 @@ tbody td{padding:11px 16px;font-size:14px}
         .coleta-linha-topo input[type=checkbox]{width:22px;height:22px;margin-top:1px;flex-shrink:0;accent-color:var(--accent)}
         .coleta-linha-campos{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-top:10px;padding-left:34px}
         .coleta-bloco{margin-bottom:18px}
-        .coleta-incluir{display:inline-flex;gap:4px;align-items:center}
         .coleta-rotulo{font-weight:600;font-size:14px;margin-bottom:8px}
         .coleta-radio{display:flex;align-items:center;gap:8px;font-size:15px;cursor:pointer}
         .coleta-radio input{width:20px;height:20px;accent-color:var(--accent)}
@@ -1242,11 +1241,7 @@ tbody td{padding:11px 16px;font-size:14px}
       <div class="section-header">
         <div class="section-title">📝 Coleta de Pedidos</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <span id="coleta-incluir-wrap" class="coleta-incluir">
-            <input class="search-input" id="coleta-incluir-num" inputmode="numeric" placeholder="Nº do pedido" style="width:120px" onkeydown="if(event.key==='Enter'){event.preventDefault();incluirPedidoNaColeta()}">
-            <button class="btn btn-outline btn-sm" onclick="incluirPedidoNaColeta()" title="Inclui um pedido bipado na lista, ou mostra por que ele não pode entrar">Incluir</button>
-          </span>
-          <button class="btn btn-outline btn-sm" id="btn-buscar-bipados" onclick="buscarBipadosRecentes()" title="Inclui na lista os pedidos faturados neste mês, já bipados, que ainda não estão nela">🔄 Buscar faturados do mês</button>
+          <button class="btn btn-outline btn-sm" id="btn-buscar-bipados" onclick="buscarBipadosRecentes()" title="Inclui na lista pedidos bipados antes desta tela existir">🔄 Buscar bipados recentes</button>
           <button class="btn btn-primary" id="btn-nova-coleta" onclick="abrirModalColeta()">+ Registrar coleta</button>
         </div>
       </div>
@@ -2443,10 +2438,7 @@ tbody td{padding:11px 16px;font-size:14px}
     </div>
     <div class="form-actions" style="flex-wrap:wrap">
       <button class="btn btn-outline" onclick="fecharScannerNF()">Cancelar</button>
-      <label class="btn btn-outline" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">🖼️ Escolher foto
-        <input type="file" id="scanner-galeria-input" accept="image/*" style="display:none" onchange="lerFotoDanfe(this)">
-      </label>
-      <label class="btn btn-primary" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">📸 Tirar foto da DANFE
+      <label class="btn btn-primary" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer" onclick="pararScannerNF()">📸 Tirar foto da DANFE
         <input type="file" id="scanner-foto-input" accept="image/*" capture="environment" style="display:none" onchange="lerFotoDanfe(this)">
       </label>
     </div>
@@ -4438,7 +4430,6 @@ async function renderPedidos(usarCache){
         </div>
         <div class="pedido-card-info">👤 <span>${esc(p.cliente_nome)}</span></div>
         <div class="pedido-card-info">📦 <span>${(p.itens||[]).length} iten(s)</span> · ${p.condicao||''}</div>
-        ${htmlAlertaClientePedido(p, true)}
         ${p.obs ? `<div style="margin-top:6px;padding:5px 10px;background:#fffbeb;border-left:3px solid #fde68a;border-radius:0 6px 6px 0;font-size:12px;color:#92400e">⚠️ ${p.obs}</div>` : ''}
         <div class="pedido-card-actions">
           <button class="btn btn-outline btn-sm" onclick="verPedido('${p.id}')">Ver detalhes</button>
@@ -4474,7 +4465,6 @@ async function renderPedidos(usarCache){
           ${usuarioLogado.admin&&p.status!=='Cancelado'?`<button class="btn btn-sm btn-danger" onclick="cancelarPedido('${p.id}')">Cancelar</button>`:''}
         </div>
       </div>
-      ${htmlAlertaClientePedido(p, true)}
       ${p.obs ? `<div style="margin-top:6px;padding:4px 10px;background:#fffbeb;border-left:3px solid #fde68a;border-radius:0 4px 4px 0;font-size:11px;color:#92400e">⚠️ ${p.obs}</div>` : ''}
     </div>`;
   }).join('') || '<div style="text-align:center;color:var(--muted);padding:24px">Nenhum pedido encontrado</div>';
@@ -4592,7 +4582,6 @@ async function aplicarFaturarRetroativo(){
         alteracoes: [`💰 Faturado retroativamente, usando a data do próprio pedido (${fmtData(dataFaturamento)})`]
       });
       await db.ref('pedidos/'+p.id).update({ faturado: true, data_faturamento: dataFaturamento, historico_edicoes: historico });
-      atualizarFaturamentoFilaColeta(p.id, dataFaturamento);
       count++;
     } catch(e){ /* segue pros próximos mesmo se um falhar */ }
   }
@@ -4830,29 +4819,6 @@ async function corrigirVendedorPedidosW3EmMassa(){
   toast(`✓ ${count} pedido(s) corrigido(s)`,'success');
 }
 
-// Alerta ao Vender do cadastro do cliente, gravado no próprio pedido (cliente_alerta).
-// Ao salvar: se o cliente foi escolhido agora, usa o alerta do cadastro; se o pedido está
-// sendo editado sem trocar o cliente, mantém o que já estava gravado no pedido.
-function alertaClienteParaSalvar(c, original){
-  const mesmoCliente = original && original.cliente_codigo === c?.codigo;
-  if(mesmoCliente && original.cliente_alerta !== undefined) return original.cliente_alerta || '';
-  const cad = CLIENTES_DB.find(x=>x.codigo===c?.codigo);
-  return (cad ? cad.alerta : c?.alerta) || '';
-}
-// Pedidos antigos (salvos antes deste campo existir) usam o cadastro já carregado em memória — sem leitura extra no Firebase.
-function alertaClienteDoPedido(p){
-  if(!p) return '';
-  if(p.cliente_alerta !== undefined) return p.cliente_alerta || '';
-  return CLIENTES_DB.find(x=>x.codigo===p.cliente_codigo)?.alerta || '';
-}
-function htmlAlertaClientePedido(p, compacto){
-  const a = alertaClienteDoPedido(p);
-  if(!a) return '';
-  return compacto
-    ? `<div style="margin-top:6px;padding:4px 10px;background:#fef3c7;border-left:3px solid #d97706;border-radius:0 6px 6px 0;font-size:12px;color:#92400e"><strong>⚠️ Cliente:</strong> ${esc(a)}</div>`
-    : `<div style="margin:-8px 0 16px;border:2px solid #d97706;background:#fef3c7;padding:10px 14px;border-radius:8px"><div style="font-weight:700;color:#92400e">⚠️ Atenção a este cliente:</div><div style="color:#92400e;margin-top:2px">${esc(a)}</div></div>`;
-}
-
 async function verPedido(id){
   try {
     const snap = await db.ref('pedidos/'+id).once('value');
@@ -4882,7 +4848,6 @@ async function verPedido(id){
         <strong>${esc(p.cliente_nome)}</strong><br>
         <span style="font-size:13px;color:var(--muted)">${p.cliente_cpf||''} · ${p.cliente_cidade||''}/${p.cliente_uf||''}</span>
       </div>
-      ${htmlAlertaClientePedido(p)}
       ${(() => {
         const ocultarVal = usuarioLogado && ehExpedicao();
         return `
@@ -5040,7 +5005,6 @@ async function confirmarFaturamentoPedido(){
             : `💰 Pedido marcado como Faturado em lote, em ${fmtData(dataEscolhida)}`]
         });
         await db.ref('pedidos/'+id).update({ faturado: true, data_faturamento: dataEscolhida, historico_edicoes: historico });
-        atualizarFaturamentoFilaColeta(id, dataEscolhida);
         count++;
       } catch(e){ /* segue pros próximos mesmo se um falhar */ }
     }
@@ -5068,7 +5032,6 @@ async function confirmarFaturamentoPedido(){
         : `💰 Pedido marcado como Faturado em ${fmtData(dataEscolhida)}`]
     });
     await db.ref('pedidos/'+id).update({ faturado: true, data_faturamento: dataEscolhida, historico_edicoes: historico });
-    atualizarFaturamentoFilaColeta(id, dataEscolhida);
     fecharModal('modal-faturar-pedido');
     toast('✓ Faturamento registrado','success');
     verPedido(id);
@@ -5459,9 +5422,6 @@ async function reativarPedido(id){
   try {
     // Restaura o status anterior (ou AA se não tiver registro)
     await db.ref('pedidos/'+id+'/status').set(statusAnterior);
-    if(statusAnterior === 'CC' && !p.coleta_id){
-      db.ref('aguardando_coleta/'+id).set(resumoPedidoColeta(p)).catch(()=>{});
-    }
 
     // Só status abertos (AA/AP/EX) têm reserva. Pedido que estava bipado (CC) já teve a
     // baixa física: reservar aqui criaria uma reserva fantasma que nunca seria liberada.
@@ -7076,7 +7036,6 @@ async function confirmarPedido(){
       cliente_cidade:c.cidade||'', cliente_uf:c.uf||'',
       cliente_endereco: c.endereco||c.end||'', cliente_cep: c.cep||'',
       cliente_telefone: c.telefone||c.tel||'',
-      cliente_alerta: alertaClienteParaSalvar(c, pedidoOriginal),
       vendedor_id: vendedorIdFinal,
       vendedor_nome: vendedorNomeFinal,
       digitado_por_id: usuarioLogado.id, digitado_por_nome: usuarioLogado.nome,
@@ -7254,7 +7213,6 @@ async function salvarComoOrcamento(){
       cliente_cidade:c.cidade||'', cliente_uf:c.uf||'',
       cliente_endereco: c.endereco||c.end||'', cliente_cep: c.cep||'',
       cliente_telefone: c.telefone||c.tel||'',
-      cliente_alerta: alertaClienteParaSalvar(c, dadosOriginais),
       vendedor_id: vendedorIdFinalOrc,
       vendedor_nome: vendedorNomeFinalOrc,
       digitado_por_id: dadosOriginais.digitado_por_id || usuarioLogado.id,
@@ -9034,10 +8992,24 @@ function mapaInsumoComprometido(){
     const deficit = Number(p.reservado||0) - Number(p.quantidade||0);
     if(deficit <= 0) continue;
     const receita = RECEITAS_DB[p.codigo];
-    for(const ri of (receita?.itens||[])){
-      const q = Number(ri.qtd)||0;
-      if(q <= 0) continue;
-      mapa[ri.codigo] = (mapa[ri.codigo]||0) + deficit*q;
+    // Só insumo de produção real (embalagem/etiqueta não trava ninguém)
+    const itens = (receita?.itens||[]).filter(ri => {
+      const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
+      return insumo?.categoria !== 'Embalagens' && (Number(ri.qtd)||0) > 0;
+    });
+    if(!itens.length) continue;
+    // O produto só "segura" o insumo que ele consegue de fato montar. Se falta outra
+    // peça dele (ex: corpo zerado), não faz sentido prender o tubo/canopla que outro
+    // código poderia usar — antes isso deixava produto montável aparecendo negativo.
+    let montavel = Infinity;
+    for(const ri of itens){
+      const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
+      montavel = Math.min(montavel, Math.floor(Number(insumo?.estoque_atual||0) / Number(ri.qtd)));
+    }
+    const segura = Math.max(0, Math.min(deficit, montavel));
+    if(segura <= 0) continue;
+    for(const ri of itens){
+      mapa[ri.codigo] = (mapa[ri.codigo]||0) + segura*Number(ri.qtd);
     }
   }
   return mapa;
@@ -9049,8 +9021,17 @@ function mapaInsumoComprometido(){
 function capacidadeProducaoLivre(codigo, comprometido){
   comprometido = comprometido || mapaInsumoComprometido();
   const prod = PRODUTOS_DB.find(p=>p.codigo===codigo);
-  const deficitProprio = prod ? Math.max(0, Number(prod.reservado||0) - Number(prod.quantidade||0)) : 0;
+  const deficitBruto = prod ? Math.max(0, Number(prod.reservado||0) - Number(prod.quantidade||0)) : 0;
   const receita = RECEITAS_DB[codigo];
+  // Devolve exatamente o que este produto segurou no mapa (mesma regra de mapaInsumoComprometido)
+  let montavelProprio = Infinity;
+  for(const ri of (receita?.itens||[])){
+    const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
+    const q = Number(ri.qtd)||0;
+    if(insumo?.categoria === 'Embalagens' || q <= 0) continue;
+    montavelProprio = Math.min(montavelProprio, Math.floor(Number(insumo?.estoque_atual||0) / q));
+  }
+  const deficitProprio = montavelProprio === Infinity ? 0 : Math.max(0, Math.min(deficitBruto, montavelProprio));
   let minCap = Infinity, gargalho = null;
   for(const ri of (receita?.itens||[])){
     const insumo = INSUMOS_DB.find(i=>i.codigo===ri.codigo);
@@ -12566,7 +12547,6 @@ async function renderSeparacao(){
         </div>
         ${p.baixa_estoque_ts ? `<div style="color:#dc2626;font-weight:700;font-size:13px;margin-top:4px">⚠️ Finalização interrompida — abra e clique em "Concluir pedido"</div>` : ''}
         <div class="pedido-card-info">📦 Itens separados: <span>${separados} / ${totalItens}</span> (${pct}%)</div>
-        ${htmlAlertaClientePedido(p, true)}
         ${p.obs ? `<div style="font-size:12px;margin-top:6px;padding:6px 10px;background:#fffbea;border-left:3px solid #f59e0b;border-radius:0 6px 6px 0;color:#92400e"><strong>⚠️ Obs:</strong> ${p.obs}</div>` : ''}
         <div style="background:#f0f0f0;border-radius:6px;height:6px;margin-top:8px;overflow:hidden">
           <div style="background:#7c3aed;height:100%;width:${pct}%"></div>
@@ -12896,24 +12876,6 @@ function renderModalBipagem(){
   setTimeout(()=>document.getElementById('input-bipagem')?.focus(), 100);
 }
 
-// Compara o GTIN lido pelo coletor com o cadastrado, aceitando as diferenças de formato que
-// fazem um código CERTO ser recusado: espaços/pontos no cadastro, zero à esquerda (leitor que
-// manda EAN-13 iniciado em 0 como UPC-A de 12 dígitos) e cadastro de 12 dígitos sem o dígito
-// verificador (a etiqueta imprime 13: os 12 + o verificador).
-function digitoVerificadorGTIN(base){
-  let soma = 0;
-  for(let i = base.length - 1, peso = 3; i >= 0; i--, peso = 4 - peso) soma += Number(base[i]) * peso;
-  return String((10 - soma % 10) % 10);
-}
-function gtinBate(cadastrado, lido){
-  const a = String(cadastrado||'').replace(/\D/g,'').replace(/^0+/,'');
-  const b = String(lido||'').replace(/\D/g,'').replace(/^0+/,'');
-  if(a.length < 7 || b.length < 7) return false; // evita confundir com códigos internos curtos
-  if(a === b) return true;
-  const [curto, longo] = a.length < b.length ? [a, b] : [b, a];
-  return longo.length === curto.length + 1 && longo.startsWith(curto) && longo.slice(-1) === digitoVerificadorGTIN(curto);
-}
-
 async function processarBipagem(codigoLido){
   if(!codigoLido.trim()) return;
   const p = pedidoSeparacaoAtual;
@@ -12935,13 +12897,13 @@ async function processarBipagem(codigoLido){
 
   // Só aceita o código/GTIN do item que está na vez — bloqueia bipar fora de ordem
   const codigoNormalizado = codigoLido.trim().toUpperCase();
-  const bate = (gtinAtual && (gtinAtual.trim().toUpperCase()===codigoNormalizado || gtinBate(gtinAtual, codigoNormalizado))) || (itemAtual.codigo.trim().toUpperCase()===codigoNormalizado);
+  const bate = (gtinAtual && gtinAtual.trim().toUpperCase()===codigoNormalizado) || (itemAtual.codigo.trim().toUpperCase()===codigoNormalizado);
   if(!bate){
     // Verifica se o código pertence a outro item do pedido, para dar mensagem mais clara
     const pertenceOutro = p.itens.some(i => {
       const prod = PRODUTOS_DB.find(x=>x.codigo===i.codigo);
       const gtin = (prod && prod.gtin) ? prod.gtin : i.gtin;
-      return (gtin && (gtin.trim().toUpperCase()===codigoNormalizado || gtinBate(gtin, codigoNormalizado))) || i.codigo.trim().toUpperCase()===codigoNormalizado;
+      return (gtin && gtin.trim().toUpperCase()===codigoNormalizado) || i.codigo.trim().toUpperCase()===codigoNormalizado;
     });
     msg.innerHTML = pertenceOutro
       ? `<span style="color:#dc2626">❌ Não é a vez deste item. Bipe primeiro: <strong>${esc(itemAtual.nome)}</strong></span>`
@@ -13266,9 +13228,8 @@ function resumoPedidoColeta(p){
     cliente_nome: p.cliente_nome || '',
     cliente_cidade: p.cliente_cidade || '',
     cliente_uf: p.cliente_uf || '',
-    volumes: Number(p.volumes) || null, // sem volume conhecido fica vazio e é exigido na coleta
-    bipado_em: p.ts_fim_bipagem ? new Date(Number(p.ts_fim_bipagem)).toISOString() : (p.data || ''),
-    data_faturamento: p.data_faturamento || ''
+    volumes: Number(p.volumes) || 1,
+    bipado_em: p.ts_fim_bipagem ? new Date(Number(p.ts_fim_bipagem)).toISOString() : ''
   };
 }
 
@@ -13304,64 +13265,16 @@ function cpfValidoColeta(cpf){
 }
 
 // ══ TELA PRINCIPAL ══
-// Por padrão a Coleta mostra só os pedidos FATURADOS no mês atual (data_faturamento).
-// Os faturados em meses anteriores e os ainda sem faturamento continuam na fila e
-// aparecem pelo link "mostrar os outros".
-let COLETA_TODOS = [];
-let COLETA_MOSTRAR_ANTERIORES = false;
-function inicioMesColeta(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-01'; }
-function faturadoNoMesColeta(p){ return !!p.data_faturamento && String(p.data_faturamento) >= inicioMesColeta(); }
-function filtrarMesColeta(){
-  COLETA_PENDENTES = COLETA_MOSTRAR_ANTERIORES ? COLETA_TODOS.slice() : COLETA_TODOS.filter(faturadoNoMesColeta);
-}
-// Mantém a data de faturamento da fila em dia quando o pedido é faturado ou a data muda.
-// Só mexe se o pedido estiver na fila (transaction aborta se o nó não existe).
-function atualizarFaturamentoFilaColeta(pedidoId, dataFat){
-  db.ref('aguardando_coleta/'+pedidoId).transaction(atual => atual ? { ...atual, data_faturamento: dataFat || '' } : undefined).catch(()=>{});
-}
-// Itens que entraram na fila antes deste campo existir: busca só a data de faturamento de
-// cada um (leitura mínima, 1 campo por pedido) e grava na fila. Roda uma vez por item.
-async function completarFaturamentoFilaColeta(){
-  const faltando = COLETA_TODOS.filter(p => p.data_faturamento === undefined);
-  if(!faltando.length) return;
-  const updates = {};
-  await Promise.all(faltando.map(async p => {
-    try {
-      const df = (await db.ref('pedidos/'+p.id+'/data_faturamento').once('value')).val() || '';
-      p.data_faturamento = df;
-      updates['aguardando_coleta/'+p.id+'/data_faturamento'] = df;
-    } catch(_){}
-  }));
-  if(Object.keys(updates).length) db.ref().update(updates).catch(()=>{});
-}
-function alternarAnterioresColeta(){
-  COLETA_MOSTRAR_ANTERIORES = !COLETA_MOSTRAR_ANTERIORES;
-  filtrarMesColeta();
-  renderColetaPendentes();
-}
-function avisoAnterioresColeta(){
-  const fora = COLETA_TODOS.filter(p => !faturadoNoMesColeta(p));
-  if(!fora.length) return '';
-  const semFat = fora.filter(p => !p.data_faturamento).length;
-  const antigos = fora.length - semFat;
-  const partes = [];
-  if(antigos) partes.push(`${antigos} faturado(s) em meses anteriores`);
-  if(semFat) partes.push(`${semFat} ainda sem faturamento`);
-  return `<div style="font-size:13px;margin:8px 0"><a href="javascript:void(0)" onclick="alternarAnterioresColeta()" style="color:var(--accent)">${COLETA_MOSTRAR_ANTERIORES ? 'Mostrar só os faturados neste mês' : `Mostrar os outros (${partes.join(', ')})`}</a></div>`;
-}
-
 async function renderColeta(){
   if(!podeVer('coleta')){ toast('Acesso restrito — sem permissão nesta área','error'); return; }
   const pode = temPermissaoEditar('coleta');
-  ['btn-nova-coleta','btn-buscar-bipados','coleta-incluir-wrap'].forEach(id => { const b = document.getElementById(id); if(b) b.style.display = pode ? '' : 'none'; });
+  ['btn-nova-coleta','btn-buscar-bipados'].forEach(id => { const b = document.getElementById(id); if(b) b.style.display = pode ? '' : 'none'; });
   try {
     const snap = await db.ref('aguardando_coleta').once('value');
     const v = snap.val() || {};
-    COLETA_TODOS = Object.keys(v).map(id => ({ id, ...v[id] }))
+    COLETA_PENDENTES = Object.keys(v).map(id => ({ id, ...v[id] }))
       .sort((a,b) => (Number(a.numero)||0) - (Number(b.numero)||0));
   } catch(e){ toast('Erro ao carregar pedidos aguardando coleta: '+e.message,'error'); }
-  await completarFaturamentoFilaColeta();
-  filtrarMesColeta();
   renderColetaPendentes();
   COLETA_HIST = []; COLETA_HIST_FIM = false;
   try { await carregarHistoricoColetas(false); }
@@ -13373,21 +13286,20 @@ function renderColetaPendentes(){
   if(!el) return;
   const pode = temPermissaoEditar('coleta');
   if(!COLETA_PENDENTES.length){
-    el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:28px">Nenhum pedido faturado neste mês aguardando coleta.</div>' + avisoAnterioresColeta();
+    el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:28px">Nenhum pedido bipado aguardando coleta.</div>';
     return;
   }
   const totVol = COLETA_PENDENTES.reduce((s,p) => s + (Number(p.volumes)||0), 0);
   el.innerHTML = `
-    <div style="font-size:13px;color:var(--muted);margin-bottom:8px">${COLETA_PENDENTES.length} pedido(s) · ${totVol} volume(s)${COLETA_MOSTRAR_ANTERIORES ? '' : ' · faturados neste mês'}</div>
-    ${avisoAnterioresColeta()}
+    <div style="font-size:13px;color:var(--muted);margin-bottom:8px">${COLETA_PENDENTES.length} pedido(s) · ${totVol} volume(s)</div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Pedido</th><th>Cliente</th><th>Cidade/UF</th><th style="text-align:center">Vol.</th><th>Faturado em</th>${pode?'<th></th>':''}</tr></thead>
+      <thead><tr><th>Pedido</th><th>Cliente</th><th>Cidade/UF</th><th style="text-align:center">Vol.</th><th>Bipado em</th>${pode?'<th></th>':''}</tr></thead>
       <tbody>${COLETA_PENDENTES.map(p => `<tr>
         <td><strong>#${esc(p.numero)}</strong></td>
         <td>${esc(p.cliente_nome)}</td>
         <td>${esc(p.cliente_cidade)}${p.cliente_uf?'/'+esc(p.cliente_uf):''}</td>
-        <td style="text-align:center">${Number(p.volumes) ? Number(p.volumes) : '<span style="color:#dc2626" title="Volume não informado na expedição">?</span>'}</td>
-        <td style="font-size:12px;color:var(--muted)">${p.data_faturamento ? fmtData(p.data_faturamento) : '<span style="color:#b45309">não faturado</span>'}</td>
+        <td style="text-align:center">${Number(p.volumes)||1}</td>
+        <td style="font-size:12px;color:var(--muted)">${fmtDataHoraColeta(p.bipado_em)}</td>
         ${pode?`<td style="text-align:right"><button class="btn btn-outline btn-sm" title="Tirar da lista (ex.: pedido já entregue antes do sistema de coleta)" onclick="removerDaFilaColeta('${esc(p.id)}')">✕</button></td>`:''}
       </tr>`).join('')}</tbody>
     </table></div>`;
@@ -13400,78 +13312,33 @@ async function removerDaFilaColeta(pid){
   try {
     await db.ref('aguardando_coleta/'+pid).remove();
     COLETA_PENDENTES = COLETA_PENDENTES.filter(x => x.id !== pid);
-    COLETA_TODOS = COLETA_TODOS.filter(x => x.id !== pid);
     renderColetaPendentes();
   } catch(e){ toast('Erro: '+e.message,'error'); }
 }
 
-// Inclui na fila os pedidos FATURADOS neste mês, já bipados e ainda não coletados. Usa o
-// índice 'data_faturamento' (já publicado): lê só os faturados do mês. Só roda no clique.
+// Inclui na fila os pedidos bipados recentes que não estão nela (ex.: bipados antes desta
+// tela existir). Lê só os pedidos dos últimos 20 dias pelo índice 'data', e só quando clicado.
 async function buscarBipadosRecentes(){
   if(!temPermissaoEditar('coleta')){ toast('Sem permissão de edição na Coleta','error'); return; }
   try {
-    toast('Buscando pedidos faturados neste mês…');
-    const snap = await db.ref('pedidos').orderByChild('data_faturamento').startAt(inicioMesColeta()).once('value');
+    toast('Buscando pedidos bipados dos últimos 20 dias…');
+    const ini = new Date(agoraTs() - 20*86400000).toISOString();
+    const snap = await db.ref('pedidos').orderByChild('data').startAt(ini).once('value');
     const v = snap.val() || {};
-    const naFila = {};
-    COLETA_TODOS.forEach(p => { naFila[p.id] = p; });
+    const naFila = new Set(COLETA_PENDENTES.map(p => p.id));
     const updates = {};
-    let n = 0, naoBipados = 0;
+    let n = 0;
     Object.keys(v).forEach(id => {
       const p = v[id];
-      if(!p || p.coleta_id || p.status === 'Cancelado') return;
-      if(p.status !== 'CC'){ naoBipados++; return; }
-      if(naFila[id]){
-        // já está na fila: só acerta a data de faturamento, se mudou
-        if(naFila[id].data_faturamento !== p.data_faturamento) updates['aguardando_coleta/'+id+'/data_faturamento'] = p.data_faturamento;
-        return;
+      if(p && p.status === 'CC' && !p.coleta_id && !naFila.has(id)){
+        updates['aguardando_coleta/'+id] = resumoPedidoColeta(p);
+        n++;
       }
-      updates['aguardando_coleta/'+id] = resumoPedidoColeta(p);
-      n++;
     });
-    if(Object.keys(updates).length) await db.ref().update(updates);
-    const avisoNaoBip = naoBipados ? ` · ${naoBipados} faturado(s) ainda não bipado(s)` : '';
-    toast((n ? `✓ ${n} pedido(s) incluído(s) na lista de coleta` : 'Nenhum pedido faturado neste mês faltando na lista') + avisoNaoBip, n ? 'success' : '');
+    if(n) await db.ref().update(updates);
+    toast(n ? `✓ ${n} pedido(s) incluído(s) na lista de coleta` : 'Nenhum pedido bipado sem coleta nos últimos 20 dias', n ? 'success' : '');
     await renderColeta();
   } catch(e){ toast('Erro ao buscar pedidos: '+e.message,'error'); }
-}
-
-// Inclui um pedido pelo número e, quando não dá, explica o motivo (ainda não bipado,
-// já coletado, cancelado). Lê só aquele pedido, pelo índice 'numero'.
-async function incluirPedidoNaColeta(){
-  if(!temPermissaoEditar('coleta')){ toast('Sem permissão de edição na Coleta','error'); return; }
-  const el = document.getElementById('coleta-incluir-num');
-  const num = parseInt(String(el?.value||'').replace(/\D/g,''), 10);
-  if(!num){ toast('Digite o número do pedido','error'); el?.focus(); return; }
-  try {
-    let snap = await db.ref('pedidos').orderByChild('numero').equalTo(num).once('value');
-    if(!snap.exists()) snap = await db.ref('pedidos').orderByChild('numero').equalTo(String(num)).once('value');
-    const v = snap.val() || {};
-    const id = Object.keys(v)[0];
-    if(!id){ toast(`Pedido #${num} não encontrado`,'error'); return; }
-    const p = v[id];
-    if(p.status === 'Cancelado'){ toast(`Pedido #${num} está cancelado`,'error'); return; }
-    if(p.status !== 'CC'){
-      toast(`Pedido #${num} ainda não foi bipado (está "${statusInfo(p.status).label}"). Conclua a bipagem na Separação.`,'error');
-      return;
-    }
-    if(p.coleta_id){
-      const c = await obterColeta(p.coleta_id, true);
-      toast(`Pedido #${num} já saiu no romaneio${c?.numero ? ' Nº '+c.numero : ''} em ${fmtDataHoraColeta(p.coletado_em)}`,'error');
-      return;
-    }
-    const resumo = resumoPedidoColeta(p);
-    const visivelNoMes = faturadoNoMesColeta(resumo);
-    if(!COLETA_TODOS.some(x => x.id === id)){
-      await db.ref('aguardando_coleta/'+id).set(resumo);
-      toast(`✓ Pedido #${num} incluído na lista de coleta`,'success');
-    } else {
-      toast(`Pedido #${num} já estava na lista de coleta`);
-    }
-    if(!visivelNoMes) COLETA_MOSTRAR_ANTERIORES = true; // sem faturamento ou faturado antes: mostra para não "sumir"
-    if(el) el.value = '';
-    await renderColeta();
-  } catch(e){ toast('Erro ao buscar o pedido: '+e.message,'error'); }
 }
 
 // ══ TRANSPORTADORAS ══
@@ -13589,7 +13456,7 @@ function renderColetaLinhas(){
         </div>
         <button type="button" class="btn btn-outline btn-sm" style="font-size:18px;padding:6px 12px" title="Ler pela câmera" onclick="abrirScannerNF('${esc(p.id)}')">📷</button>
         <label style="display:flex;align-items:center;gap:6px;font-size:13px">Vol.
-          <input type="number" min="1" inputmode="numeric" class="search-input" value="${Number(s.volumes)||''}" placeholder="?" style="width:70px;${Number(s.volumes)?'':'border-color:#dc2626'}"
+          <input type="number" min="1" class="search-input" style="width:70px" value="${Number(s.volumes)||1}"
             oninput="COLETA_SELECAO['${esc(p.id)}'] && (COLETA_SELECAO['${esc(p.id)}'].volumes = parseInt(this.value)||0); atualizarResumoColeta()">
         </label>
       </div>` : ''}
@@ -13609,7 +13476,7 @@ function atualizarResumoColeta(){
 function alternarPedidoColeta(pid, marcado){
   if(marcado){
     const p = COLETA_PENDENTES.find(x => x.id === pid);
-    COLETA_SELECAO[pid] = { volumes: Number(p?.volumes)||0, nf:null, nfTexto:'', nfErro:'' };
+    COLETA_SELECAO[pid] = { volumes: Number(p?.volumes)||1, nf:null, nfTexto:'', nfErro:'' };
   } else {
     delete COLETA_SELECAO[pid];
   }
@@ -13636,26 +13503,6 @@ function aplicarNFColeta(pid, valor){
     s.nfTexto = String(Number(d));
   } else {
     s.nfErro = 'Digite só o número da NF ou bipe o código de barras da DANFE.';
-  }
-  // A mesma NF não pode entrar em dois pedidos do mesmo romaneio
-  if(s.nf){
-    const outroId = Object.keys(COLETA_SELECAO).find(id => id !== pid && COLETA_SELECAO[id].nf && COLETA_SELECAO[id].nf.numero === s.nf.numero);
-    if(outroId){
-      const outro = COLETA_PENDENTES.find(x => x.id === outroId);
-      s.nfErro = `A NF ${s.nf.numero} já foi lida no pedido #${outro?.numero||''} desta coleta.`;
-      s.nf = null; s.nfTexto = '';
-    }
-  }
-  // Nem em outro romaneio já registrado (1 leitura pequena no índice coletas_nf)
-  if(s.nf){
-    const numero = s.nf.numero;
-    db.ref('coletas_nf/'+numero).once('value').then(snap => {
-      if(!snap.exists() || !COLETA_SELECAO[pid] || COLETA_SELECAO[pid].nf?.numero !== numero) return;
-      COLETA_SELECAO[pid].nf = null;
-      COLETA_SELECAO[pid].nfTexto = '';
-      COLETA_SELECAO[pid].nfErro = `A NF ${numero} já saiu em outro romaneio.`;
-      renderColetaLinhas();
-    }).catch(()=>{});
   }
   renderColetaLinhas();
   // Leitor USB: depois de uma leitura certa, já posiciona no próximo pedido sem NF
@@ -13718,21 +13565,16 @@ function limparAssinaturaColeta(){
 }
 
 // ══ LEITOR PELA CÂMERA ══
-// Motor de leitura, nesta ordem:
-//  1. BarcodeDetector nativo (Chrome/Android).
-//  2. zxing-cpp compilado em WebAssembly (pacote barcode-detector) — iPhone/iPad e qualquer
-//     navegador sem leitor nativo. Bem mais robusto que a versão JavaScript para código longo
-//     e fino como o da DANFE. Baixa ~1 MB na primeira vez e fica no cache (não usa Firebase).
-//  3. ZXing JavaScript, só se o WebAssembly não carregar.
-// O código da DANFE é ~8x mais largo que alto: com a nota inclinada só uns 5°, nenhuma linha
-// horizontal atravessa o código inteiro e nenhum leitor consegue ler. Por isso a imagem é
-// testada endireitada em vários ângulos.
-const POLYFILL_URL_COLETA = 'https://cdn.jsdelivr.net/npm/barcode-detector@2.3.1/dist/iife/pure.js';
+// Chrome/Android: BarcodeDetector nativo. iPad/iPhone (todo navegador usa o motor do Safari):
+// biblioteca ZXing, baixada só na primeira vez (fica no cache do navegador, não usa Firebase).
+// Cuidados para iPad antigo: um único canvas reaproveitado (o Safari tem limite de memória
+// de canvas e falha em silêncio quando estoura), imagens limitadas a ~2600 px, dois métodos
+// de binarização (um deles lida melhor com foto desfocada/sombra) e o status sempre visível
+// no topo, com contagem de tentativas, para diagnosticar quando não ler.
 const ZXING_URL_COLETA = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
 let SCANNER_STREAM = null, SCANNER_TIMER = null, SCANNER_ATIVO = false, SCANNER_PID = null;
-let DETECTOR_COLETA = null, MOTOR_COLETA = '', ZXING_LEITOR_COLETA = null;
+let ZXING_LEITOR_COLETA = null;
 let CANVAS_LEITOR_COLETA = null;
-let ULTIMA_LEITURA_INVALIDA_COLETA = '';
 
 function statusScanner(msg, tipo){
   const el = document.getElementById('scanner-status');
@@ -13741,77 +13583,55 @@ function statusScanner(msg, tipo){
   el.style.color = tipo === 'erro' ? '#dc2626' : (tipo === 'ok' ? '#166534' : 'var(--text)');
 }
 
-function carregarScriptColeta(url, pronto){
+function carregarScriptColeta(url){
   return new Promise((resolve, reject) => {
-    if(pronto()) return resolve();
+    if(window.ZXing) return resolve();
     const antigo = document.querySelector(`script[data-src="${url}"]`);
     if(antigo) antigo.remove();
     const s = document.createElement('script');
     s.src = url; s.async = true; s.setAttribute('data-src', url);
-    const limite = setTimeout(() => reject(new Error('o leitor demorou demais para carregar — verifique a internet')), 25000);
-    s.onload = () => { clearTimeout(limite); pronto() ? resolve() : reject(new Error('o leitor carregou com erro')); };
+    const limite = setTimeout(() => reject(new Error('o leitor demorou demais para carregar — verifique a internet')), 20000);
+    s.onload = () => { clearTimeout(limite); window.ZXing ? resolve() : reject(new Error('o leitor carregou com erro')); };
     s.onerror = () => { clearTimeout(limite); s.remove(); reject(new Error('não foi possível baixar o leitor — verifique a internet')); };
     document.head.appendChild(s);
   });
 }
 
-async function prepararLeitorColeta(){
-  if(DETECTOR_COLETA || ZXING_LEITOR_COLETA) return MOTOR_COLETA;
-  if('BarcodeDetector' in window){
-    try {
-      if((await BarcodeDetector.getSupportedFormats()).includes('code_128')){
-        DETECTOR_COLETA = new BarcodeDetector({ formats:['code_128'] });
-        MOTOR_COLETA = 'nativo';
-        return MOTOR_COLETA;
-      }
-    } catch(_){}
-  }
+async function detectorNativoColeta(){
+  if(!('BarcodeDetector' in window)) return null;
   try {
-    await carregarScriptColeta(POLYFILL_URL_COLETA, () => !!window.BarcodeDetectionAPI);
-    const det = new window.BarcodeDetectionAPI.BarcodeDetector({ formats:['code_128'] });
-    const c = document.createElement('canvas'); c.width = 8; c.height = 8;
-    await det.detect(c); // baixa e inicializa o WebAssembly agora, para o erro aparecer cedo
-    DETECTOR_COLETA = det;
-    MOTOR_COLETA = 'wasm';
-    return MOTOR_COLETA;
-  } catch(e){ console.warn('Leitor WebAssembly indisponível:', e); }
-  await carregarScriptColeta(ZXING_URL_COLETA, () => !!window.ZXing);
+    if(!(await BarcodeDetector.getSupportedFormats()).includes('code_128')) return null;
+    return new BarcodeDetector({ formats:['code_128'] });
+  } catch(_){ return null; }
+}
+
+async function obterLeitorZXingColeta(){
+  if(ZXING_LEITOR_COLETA) return ZXING_LEITOR_COLETA;
+  await carregarScriptColeta(ZXING_URL_COLETA);
   const leitor = new ZXing.MultiFormatReader();
   const dicas = new Map();
   dicas.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.CODE_128]);
   dicas.set(ZXing.DecodeHintType.TRY_HARDER, true);
   leitor.setHints(dicas);
   ZXING_LEITOR_COLETA = leitor;
-  MOTOR_COLETA = 'js';
-  return MOTOR_COLETA;
+  return leitor;
 }
 
-function nomeMotorColeta(){
-  return { nativo:'leitor nativo', wasm:'leitor WebAssembly', js:'leitor JavaScript' }[MOTOR_COLETA] || '';
-}
-
-// Recorte da fonte (vídeo ou foto) num canvas único reaproveitado (o Safari tem limite de
-// memória de canvas e falha em silêncio quando estoura), girado alguns graus se pedido.
-function desenharRecorteColeta(fonte, sx, sy, sw, sh, larguraMax, graus){
-  const fator = Math.min(1, larguraMax / sw);
+// Desenha um recorte da fonte (vídeo ou foto) no canvas único, limitando a largura final
+// e girando 90° se pedido (nota fotografada de lado).
+function desenharRecorteColeta(fonte, sx, sy, sw, sh, larguraMax, girar){
+  const fator = Math.min(1, larguraMax / (girar ? sh : sw));
   const w = Math.max(1, Math.round(sw * fator)), h = Math.max(1, Math.round(sh * fator));
-  const a = (graus || 0) * Math.PI / 180;
-  const cw = a ? Math.round(w * Math.abs(Math.cos(a)) + h * Math.abs(Math.sin(a))) : w;
-  const ch = a ? Math.round(w * Math.abs(Math.sin(a)) + h * Math.abs(Math.cos(a))) : h;
   if(!CANVAS_LEITOR_COLETA) CANVAS_LEITOR_COLETA = document.createElement('canvas');
   const c = CANVAS_LEITOR_COLETA;
+  const cw = girar ? h : w, ch = girar ? w : h;
   if(c.width !== cw) c.width = cw;
   if(c.height !== ch) c.height = ch;
   const ctx = c.getContext('2d', { willReadFrequently:true });
   if(!ctx) throw new Error('o aparelho ficou sem memória para processar a imagem');
   ctx.setTransform(1,0,0,1,0,0);
-  if(a){
-    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cw, ch);
-    ctx.translate(cw/2, ch/2); ctx.rotate(a);
-    ctx.drawImage(fonte, sx, sy, sw, sh, -w/2, -h/2, w, h);
-  } else {
-    ctx.drawImage(fonte, sx, sy, sw, sh, 0, 0, w, h);
-  }
+  if(girar){ ctx.translate(cw, 0); ctx.rotate(Math.PI/2); }
+  ctx.drawImage(fonte, sx, sy, sw, sh, 0, 0, w, h);
   return c;
 }
 
@@ -13819,18 +13639,13 @@ function liberarCanvasColeta(){
   if(CANVAS_LEITOR_COLETA){ CANVAS_LEITOR_COLETA.width = 0; CANVAS_LEITOR_COLETA.height = 0; }
 }
 
-async function lerChaveNoCanvas(canvas){
-  const valida = t => {
-    const d = String(t||'').replace(/\D/g,'');
-    if(d.length === 44 && analisarChaveNFe(d).ok) return d;
-    if(t) ULTIMA_LEITURA_INVALIDA_COLETA = String(t).slice(0, 50);
-    return null;
-  };
-  if(DETECTOR_COLETA){
-    try { for(const c of await DETECTOR_COLETA.detect(canvas)){ const v = valida(c.rawValue); if(v) return v; } } catch(_){}
-    return null;
+// Tenta ler uma chave válida no canvas. Devolve a chave (44 dígitos) ou null.
+async function lerChaveNoCanvas(canvas, detector, usarZXing){
+  const valida = t => { const d = String(t||'').replace(/\D/g,''); return d.length === 44 && analisarChaveNFe(d).ok ? d : null; };
+  if(detector){
+    try { for(const c of await detector.detect(canvas)){ const v = valida(c.rawValue); if(v) return v; } } catch(_){}
   }
-  if(ZXING_LEITOR_COLETA){
+  if(usarZXing && ZXING_LEITOR_COLETA){
     const fonte = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
     for(const Binarizador of [ZXing.HybridBinarizer, ZXing.GlobalHistogramBinarizer]){
       try {
@@ -13853,14 +13668,15 @@ function leituraConcluidaColeta(chave){
 
 async function abrirScannerNF(pid){
   SCANNER_PID = pid;
-  ULTIMA_LEITURA_INVALIDA_COLETA = '';
   const video = document.getElementById('scanner-video');
-  ['scanner-foto-input','scanner-galeria-input'].forEach(id => { const e = document.getElementById(id); if(e) e.value = ''; });
+  document.getElementById('scanner-foto-input').value = '';
   abrirModal('modal-scanner-nf');
-  statusScanner('Preparando o leitor… (na primeira vez pode levar alguns segundos)');
+  statusScanner('Preparando o leitor…');
   SCANNER_ATIVO = true;
   try {
-    await prepararLeitorColeta();
+    const detector = await detectorNativoColeta();
+    // ZXing sempre carregado: no iPad é o único leitor; no Android reforça o nativo
+    try { await obterLeitorZXingColeta(); } catch(e){ if(!detector) throw e; }
     if(!SCANNER_ATIVO) return;
     if(!navigator.mediaDevices?.getUserMedia) throw new Error('este navegador não libera a câmera ao vivo');
     statusScanner('Abrindo a câmera…');
@@ -13878,19 +13694,19 @@ async function abrirScannerNF(pid){
       if(vw && vh){
         analises++;
         try {
-          const graus = [0, -4, 4, -8, 8][analises % 5];
-          const faixa = desenharRecorteColeta(video, 0, Math.round(vh*0.2), vw, Math.round(vh*0.6), 1600, graus);
-          const chave = await lerChaveNoCanvas(faixa);
+          const faixa = desenharRecorteColeta(video, 0, Math.round(vh*0.3), vw, Math.round(vh*0.4), 1280, false);
+          const usarZX = !detector || analises % 3 === 0;
+          const chave = await lerChaveNoCanvas(faixa, detector, usarZX);
           if(chave && SCANNER_ATIVO){ leituraConcluidaColeta(chave); return; }
         } catch(e){
           statusScanner('Erro na leitura ao vivo: ' + e.message + '. Use "Tirar foto".', 'erro');
           return;
         }
-        if(analises % 5 === 1){
-          statusScanner(`Procurando… (${nomeMotorColeta()}, câmera ${vw}×${vh}, ${analises} tentativas${ULTIMA_LEITURA_INVALIDA_COLETA ? ', leu "'+ULTIMA_LEITURA_INVALIDA_COLETA+'"' : ''}). Afaste um pouco se estiver desfocado. Se não ler, use "Tirar foto".`);
+        if(analises % 4 === 1){
+          statusScanner(`Procurando… (câmera ${vw}×${vh}, ${analises} tentativas). Encaixe o código de barras no retângulo, nota deitada. Se não ler em poucos segundos, use "Tirar foto".`);
         }
       }
-      SCANNER_TIMER = setTimeout(ciclo, 150);
+      SCANNER_TIMER = setTimeout(ciclo, detector ? 150 : 200);
     };
     ciclo();
   } catch(e){
@@ -13904,38 +13720,48 @@ function carregarImagemColeta(arquivo){
     const url = URL.createObjectURL(arquivo);
     const img = new Image();
     img.onload = () => resolve({ img, url });
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('não foi possível abrir a foto (formato '+(arquivo.type||'desconhecido')+')')); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('não foi possível abrir a foto')); };
     img.src = url;
   });
 }
 
+// Foto pela câmera nativa: procura o código na foto inteira (reta e girada) e depois em
+// faixas horizontais, que é onde um código longo e fino aparece com mais detalhe.
 async function lerFotoDanfe(input){
   const arquivo = input.files && input.files[0];
   if(!arquivo){ statusScanner('Nenhuma foto recebida. Toque em "Tirar foto da DANFE" de novo.', 'erro'); return; }
-  pararScannerNF();
-  ULTIMA_LEITURA_INVALIDA_COLETA = '';
   statusScanner('Foto recebida. Preparando o leitor…');
   let url = null;
   try {
-    await prepararLeitorColeta();
+    const detector = await detectorNativoColeta();
+    try { await obterLeitorZXingColeta(); } catch(e){ if(!detector) throw e; }
     const carregada = await carregarImagemColeta(arquivo);
     url = carregada.url;
     const img = carregada.img;
     const W = img.naturalWidth, H = img.naturalHeight;
     if(!W || !H) throw new Error('a foto veio vazia');
-    const tentativas = [];
-    for(const g of [0, -3, 3, -6, 6, -9, 9, -12, 12]) tentativas.push([0, 0, W, H, 2400, g]);
-    for(const g of [0, -4, 4, -8, 8]) tentativas.push([0, 0, W, H, 3400, g]);
-    for(const g of [0, -5, 5]) tentativas.push([0, 0, W, H, 1500, g]);
-    for(const g of [90, -90]) tentativas.push([0, 0, W, H, 2400, g]); // foto de lado
+    const tentativas = [
+      [0, 0, W, H, 2400, false], [0, 0, W, H, 1500, false],
+      [0, 0, W, H, 2400, true],  [0, 0, W, H, 1500, true]
+    ];
+    const NF = 7, altura = 0.28;
+    for(let i = 0; i < NF; i++){
+      const ini = i * (1 - altura) / (NF - 1);
+      tentativas.push([0, Math.round(H*ini), W, Math.round(H*altura), 2600, false]);
+    }
+    for(let i = 0; i < NF; i++){
+      const ini = i * (1 - altura) / (NF - 1);
+      tentativas.push([Math.round(W*ini), 0, Math.round(W*altura), H, 2600, true]);
+    }
     for(let i = 0; i < tentativas.length; i++){
-      statusScanner(`Procurando o código na foto (${nomeMotorColeta()}, ${W}×${H})… ${i+1}/${tentativas.length}`);
-      await new Promise(r => setTimeout(r, 0));
-      const [sx, sy, sw, sh, larg, graus] = tentativas[i];
-      const chave = await lerChaveNoCanvas(desenharRecorteColeta(img, sx, sy, sw, sh, larg, graus));
+      statusScanner(`Procurando o código na foto (${W}×${H})… ${i+1}/${tentativas.length}`);
+      await new Promise(r => setTimeout(r, 0)); // deixa a tela atualizar
+      const [sx, sy, sw, sh, larg, girar] = tentativas[i];
+      const c = desenharRecorteColeta(img, sx, sy, sw, sh, larg, girar);
+      const chave = await lerChaveNoCanvas(c, detector, true);
       if(chave){ leituraConcluidaColeta(chave); return; }
     }
-    statusScanner(`Não encontrei o código nessa foto (${nomeMotorColeta()}, ${W}×${H}${ULTIMA_LEITURA_INVALIDA_COLETA ? ', leu "'+ULTIMA_LEITURA_INVALIDA_COLETA+'"' : ''}). Tire outra com o código de barras ocupando boa parte da foto, boa luz e nota reta — ou digite o número da NF.`, 'erro');
+    statusScanner('Não encontrei o código nessa foto. Tire outra mais de perto (o código ocupando quase toda a largura), com boa luz e a nota bem reta — ou digite o número da NF.', 'erro');
   } catch(e){
     statusScanner('Erro ao ler a foto: ' + (e.message || e) + '. Digite o número da NF.', 'erro');
   } finally {
@@ -14037,24 +13863,12 @@ async function confirmarColeta(modoPapel){
       return;
     }
 
-    // 2) NF repetida nesta coleta ou já registrada em outro romaneio: bloqueia
-    const nfsRepetidas = [];
-    const vistas = {};
-    ids.forEach(pid => {
-      const n = COLETA_SELECAO[pid].nf.numero;
-      if(vistas[n]) nfsRepetidas.push(`• A NF ${n} foi informada em mais de um pedido desta coleta.`);
-      vistas[n] = true;
-    });
+    // 2) NF que já consta em outro romaneio
     await Promise.all(ids.map(async pid => {
       const s = COLETA_SELECAO[pid];
       const snap = await db.ref('coletas_nf/'+s.nf.numero).once('value');
-      if(snap.exists()) nfsRepetidas.push(`• A NF ${s.nf.numero} já saiu em outro romaneio.`);
+      if(snap.exists()) avisos.push(`• A NF ${s.nf.numero} já consta em outro romaneio.`);
     }));
-    if(nfsRepetidas.length){
-      abortar();
-      await confirmCustom('Não foi possível registrar a coleta:\n\n' + nfsRepetidas.map(esc).join('\n') + '\n\nConfira o número das notas.', 'OK');
-      return;
-    }
     if(avisos.length && !await confirmCustom('Confira antes de continuar:\n\n' + avisos.join('\n') + '\n\nRegistrar mesmo assim?', 'Registrar')){
       abortar(); return;
     }
@@ -14319,7 +14133,7 @@ async function desfazerColeta(id){
       updates['aguardando_coleta/'+n.pedido_id] = {
         numero: n.pedido_numero || '', cliente_nome: n.cliente_nome || '',
         cliente_cidade: n.cliente_cidade || '', cliente_uf: n.cliente_uf || '',
-        volumes: Number(n.volumes) || null, bipado_em: agora().toISOString()
+        volumes: Number(n.volumes) || 1, bipado_em: ''
       };
     });
     await db.ref().update(updates);
@@ -14341,49 +14155,27 @@ async function abrirModalEtiqueta(pedidoId){
     <div class="modal-title">🏷️ Etiqueta de Envio — Pedido #${p.numero}</div>
     <div class="form-row single">
       <div class="form-group">
-        <label>Quantidade de volumes (caixas/pacotes) *</label>
-        <input type="number" id="etiqueta-volumes" value="${Number(p.volumes)||''}" min="1" max="99" inputmode="numeric" placeholder="Conte as caixas/pacotes">
-        <div style="font-size:12px;color:var(--muted);margin-top:4px">Esse número vai para o romaneio de coleta.</div>
+        <label>Quantidade de volumes (caixas/pacotes)</label>
+        <input type="number" id="etiqueta-volumes" value="1" min="1" max="20">
       </div>
     </div>
     <div class="form-actions">
-      <button class="btn btn-outline" onclick="salvarVolumesSemEtiqueta('${pedidoId}')">Salvar sem imprimir</button>
+      <button class="btn btn-outline" onclick="fecharModal('modal-etiqueta')">Pular</button>
       <button class="btn btn-primary" onclick="gerarEImprimirEtiquetas('${pedidoId}')">🖨️ Gerar e Imprimir</button>
     </div>
   `;
   abrirModal('modal-etiqueta');
 }
 
-// Volume informado na etiqueta: obrigatório, sem valor padrão (um "1" automático vira erro no romaneio)
-function lerVolumesEtiqueta(){
-  const el = document.getElementById('etiqueta-volumes');
-  const v = parseInt(el && el.value, 10);
-  if(!(v >= 1)){ toast('Informe a quantidade de volumes','error'); if(el) el.focus(); return null; }
-  return v;
-}
-
-// Guarda os volumes no pedido e na fila da Coleta. A fila só é atualizada se o pedido
-// ainda estiver nela (transaction aborta se o nó não existe — sem registro fantasma).
-function gravarVolumesPedido(pedidoId, totalVolumes){
-  db.ref('pedidos/'+pedidoId+'/volumes').set(totalVolumes).catch(()=>{});
-  db.ref('aguardando_coleta/'+pedidoId).transaction(atual => atual ? { ...atual, volumes: totalVolumes } : undefined).catch(()=>{});
-}
-
-function salvarVolumesSemEtiqueta(pedidoId){
-  const v = lerVolumesEtiqueta();
-  if(!v) return;
-  gravarVolumesPedido(pedidoId, v);
-  fecharModal('modal-etiqueta');
-  toast(`✓ ${v} volume(s) registrado(s)`,'success');
-}
-
 async function gerarEImprimirEtiquetas(pedidoId){
-  const totalVolumes = lerVolumesEtiqueta();
-  if(!totalVolumes) return;
   const snap = await db.ref('pedidos/'+pedidoId).once('value');
   const p = snap.val();
   if(!p) return;
-  gravarVolumesPedido(pedidoId, totalVolumes);
+  const totalVolumes = Number(document.getElementById('etiqueta-volumes').value) || 1;
+  // Guarda os volumes para já virem preenchidos na Coleta. A fila só é atualizada se o
+  // pedido ainda estiver nela (transaction aborta se o nó não existe — sem registro fantasma).
+  db.ref('pedidos/'+pedidoId+'/volumes').set(totalVolumes).catch(()=>{});
+  db.ref('aguardando_coleta/'+pedidoId).transaction(atual => atual ? { ...atual, volumes: totalVolumes } : undefined).catch(()=>{});
 
   let etiquetasHtml = '';
   for(let vol = 1; vol <= totalVolumes; vol++){
@@ -18880,16 +18672,6 @@ async function calcularMRP(){
 
   const desdeTs = agoraTs() - diasHistorico*24*60*60*1000;
   const consumoPorCodigo = {}; // codigo -> total consumido/vendido no período
-  // Data do primeiro consumo de cada item DENTRO da janela. Item que passou a girar há
-  // poucos dias (importado que acabou de chegar, produto novo) nao pode ter o consumo
-  // dividido pela janela inteira: isso subestima o CMD proporcionalmente ao tempo que
-  // ele ainda nao existia, e atrasa a compra exatamente dos itens mais criticos.
-  const primeiroConsumoPorCodigo = {};
-  const PISO_DIAS_CMD = 30; // historico curto demais gera CMD instavel: nunca divide por menos que isso
-  const marcarPrimeiroConsumo = (codigo, ts) => {
-    if(!codigo || !ts || isNaN(ts)) return;
-    if(!primeiroConsumoPorCodigo[codigo] || ts < primeiroConsumoPorCodigo[codigo]) primeiroConsumoPorCodigo[codigo] = ts;
-  };
   const emTransitoPorCodigo = {};
 
   if(tipoMrp === 'insumo'){
@@ -18903,7 +18685,6 @@ async function calcularMRP(){
       const motivoLower = (m.motivo||'').toLowerCase();
       if(motivoLower.includes('balanço') || motivoLower.includes('balanco') || motivoLower.includes('estorno')) return;
       consumoPorCodigo[m.codigo] = (consumoPorCodigo[m.codigo]||0) + Number(m.qtd||0);
-      marcarPrimeiroConsumo(m.codigo, Number(m.ts||0));
     });
 
     // Em trânsito: pedidos de compra de insumo já saíram da negociação (Separação em diante),
@@ -18927,7 +18708,6 @@ async function calcularMRP(){
       if(isNaN(dataPedido) || dataPedido < desdeTs) return;
       (p.itens||[]).forEach(it=>{
         consumoPorCodigo[it.codigo] = (consumoPorCodigo[it.codigo]||0) + Number(it.qtd||0);
-        marcarPrimeiroConsumo(it.codigo, dataPedido);
       });
     });
 
@@ -18950,17 +18730,8 @@ async function calcularMRP(){
   const baseItens = tipoMrp === 'insumo' ? INSUMOS_DB : PRODUTOS_DB;
   const linhas = baseItens.filter(i=>!i.inativo).map(i=>{
     const consumoTotal = consumoPorCodigo[i.codigo] || 0;
-    // Divide pelos dias em que o item realmente girou, limitado pela janela e pelo piso.
-    const primeiroTs = primeiroConsumoPorCodigo[i.codigo];
-    const diasDeGiro = primeiroTs ? Math.ceil((agoraTs() - primeiroTs) / (24*60*60*1000)) : diasHistorico;
-    const diasEfetivos = Math.min(diasHistorico, Math.max(PISO_DIAS_CMD, diasDeGiro));
-    const historicoCurto = diasDeGiro < diasEfetivos; // gira ha menos tempo que o piso: CMD ainda subestimado
-    const cmd = consumoTotal / diasEfetivos;
-    // Reservado = comprometido em pedido confirmado, ainda nao bipado. Nao esta disponivel
-    // para atender demanda futura, entao nao pode contar como cobertura.
-    const reservado = tipoMrp==='insumo' ? 0 : Number(i.reservado||0);
-    const estoqueFisico = Number((tipoMrp==='insumo' ? i.estoque_atual : i.quantidade) || 0);
-    const estoqueAtual = estoqueFisico - reservado;
+    const cmd = consumoTotal / diasHistorico;
+    const estoqueAtual = Number((tipoMrp==='insumo' ? i.estoque_atual : i.quantidade) || 0);
     const emTransito = emTransitoPorCodigo[i.codigo] || 0;
 
     let nomeFornecedor, prazoEntrega;
@@ -18997,7 +18768,6 @@ async function calcularMRP(){
 
     return {
       codigo: i.codigo, nome: i.nome, cmd, estoqueAtual, emTransito,
-      reservado, estoqueFisico, diasEfetivos, historicoCurto,
       coberturaAtualDias, prazoEntrega, fornecedor: nomeFornecedor || (temReceita?'(produção própria)':'(sem fornecedor)'),
       temReceita, diasAteComprar, statusMrp, corStatus, qtdSugerida, dataSugerida,
       urgente: cmd > 0 && diasAteComprar <= 7
@@ -19030,8 +18800,7 @@ async function calcularMRP(){
         <th style="padding:7px 9px;text-align:left">${tipoMrp==='insumo'?'Insumo':'Produto'}</th>
         <th style="padding:7px 9px;text-align:left">Fornecedor</th>
         <th style="padding:7px 9px;text-align:center">${tipoMrp==='insumo'?'Consumo':'Venda'}/dia</th>
-        <th style="padding:7px 9px;text-align:center" title="Estoque físico menos o que já está reservado em pedidos confirmados">Disponível</th>
-        <th style="padding:7px 9px;text-align:center" title="Comprometido em pedidos confirmados, ainda não bipado">Reservado</th>
+        <th style="padding:7px 9px;text-align:center">Estoque</th>
         <th style="padding:7px 9px;text-align:center">A Caminho</th>
         <th style="padding:7px 9px;text-align:center">Prazo</th>
         <th style="padding:7px 9px;text-align:center">${colunaAcao}</th>
@@ -19044,9 +18813,8 @@ async function calcularMRP(){
             <td style="padding:6px 9px;font-weight:700">${l.codigo}</td>
             <td style="padding:6px 9px">${esc(l.nome)}</td>
             <td style="padding:6px 9px">${esc(l.fornecedor)}</td>
-            <td style="padding:6px 9px;text-align:center" title="Consumo apurado sobre ${l.diasEfetivos} dia(s)${l.historicoCurto?' — item gira há menos tempo que isso, consumo real tende a ser maior':''}">${l.cmd.toFixed(2)}${l.historicoCurto?' <span style="color:#b45309;font-weight:700" title="Histórico curto: CMD provavelmente subestimado">*</span>':''}</td>
-            <td style="padding:6px 9px;text-align:center;${l.estoqueAtual<=0?'color:#dc2626;font-weight:700':''}">${l.estoqueAtual.toLocaleString('pt-BR')}</td>
-            <td style="padding:6px 9px;text-align:center;${l.reservado>0?'color:#b45309':'color:var(--muted)'}">${l.reservado ? l.reservado.toLocaleString('pt-BR') : '—'}</td>
+            <td style="padding:6px 9px;text-align:center">${l.cmd.toFixed(2)}</td>
+            <td style="padding:6px 9px;text-align:center">${l.estoqueAtual.toLocaleString('pt-BR')}</td>
             <td style="padding:6px 9px;text-align:center">${l.emTransito.toLocaleString('pt-BR')}</td>
             <td style="padding:6px 9px;text-align:center">${l.prazoEntrega ? l.prazoEntrega+'d' : (l.temReceita?'—':'<span style="color:#dc2626">sem prazo</span>')}</td>
             <td style="padding:6px 9px;text-align:center">${l.dataSugerida ? l.dataSugerida.toLocaleDateString('pt-BR') : '—'}</td>
@@ -19068,8 +18836,7 @@ let mrpCache = [];
 function exportarMRPExcel(){
   const dados = mrpCache.map(l=>({
     'Código': l.codigo, 'Insumo': l.nome, 'Fornecedor': l.fornecedor,
-    'Consumo Médio/Dia': Number(l.cmd.toFixed(2)), 'Dias Apurados': l.diasEfetivos,
-    'Estoque Físico': l.estoqueFisico, 'Reservado': l.reservado, 'Disponível': l.estoqueAtual,
+    'Consumo Médio/Dia': Number(l.cmd.toFixed(2)), 'Estoque Atual': l.estoqueAtual,
     'A Caminho': l.emTransito, 'Prazo Entrega (dias)': l.prazoEntrega,
     'Comprar Até': l.dataSugerida ? l.dataSugerida.toLocaleDateString('pt-BR') : '',
     'Quantidade Sugerida': l.qtdSugerida, 'Situação': l.statusMrp
@@ -20569,7 +20336,6 @@ async function finalizarPedidosEmMassa(){
     updates['pedidos/'+id+'/status'] = 'CC';
     updates['pedidos/'+id+'/ts_fim_bipagem'] = agoraTs();
     updates['pedidos/'+id+'/bipado_por'] = (usuarioLogado?.nome||'') + ' (finalização em massa)';
-    if(!p.coleta_id) updates['aguardando_coleta/'+id] = resumoPedidoColeta({ ...p, ts_fim_bipagem: agoraTs() });
     finalizados++;
   }
 
