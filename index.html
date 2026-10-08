@@ -5224,7 +5224,7 @@ async function clonarPedido(id){
   fecharModal('modal-ver-pedido');
   // Clona itens removendo qualquer marcação de separação/bipagem da OP anterior
   let itensClonados = JSON.parse(JSON.stringify(p.itens||[])).map(i=>{
-    delete i.separado; delete i.qtd_bipada; delete i.bipado;
+    delete i.separado; delete i.qtd_bipada; delete i.bipado; delete i.bip_adiado;
     // Marcas de campanha do pedido antigo não valem no clone — volta ao preço de
     // tabela e deixa a campanha vigente (se houver) ser reavaliada do zero.
     if(i.promo_ativa && i.preco_pre_promo != null) i.preco = Number(i.preco_pre_promo);
@@ -12786,6 +12786,7 @@ async function confirmarGerarOPSeparacao(){
 async function irParaBipagem(){
   pedidoSeparacaoAtual.ts_inicio_bipagem = agoraTs();
   await db.ref('pedidos/'+pedidoSeparacaoAtual.id+'/ts_inicio_bipagem').set(pedidoSeparacaoAtual.ts_inicio_bipagem);
+  await recarregarItensBipagem();
   fecharModal('modal-separacao');
   renderModalBipagem();
   abrirModal('modal-separacao');
@@ -12795,8 +12796,8 @@ async function irParaBipagem(){
 // por endereço (R1-P01-V1...), sem endereço por último, empate na ordem original do pedido.
 // Devolve só os ÍNDICES: p.itens NÃO é reordenado, então o que é gravado no Firebase continua igual.
 function ordemRotaIndices(itens){
-  return (itens||[]).map((it, i) => ({ i, loc: String(PRODUTOS_DB.find(x=>x.codigo===it.codigo)?.localizacao||'').trim() }))
-    .sort((a,b) => (!a.loc - !b.loc) || a.loc.localeCompare(b.loc, 'pt-BR', {numeric:true}) || (a.i - b.i))
+  return (itens||[]).map((it, i) => ({ i, adi: Number(it.bip_adiado||0), loc: String(PRODUTOS_DB.find(x=>x.codigo===it.codigo)?.localizacao||'').trim() }))
+    .sort((a,b) => ((a.adi>0) - (b.adi>0)) || (a.adi - b.adi) || (!a.loc - !b.loc) || a.loc.localeCompare(b.loc, 'pt-BR', {numeric:true}) || (a.i - b.i))
     .map(x => x.i);
 }
 // Primeiro item (na ordem de rota) que ainda não foi 100% bipado; -1 se tudo bipado
@@ -12821,6 +12822,7 @@ function renderModalBipagem(){
   const idxAtual = idxAtualBipagemRota(itens);
   const itemAtual = idxAtual >= 0 ? itens[idxAtual] : null;
   const posAtual = ordem.indexOf(idxAtual);
+  const pendentesBip = itens.filter(i => Number(i.qtd_bipada||0) < i.qtd).length;
 
   const linhasConcluidas = ordem.map((idx, pos) => {
     const item = itens[idx];
@@ -12854,6 +12856,7 @@ function renderModalBipagem(){
         <div style="font-size:16px;font-weight:700">${esc(itemAtual.nome)}</div>
         ${(()=>{ const l = String(PRODUTOS_DB.find(x=>x.codigo===itemAtual.codigo)?.localizacao||'').trim(); return l ? `<div style="margin-top:6px"><span style="background:#1F3A5F;color:#fff;border-radius:5px;padding:2px 10px;font-weight:700;font-size:13px">📍 ${esc(l)}</span></div>` : ''; })()}
         <div style="font-size:28px;font-weight:900;font-family:'DM Sans',sans-serif;color:#d97706;margin-top:8px">${Number(itemAtual.qtd_bipada||0)} / ${itemAtual.qtd}</div>
+        ${pendentesBip > 1 ? `<button class="btn btn-outline btn-sm" style="margin-top:10px" onclick="adiarItemBipagem()">⏭ Deixar para o final (aguardando produção)</button>` : (itemAtual.bip_adiado ? `<div style="margin-top:8px;font-size:12px;color:#92400e">⏭ Item que tinha sido deixado para o final</div>` : '')}
       </div>
     ` : `<div style="text-align:center;color:var(--success);font-weight:700;padding:12px">✅ Todos os itens bipados!</div>
       <button class="btn btn-primary" style="width:100%;margin-bottom:16px;background:#16a34a;border-color:#16a34a" onclick="finalizarPedidoBipado()">✅ Concluir pedido</button>`}
@@ -12876,10 +12879,54 @@ function renderModalBipagem(){
   setTimeout(()=>document.getElementById('input-bipagem')?.focus(), 100);
 }
 
-async function processarBipagem(codigoLido){
-  if(!codigoLido.trim()) return;
+// Relê SÓ os itens do pedido no Firebase (poucos KB). Evita gravar por cima de uma alteração
+// feita em outra tela/computador com uma lista antiga que estava na memória deste navegador.
+async function recarregarItensBipagem(){
   const p = pedidoSeparacaoAtual;
-  const msg = document.getElementById('bipagem-msg');
+  if(!p || !p.id) return false;
+  const snap = await db.ref('pedidos/'+p.id+'/itens').once('value');
+  const v = snap.val();
+  if(!v) return false;
+  const novos = (Array.isArray(v) ? v : Object.values(v)).filter(Boolean);
+  const mudou = JSON.stringify(novos) !== JSON.stringify(p.itens||[]);
+  p.itens = novos;
+  return mudou;
+}
+
+// Fila: processa um bipe (ou um "deixar para o final") por vez, para nenhuma leitura se perder
+let _filaBipagem = Promise.resolve();
+function enfileirarBipagem(fn){
+  _filaBipagem = _filaBipagem.then(fn).catch(e => { console.error(e); toast('Erro na bipagem: '+(e.message||e),'error'); });
+  return _filaBipagem;
+}
+
+function processarBipagem(codigoLido){
+  if(!String(codigoLido||'').trim()) return;
+  return enfileirarBipagem(() => _processarBipagemAgora(codigoLido));
+}
+
+async function adiarItemBipagem(){
+  return enfileirarBipagem(async () => {
+    const p = pedidoSeparacaoAtual;
+    await recarregarItensBipagem();
+    const idx = idxAtualBipagemRota(p.itens);
+    const pendentes = p.itens.filter(i => Number(i.qtd_bipada||0) < i.qtd).length;
+    if(idx < 0 || pendentes < 2){ renderModalBipagem(); toast('Não há outro item pendente para bipar antes deste.','error'); return; }
+    const item = p.itens[idx];
+    if(!confirm(`Deixar "${item.nome}" para o final da bipagem?\n\nOs próximos itens são liberados agora. Este volta a ser cobrado quando todos os outros estiverem bipados.`)){ renderModalBipagem(); return; }
+    item.bip_adiado = agoraTs();
+    await db.ref('pedidos/'+p.id+'/itens').set(p.itens);
+    renderModalBipagem();
+    const m = document.getElementById('bipagem-msg');
+    if(m) m.innerHTML = `<span style="color:#92400e">⏭ ${esc(item.nome)} foi para o final da fila.</span>`;
+  });
+}
+
+async function _processarBipagemAgora(codigoLido){
+  const p = pedidoSeparacaoAtual;
+  if(!p) return;
+  if(await recarregarItensBipagem()) renderModalBipagem(); // alguém mudou o pedido: mostra a versão atual
+  const msg = document.getElementById('bipagem-msg') || { innerHTML: '' };
 
   // Encontra o item atual da fila (primeiro não-completo, na ORDEM DE ROTA — igual à folha impressa)
   const idxAtual = idxAtualBipagemRota(p.itens);
@@ -12942,8 +12989,10 @@ async function processarBipagem(codigoLido){
 function confirmarReiniciarBipagem(){
   const p = pedidoSeparacaoAtual;
   if(!confirm(`Reiniciar TODA a bipagem do pedido #${p.numero}?\n\nIsso vai zerar a contagem de todos os itens — você terá que bipar tudo de novo desde o começo.`)) return;
-  p.itens.forEach(item => { item.qtd_bipada = 0; });
-  db.ref('pedidos/'+p.id+'/itens').set(p.itens).then(()=>{
+  enfileirarBipagem(async () => {
+    await recarregarItensBipagem(); // zera em cima da versão atual do pedido, sem desfazer edições
+    p.itens.forEach(item => { item.qtd_bipada = 0; delete item.bip_adiado; });
+    await db.ref('pedidos/'+p.id+'/itens').set(p.itens);
     renderModalBipagem();
     toast('✓ Bipagem reiniciada','success');
   });
