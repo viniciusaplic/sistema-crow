@@ -2407,8 +2407,8 @@ tbody td{padding:11px 16px;font-size:14px}
     <div class="coleta-bloco">
       <div class="coleta-rotulo">Quem está coletando</div>
       <div class="form-row">
-        <div class="form-group"><label>Nome completo *</label><input type="text" id="coleta-coletor-nome" autocomplete="off"></div>
-        <div class="form-group"><label>RG ou CPF *</label><input type="text" id="coleta-coletor-doc" autocomplete="off"></div>
+        <div class="form-group"><label>Nome completo *</label><input type="text" id="coleta-coletor-nome" autocomplete="off" list="coleta-coletores-lista" oninput="aoDigitarNomeColetor()"><datalist id="coleta-coletores-lista"></datalist></div>
+        <div class="form-group"><label>RG ou CPF *</label><input type="text" id="coleta-coletor-doc" autocomplete="off" onfocus="aoFocarDocColetor()" oninput="COLETOR_ESCOLHIDO=null"></div>
       </div>
       <div class="form-row single" id="coleta-placa-wrap">
         <div class="form-group"><label>Placa do veículo (opcional)</label><input type="text" id="coleta-placa" autocomplete="off" style="text-transform:uppercase" maxlength="8"></div>
@@ -13550,7 +13550,8 @@ async function carregarTransportadoras(forcar){
   if(TRANSPORTADORAS_DB && !forcar) return TRANSPORTADORAS_DB;
   const snap = await db.ref('transportadoras').once('value');
   const v = snap.val() || {};
-  TRANSPORTADORAS_DB = Object.keys(v).map(id => ({ id, nome: v[id].nome || '' }))
+  TRANSPORTADORAS_DB = Object.keys(v).map(id => ({ id, nome: v[id].nome || '',
+      coletores: Object.values(v[id].coletores || {}).filter(c => c && c.nome && c.documento) }))
     .filter(t => t.nome)
     .sort((a,b) => a.nome.localeCompare(b.nome,'pt-BR'));
   return TRANSPORTADORAS_DB;
@@ -13570,6 +13571,53 @@ function aoMudarTransportadora(){
   const wrap = document.getElementById('coleta-nova-transp-wrap');
   wrap.style.display = v === '__nova' ? 'flex' : 'none';
   if(v === '__nova') document.getElementById('coleta-nova-transp').focus();
+  preencherUltimoColetor();
+}
+
+// ══ COLETORES SALVOS (por transportadora) ══
+// Ficam em transportadoras/{id}/coletores/{doc} e chegam na mesma leitura das transportadoras.
+let COLETOR_ESCOLHIDO = null; // {nome, documento, placa} quando o doc na tela está mascarado
+
+function mascararDocColetor(doc){
+  const d = String(doc||'').replace(/[^0-9a-z]/gi,'');
+  if(/^\d{11}$/.test(d)) return '***.' + d.slice(3,6) + '.' + d.slice(6,9) + '-**';
+  return d.length > 4 ? '•'.repeat(d.length-4) + d.slice(-4) : d;
+}
+function normNomeColetor(s){
+  return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
+}
+function coletoresDaTranspSelecionada(){
+  const sid = document.getElementById('coleta-transportadora')?.value;
+  const t = (TRANSPORTADORAS_DB||[]).find(x => x.id === sid);
+  return t ? [...(t.coletores||[])].sort((a,b) => String(b.ultimo_uso||'').localeCompare(String(a.ultimo_uso||''))) : [];
+}
+function aplicarColetor(c){
+  COLETOR_ESCOLHIDO = c || null;
+  document.getElementById('coleta-coletor-nome').value = c ? c.nome : '';
+  document.getElementById('coleta-coletor-doc').value = c ? mascararDocColetor(c.documento) : '';
+  const pl = document.getElementById('coleta-placa');
+  if(pl) pl.value = c ? (c.placa || '') : '';
+}
+function preencherUltimoColetor(){
+  const lista = coletoresDaTranspSelecionada();
+  const dl = document.getElementById('coleta-coletores-lista');
+  if(dl) dl.innerHTML = lista.map(c => `<option value="${esc(c.nome)}"></option>`).join('');
+  aplicarColetor(lista[0] || null);
+}
+function aoDigitarNomeColetor(){
+  const nome = normNomeColetor(document.getElementById('coleta-coletor-nome').value);
+  const c = coletoresDaTranspSelecionada().find(x => normNomeColetor(x.nome) === nome);
+  if(c){ aplicarColetor(c); return; }
+  // Nome diferente do salvo: não reaproveita o documento de outra pessoa
+  if(COLETOR_ESCOLHIDO){
+    COLETOR_ESCOLHIDO = null;
+    document.getElementById('coleta-coletor-doc').value = '';
+    const pl = document.getElementById('coleta-placa'); if(pl) pl.value = '';
+  }
+}
+function aoFocarDocColetor(){
+  // Doc mascarado não dá pra editar parcialmente: ao clicar, limpa para digitar outro
+  if(COLETOR_ESCOLHIDO){ COLETOR_ESCOLHIDO = null; document.getElementById('coleta-coletor-doc').value = ''; }
 }
 
 async function salvarNovaTransportadora(){
@@ -13612,6 +13660,8 @@ async function abrirModalColeta(){
   aoMudarTipoColeta();
   renderSelectTransportadora('');
   ['coleta-filtro','coleta-coletor-nome','coleta-coletor-doc','coleta-placa','coleta-nova-transp'].forEach(id => { const e = document.getElementById(id); if(e) e.value = ''; });
+  COLETOR_ESCOLHIDO = null;
+  const dlCol = document.getElementById('coleta-coletores-lista'); if(dlCol) dlCol.innerHTML = '';
   renderColetaLinhas();
   abrirModal('modal-coleta');
   // O quadro de assinatura só pode ser medido com o modal visível
@@ -14013,7 +14063,8 @@ async function confirmarColeta(modoPapel){
     if(!(Number(s.volumes) >= 1)){ toast(`Informe os volumes do pedido #${p?.numero||''}`,'error'); return; }
   }
   const nome = String(document.getElementById('coleta-coletor-nome').value||'').trim().replace(/\s+/g,' ');
-  const doc = String(document.getElementById('coleta-coletor-doc').value||'').trim();
+  const docTela = String(document.getElementById('coleta-coletor-doc').value||'').trim();
+  const doc = (COLETOR_ESCOLHIDO && docTela === mascararDocColetor(COLETOR_ESCOLHIDO.documento)) ? COLETOR_ESCOLHIDO.documento : docTela;
   const placa = tipo === 'transportadora' ? String(document.getElementById('coleta-placa').value||'').trim().toUpperCase() : '';
   if(nome.length < 3){ toast('Informe o nome de quem está coletando','error'); document.getElementById('coleta-coletor-nome').focus(); return; }
   const docDig = doc.replace(/[^0-9a-z]/gi,'');
@@ -14120,6 +14171,11 @@ async function confirmarColeta(modoPapel){
       updates['aguardando_coleta/'+n.pedido_id] = null;
       updates['coletas_nf/'+n.nf_numero+'/'+cid] = true;
     });
+    let coletorSalvo = null;
+    if(transp){
+      coletorSalvo = { nome, documento: doc, placa, ultimo_uso: dataIso };
+      updates['transportadoras/'+transp.id+'/coletores/'+docDig.toLowerCase()] = coletorSalvo;
+    }
 
     if(modoPapel) escreverRomaneioNaJanela(win, { id:cid, ...coleta }, null);
 
@@ -14128,6 +14184,14 @@ async function confirmarColeta(modoPapel){
     await gravacao;
 
     if(assinaturaPng) COLETA_ASSINATURAS_CACHE[cid] = assinaturaPng;
+    if(coletorSalvo){
+      const tMem = (TRANSPORTADORAS_DB||[]).find(t => t.id === transp.id);
+      if(tMem){
+        const dk = c => String(c.documento||'').replace(/[^0-9a-z]/gi,'').toLowerCase();
+        tMem.coletores = (tMem.coletores||[]).filter(c => dk(c) !== docDig.toLowerCase());
+        tMem.coletores.push(coletorSalvo);
+      }
+    }
     toast(`✅ Coleta registrada${numero?' — romaneio Nº '+numero:''}`,'success');
     fecharModal('modal-coleta');
     COLETA_SELECAO = {};
