@@ -770,6 +770,14 @@ tbody td{padding:11px 16px;font-size:14px}
             <label>Até</label>
             <input type="date" id="rel-data-fim" onchange="gerarRelatorio()">
           </div>
+          <div class="filtro-group" id="rel-filtro-tipoprod-wrap" style="display:none">
+            <label>Tipo de item</label>
+            <select id="rel-tipoprod" onchange="gerarRelatorio()">
+              <option value="vendavel">Vendáveis (vendas)</option>
+              <option value="insumo">Insumos (consumo)</option>
+              <option value="todos">Vendáveis + Insumos</option>
+            </select>
+          </div>
           <div class="filtro-group" id="rel-filtro-vendedor-wrap">
             <label>Vendedor</label>
             <select id="rel-vendedor" onchange="gerarRelatorio()">
@@ -18534,6 +18542,8 @@ function mostrarRelatorio(tipo, btnEl){
     ['vendas-periodo'].includes(tipo) ? 'block' : 'none';
   document.getElementById('rel-filtro-estoque-minimo-wrap').style.display =
     tipo === 'estoque-minimo' ? 'flex' : 'none';
+  document.getElementById('rel-filtro-tipoprod-wrap').style.display =
+    tipo === 'vendas-produto' ? 'block' : 'none';
   // Diagnóstico de Consumo não usa período/vendedor/agrupamento — esconde só esses campos,
   // mantendo visíveis os botões Gerar/Excel que ficam no mesmo container
   const escondePeriodoVendedorAgrupar = ['diagnostico-consumo','mrp','comissionamento','sugestao-compra','recalc-estoque-minimo','codigos-duplicados','insumos-inativos','auditoria-estoque','baixas-duplicadas'].includes(tipo);
@@ -18566,6 +18576,15 @@ async function gerarRelatorio(){
   if(tipo === 'insumos-inativos'){ await relInsumosInativos(el); return; }
   if(tipo === 'baixas-duplicadas'){ await relBaixasDuplicadas(el); return; }
   if(tipo === 'auditoria-estoque'){ await relAuditoriaEstoque(el); return; }
+  const tipoProd = document.getElementById('rel-tipoprod')?.value || 'vendavel';
+  if(tipo === 'vendas-produto' && tipoProd === 'insumo'){
+    el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:40px">⏳ Carregando...</div>';
+    document.getElementById('rel-grafico-wrap').style.display = 'none';
+    const r = await relConsumoInsumos(dataIni, dataFim);
+    relatorioCache = { tipo:'vendas-produto', lista: r.lista };
+    el.innerHTML = r.html;
+    return;
+  }
 
   el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:40px">⏳ Carregando...</div>';
 
@@ -18594,7 +18613,7 @@ async function gerarRelatorio(){
     case 'vendas-vendedor': relVendasVendedor(pedidos, el); break;
     case 'vendas-cliente': relVendasCliente(pedidos, el); break;
     case 'clientes-inativos': await relClientesInativos(dataIni, dataFim, vendedorFiltro, el); break;
-    case 'vendas-produto': relVendasProduto(pedidos, el); break;
+    case 'vendas-produto': await relVendasProduto(pedidos, el, tipoProd, dataIni, dataFim); break;
     case 'compras-fornecedor': await relComprasFornecedor(dataIni, dataFim, el); break;
     case 'estoque-posicao': await relEstoquePosicao(el); break;
     case 'vendas-cidade': relVendasCidade(pedidos, el); break;
@@ -18751,7 +18770,7 @@ async function relClientesInativos(dataIni, dataFim, vendedorFiltro, el){
 }
 
 // ── Vendas por Produto ──
-function relVendasProduto(pedidos, el){
+async function relVendasProduto(pedidos, el, tipoProd, dataIni, dataFim){
   const grupos = {};
   // Guardar referência dos pedidos por produto para drill-down
   const pedidosPorProd = {};
@@ -18771,9 +18790,10 @@ function relVendasProduto(pedidos, el){
   const lista = Object.values(grupos).sort((a,b)=>b.total-a.total);
   const totalGeral = lista.reduce((s,g)=>s+g.total,0);
   const totalPecas = lista.reduce((s,g)=>s+g.qtd,0);
+  lista.forEach(g=>{ g.tipo = 'Vendável'; });
   relatorioCache = { tipo:'vendas-produto', lista };
   renderGrafico(lista.slice(0,10).map(g=>g.nome.slice(0,20)), [{label:'Faturamento',data:lista.slice(0,10).map(g=>g.total),backgroundColor:'rgba(200,16,46,.7)'}]);
-  el.innerHTML = `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">
+  el.innerHTML = (tipoProd==='todos' ? '<div style="font-weight:700;font-size:15px;margin-bottom:8px">📦 Vendáveis — vendas faturadas</div>' : '') + `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">
     ${lista.length} produto(s) · ${pedidos.length} pedido(s) no período · ${totalPecas.toLocaleString('pt-BR')} peças vendidas
     <span style="color:var(--accent)"> · Clique em um produto para ver os pedidos detalhados</span>
   </div>`+tabelaRel(
@@ -18783,6 +18803,75 @@ function relVendasProduto(pedidos, el){
     ]),
     ['','','TOTAL',totalPecas.toLocaleString('pt-BR'),fmtMoeda(totalGeral),'']
   );
+
+  if(tipoProd === 'todos'){
+    const r = await relConsumoInsumos(dataIni, dataFim);
+    el.innerHTML += '<div style="font-weight:700;font-size:15px;margin:28px 0 8px">🔩 Insumos — consumo no período</div>' + r.html;
+    relatorioCache = { tipo:'vendas-produto', lista: lista.concat(r.lista) };
+  }
+}
+
+// ── Consumo de Insumos por período (Por Produto → Insumos) ──
+// Insumo não entra em pedido de venda, então o "movimento" dele é o consumo:
+// baixas das OPs (produção) e reposições de garantia, líquidas de estornos.
+// Ajustes de balanço/contagem e compras ficam de fora.
+// Leitura: busca só a faixa de datas por 'ts' (precisa de .indexOn "ts" em
+// movimentos_estoque para o Firebase baixar só o período; sem índice ainda funciona,
+// mas baixa o nó inteiro). Sem período informado, usa o cache de 2 min.
+async function relConsumoInsumos(dataIni, dataFim){
+  if(!INSUMOS_DB.length) await carregarInsumosFirebase();
+  const insPorCod = {};
+  INSUMOS_DB.forEach(i=>{ if(i.codigo) insPorCod[i.codigo] = i; });
+
+  const msIni = dataIni ? new Date(dataIni+'T00:00:00').getTime() : null;
+  const msFim = dataFim ? new Date(dataFim+'T23:59:59.999').getTime() : null;
+  let movs;
+  if(msIni !== null){
+    let q = db.ref('movimentos_estoque').orderByChild('ts').startAt(msIni);
+    if(msFim !== null) q = q.endAt(msFim);
+    movs = (await q.once('value')).val() || {};
+  } else {
+    movs = (await lerNoCache('movimentos_estoque')).val() || {};
+  }
+
+  const grupos = {};
+  Object.values(movs).forEach(m=>{
+    if(!m || m.pendente || m.falhou) return;
+    const ins = insPorCod[m.codigo]; if(!ins) return;          // só insumos
+    if(m.origem_tipo !== 'op' && m.origem_tipo !== 'garantia_cliente') return;
+    const ts = Number(m.ts)||0;
+    if(msIni !== null && ts < msIni) return;
+    if(msFim !== null && ts > msFim) return;
+    const sinal = m.tipo === 'saida' ? 1 : -1;                 // entrada = estorno
+    const q = sinal * (Number(m.qtd)||0);
+    if(!grupos[m.codigo]) grupos[m.codigo] = { tipo:'Insumo', cod:m.codigo, nome:ins.nome||m.nome||'', unidade:ins.unidade||'UN',
+      producao:0, garantia:0, qtd:0, custo:Number(ins.preco_custo)||0, total:0, ops:new Set() };
+    const g = grupos[m.codigo];
+    if(m.origem_tipo === 'op'){ g.producao += q; if(m.origem_id) g.ops.add(m.origem_id); }
+    else g.garantia += q;
+  });
+
+  const lista = Object.values(grupos).map(g=>{
+    g.qtd = g.producao + g.garantia;
+    g.total = g.qtd * g.custo;
+    g.nOps = g.ops.size; delete g.ops;
+    return g;
+  }).filter(g=>g.qtd !== 0).sort((a,b)=>b.qtd-a.qtd);
+
+  if(!lista.length){
+    return { lista, html:'<div style="text-align:center;color:var(--muted);padding:30px">Nenhum consumo de insumo no período.</div>' };
+  }
+  const fmtN = n => Number(n.toFixed(3)).toLocaleString('pt-BR');
+  const totQtd = lista.reduce((s,g)=>s+g.qtd,0);
+  const totVal = lista.reduce((s,g)=>s+g.total,0);
+  const html = `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">
+    ${lista.length} insumo(s) consumido(s) · baixas de OP + reposição de garantia, já descontados estornos · valor pelo custo atual do cadastro
+  </div>` + tabelaRel(
+    ['#','Código','Insumo',{label:'Un',align:'center'},{label:'Produção',align:'center'},{label:'OPs',align:'center'},{label:'Garantia',align:'center'},{label:'Total Consumido',align:'center'},{label:'Valor (custo)',align:'right'}],
+    lista.map((g,i)=>[i+1,esc(g.cod),esc(g.nome),g.unidade,fmtN(g.producao),g.nOps,fmtN(g.garantia),'<b>'+fmtN(g.qtd)+'</b>',g.custo?fmtMoeda(g.total):'—']),
+    ['','','TOTAL','','','','',fmtN(totQtd),fmtMoeda(totVal)]
+  );
+  return { lista, html };
 }
 
 function drillDownProduto(cod, nome){
@@ -21311,7 +21400,9 @@ function exportarRelatorioExcel(){
     case 'vendas-vendedor': dados = lista.map(g=>({'Vendedor':g.nome,'Pedidos':g.qtd,'Total':g.total})); break;
     case 'vendas-cliente': dados = lista.map(g=>({'Cliente':g.nome,'Pedidos':g.qtd,'Última Compra':g.ultima,'Total':g.total})); break;
     case 'clientes-inativos': dados = lista.map(g=>({'Cliente':g.nome,'Vendedor':g.vendedor_nome,'Última Compra':g.ultima||'Nunca'})); break;
-    case 'vendas-produto': dados = lista.map(g=>({'Código':g.cod,'Produto':g.nome,'Qtd':g.qtd,'Total':g.total})); break;
+    case 'vendas-produto': dados = lista.map(g=>g.tipo==='Insumo'
+      ? ({'Tipo':'Insumo','Código':g.cod,'Produto/Insumo':g.nome,'Un':g.unidade,'Qtd':Number(g.qtd.toFixed(3)),'Consumo Produção':Number(g.producao.toFixed(3)),'OPs':g.nOps,'Consumo Garantia':Number(g.garantia.toFixed(3)),'Valor':Number(g.total.toFixed(2)),'Base do valor':'Custo atual'})
+      : ({'Tipo':'Vendável','Código':g.cod,'Produto/Insumo':g.nome,'Un':'','Qtd':g.qtd,'Consumo Produção':'','OPs':'','Consumo Garantia':'','Valor':g.total,'Base do valor':'Faturamento'})); break;
     case 'compras-fornecedor': dados = lista.map(g=>({'Fornecedor':g.nome,'Pedidos':g.qtd,'Total':g.total})); break;
     case 'estoque-posicao': dados = lista.map(g=>({'Tipo':g.tipo||'','Código':g.codigo,'Produto/Insumo':g.nome,'Estoque':g.estoque,'Reservado':g.tipo==='Insumo'?'':g.reservado,'Disponível':g.disponivel,'Mínimo':g.minimo})); break;
     case 'baixas-duplicadas': dados = lista.map(g=>({'Código':g.codigo,'Produto':g.nome,'Origem':g.motivo,'Vezes':g.vezes,'Qtd da baixa':g.qtd_unitaria,'A devolver':g.excedente,'Quando':g.ts?new Date(g.ts).toLocaleString('pt-BR'):'','Usuário':g.usuario})); break;
