@@ -1268,7 +1268,10 @@ tbody td{padding:11px 16px;font-size:14px}
     <div id="tab-financeiro" style="display:none">
       <div class="section-header">
         <div class="section-title">💵 Contas a Receber</div>
-        <button class="btn btn-outline btn-sm" onclick="renderFinanceiro(true)">🔄 Atualizar</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="renderFinanceiro(true)">🔄 Atualizar</button>
+          <button class="btn btn-primary btn-sm" id="btn-cr-manual" onclick="abrirLancamentoManualCR()">+ Lançar manualmente</button>
+        </div>
       </div>
       <div class="dashboard-cards" id="cr-cards"></div>
       <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
@@ -2135,6 +2138,53 @@ tbody td{padding:11px 16px;font-size:14px}
       <span id="cr-receber-saldo-txt"></span>
     </label>
     <button class="btn btn-primary" id="btn-cr-receber" style="margin-top:6px" onclick="confirmarReceberCR()">✅ Confirmar recebimento</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-cr-manual">
+  <div class="modal" style="max-width:600px">
+    <button class="modal-close" onclick="fecharModal('modal-cr-manual')">×</button>
+    <div class="modal-title">+ Lançar Contas a Receber</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px">Para histórico de antes do módulo ou vendas que não passaram pelo faturamento do sistema. Marque "Já recebida" nas parcelas que já foram pagas.</div>
+    <div class="form-group" style="margin-bottom:12px">
+      <label>Cliente *</label>
+      <input type="text" id="cr-manual-cliente" list="cr-manual-clientes-lista" autocomplete="off" placeholder="Digite para buscar no cadastro">
+      <datalist id="cr-manual-clientes-lista"></datalist>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Data da venda *</label><input type="date" id="cr-manual-data"></div>
+      <div class="form-group"><label>Nº do pedido / NF (referência)</label><input type="text" id="cr-manual-pedido" maxlength="40"></div>
+    </div>
+    <div class="form-group" style="margin-bottom:12px">
+      <label>Descrição</label>
+      <input type="text" id="cr-manual-desc" maxlength="200" placeholder="Ex.: pedido W3 1234, saldo de acordo…">
+    </div>
+    <div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:12px">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Atalho: preencha o total e a condição e clique em Gerar parcelas</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input type="number" class="search-input" id="cr-manual-total" min="0" step="0.01" placeholder="Valor total" style="width:140px">
+        <input type="text" class="search-input" id="cr-manual-condicao" placeholder="Ex.: 30/60/90 ou AVISTA" style="width:190px">
+        <button type="button" class="btn btn-outline btn-sm" onclick="gerarParcelasCrManual()">Gerar parcelas</button>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px">
+      <div style="font-size:13px;font-weight:600">Parcelas</div>
+      <div style="display:flex;gap:6px">
+        <button type="button" class="btn btn-outline btn-sm" onclick="marcarTodasRecebidasCrManual(true)">Todas recebidas</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick="marcarTodasRecebidasCrManual(false)">Nenhuma recebida</button>
+      </div>
+    </div>
+    <div id="cr-manual-linhas"></div>
+    <button type="button" class="btn btn-outline btn-sm" onclick="adicionarLinhaCrManual()">+ Parcela</button>
+    <div id="cr-manual-soma" style="font-size:13px;margin:12px 0"></div>
+    <div class="form-group" id="cr-manual-forma-wrap" style="display:none;margin-bottom:12px">
+      <label>Forma de recebimento (parcelas já recebidas)</label>
+      <select id="cr-manual-forma"></select>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-outline" onclick="fecharModal('modal-cr-manual')">Cancelar</button>
+      <button class="btn btn-primary" id="btn-cr-manual-salvar" onclick="salvarLancamentoManualCR()">💾 Lançar</button>
+    </div>
   </div>
 </div>
 
@@ -5422,6 +5472,8 @@ async function confirmarCrLote(){
 
 // ── Aba Financeiro ──
 async function renderFinanceiro(forcar = false){
+  const btnManual = document.getElementById('btn-cr-manual');
+  if(btnManual) btnManual.style.display = temPermissaoEditar('financeiro') ? '' : 'none';
   if(!document.getElementById('cr-mes').value) document.getElementById('cr-mes').value = crHoje().slice(0, 7);
   const el = document.getElementById('cr-tabela');
   if(forcar || !CR_ABERTAS){
@@ -5491,7 +5543,9 @@ function renderFinanceiroTela(){
 function crCasaBusca(t, termo){
   if(!termo) return true;
   if(/^\d+$/.test(termo) && String(t.pedido_numero) === termo) return true;
-  return String(t.cliente_nome||'').toLowerCase().includes(termo.toLowerCase());
+  const tl = termo.toLowerCase();
+  return String(t.cliente_nome||'').toLowerCase().includes(tl) || String(t.descricao||'').toLowerCase().includes(tl)
+    || (!!t.manual && String(t.pedido_numero||'').toLowerCase().includes(tl));
 }
 
 function crBadgeSituacao(t){
@@ -5506,7 +5560,10 @@ function renderTabelaCR(){
   const el = document.getElementById('cr-tabela');
   if(!CR_ABERTAS){ el.innerHTML = ''; return; }
   const pode = temPermissaoEditar('financeiro');
-  const linkPedido = t => `<a href="#" onclick="event.preventDefault();verPedido('${t.pedido_id}')" style="color:var(--accent);font-weight:600">#${esc(t.pedido_numero)}</a>`;
+  const linkPedido = t => t.pedido_id
+    ? `<a href="#" onclick="event.preventDefault();verPedido('${t.pedido_id}')" style="color:var(--accent);font-weight:600">#${esc(t.pedido_numero)}</a>`
+    : `${t.pedido_numero ? esc(t.pedido_numero)+'<br>' : ''}<span class="badge badge-gray" title="Lançado manualmente">manual</span>`;
+  const detalhe = (t, campoObs) => [t.descricao, t[campoObs]].filter(Boolean).map(x => `<div style="font-size:12px;color:var(--muted)">${esc(x)}</div>`).join('');
 
   if(CR_SUBABA === 'abertas'){
     const termo = document.getElementById('cr-busca').value.trim();
@@ -5525,7 +5582,7 @@ function renderTabelaCR(){
     el.innerHTML = `<table><thead><tr><th>Vencimento</th><th>Cliente</th><th>Pedido</th><th>Parcela</th><th style="text-align:right">Valor</th><th>Situação</th>${pode?'<th></th>':''}</tr></thead><tbody>
       ${lista.map(t => `<tr>
         <td style="white-space:nowrap">${fmtData(t.vencimento)}</td>
-        <td>${esc(t.cliente_nome)}${t.obs?`<div style="font-size:12px;color:var(--muted)">${esc(t.obs)}</div>`:''}</td>
+        <td>${esc(t.cliente_nome)}${detalhe(t,'obs')}</td>
         <td>${linkPedido(t)}</td>
         <td>${t.parcela}/${t.parcelas}</td>
         <td style="text-align:right;white-space:nowrap;font-weight:600">${fmtMoeda(t.valor)}</td>
@@ -5550,7 +5607,7 @@ function renderTabelaCR(){
   el.innerHTML = `<table><thead><tr><th>Recebido em</th><th>Cliente</th><th>Pedido</th><th>Parcela</th><th>Vencimento</th><th style="text-align:right">Recebido</th><th>Forma</th>${pode?'<th></th>':''}</tr></thead><tbody>
     ${lista.map(t => `<tr>
       <td style="white-space:nowrap">${fmtData(t.data_recebimento)}</td>
-      <td>${esc(t.cliente_nome)}${t.obs_recebimento?`<div style="font-size:12px;color:var(--muted)">${esc(t.obs_recebimento)}</div>`:''}</td>
+      <td>${esc(t.cliente_nome)}${detalhe(t,'obs_recebimento')}</td>
       <td>${linkPedido(t)}</td>
       <td>${t.parcela}/${t.parcelas}</td>
       <td style="white-space:nowrap">${fmtData(t.vencimento)}</td>
@@ -5628,7 +5685,7 @@ async function confirmarReceberCR(){
       const nk = db.ref('contas_receber/abertas').push().key;
       novo = { ...t, valor: saldoC / 100, saldo_de: key, obs: ('Saldo de recebimento parcial' + (t.obs ? ' · '+t.obs : '')).slice(0, 200), criado_em: agora().toISOString(), criado_por: usuarioLogado?.nome || '' };
       updates['contas_receber/abertas/'+nk] = novo;
-      updates['pedidos/'+t.pedido_id+'/contas_receber/'+nk] = true;
+      if(t.pedido_id) updates['pedidos/'+t.pedido_id+'/contas_receber/'+nk] = true;
       novo = { key: nk, ...novo };
     }
     await db.ref().update(updates);
@@ -5703,14 +5760,165 @@ async function excluirTituloCR(key){
   const ok = await confirmCustom(`Excluir o título de ${fmtMoeda(t.valor)} (pedido #${t.pedido_numero}, parcela ${t.parcela}/${t.parcelas}, vence ${fmtData(t.vencimento)})?`, 'Excluir');
   if(!ok) return;
   try {
-    await db.ref().update({
-      ['contas_receber/abertas/'+key]: null,
-      ['pedidos/'+t.pedido_id+'/contas_receber/'+key]: null
-    });
+    const upd = { ['contas_receber/abertas/'+key]: null };
+    if(t.pedido_id) upd['pedidos/'+t.pedido_id+'/contas_receber/'+key] = null;
+    await db.ref().update(upd);
     CR_ABERTAS = CR_ABERTAS.filter(x => x.key !== key);
     toast('🗑️ Título excluído','success');
     renderFinanceiroTela();
   } catch(e){ toast('Erro ao excluir: '+e.message,'error'); }
+}
+
+// ── Lançamento manual ──
+// Título que não nasce do faturamento: histórico de antes do módulo existir, venda
+// fora do sistema, acordo etc. Pode ser lançado já como recebido (vai direto para
+// contas_receber/baixadas/{mês do recebimento}) ou em aberto. Não fica vinculado a um
+// pedido do sistema — o nº do pedido, se informado, é só referência (sem leitura extra).
+// A busca de cliente usa CLIENTES_DB, que já está na memória desde o login.
+let CR_MANUAL_LINHAS = [];
+
+async function abrirLancamentoManualCR(){
+  if(!temPermissaoEditar('financeiro')){ toast('Acesso restrito — sem permissão no Financeiro','error'); return; }
+  if(!CLIENTES_DB.length) await carregarClientesFirebase();
+  const vistos = new Set();
+  document.getElementById('cr-manual-clientes-lista').innerHTML = CLIENTES_DB
+    .filter(c => { const k = String(c.nome).trim().toUpperCase(); if(vistos.has(k)) return false; vistos.add(k); return true; })
+    .map(c => `<option value="${esc(c.nome)}">${esc([c.cidade, c.uf].filter(Boolean).join('/'))}</option>`).join('');
+  ['cr-manual-cliente','cr-manual-pedido','cr-manual-desc','cr-manual-total','cr-manual-condicao'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('cr-manual-data').value = crHoje();
+  document.getElementById('cr-manual-forma').innerHTML = CR_FORMAS.map(f => `<option>${f}</option>`).join('');
+  CR_MANUAL_LINHAS = [{ vencimento: crHoje(), valor: 0, recebido: false, data_recebimento: '' }];
+  renderCrManualLinhas();
+  abrirModal('modal-cr-manual');
+}
+
+// Preenche as parcelas a partir do valor total + condição (mesma regra dos pedidos)
+function gerarParcelasCrManual(){
+  const totalC = crCentavos(document.getElementById('cr-manual-total').value);
+  if(totalC <= 0){ toast('Informe o valor total','error'); return; }
+  const base = document.getElementById('cr-manual-data').value || crHoje();
+  const recebido = CR_MANUAL_LINHAS.length > 0 && CR_MANUAL_LINHAS.every(l => l.recebido);
+  CR_MANUAL_LINHAS = crMontarParcelas({ total: totalC/100, condicao: document.getElementById('cr-manual-condicao').value }, base)
+    .map(l => ({ ...l, recebido, data_recebimento: recebido ? l.vencimento : '' }));
+  renderCrManualLinhas();
+}
+
+function renderCrManualLinhas(){
+  const n = CR_MANUAL_LINHAS.length;
+  document.getElementById('cr-manual-linhas').innerHTML = CR_MANUAL_LINHAS.map((l, i) => `
+    <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <div style="width:40px;font-size:13px;color:var(--muted)">${i+1}/${n}</div>
+        <div style="display:flex;flex-direction:column;gap:2px;flex:1;min-width:130px"><span style="font-size:11px;color:var(--muted)">Vencimento</span>
+          <input type="date" class="search-input" style="width:auto" value="${l.vencimento}" onchange="CR_MANUAL_LINHAS[${i}].vencimento=this.value"></div>
+        <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:11px;color:var(--muted)">Valor</span>
+          <input type="number" class="search-input" style="width:120px" min="0" step="0.01" value="${Number(l.valor||0).toFixed(2)}" oninput="CR_MANUAL_LINHAS[${i}].valor=this.value;atualizarSomaCrManual()"></div>
+        ${n > 1 ? `<button type="button" class="btn btn-outline btn-sm" style="align-self:flex-end" title="Remover parcela" onclick="CR_MANUAL_LINHAS.splice(${i},1);renderCrManualLinhas()">✕</button>` : ''}
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px;padding-left:48px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+          <input type="checkbox" ${l.recebido?'checked':''} style="width:17px;height:17px;accent-color:var(--success)" onchange="marcarRecebidoCrManual(${i},this.checked)"> Já recebida
+        </label>
+        ${l.recebido ? `<span style="font-size:13px;color:var(--muted)">em</span>
+          <input type="date" class="search-input" style="width:auto" value="${l.data_recebimento||''}" onchange="CR_MANUAL_LINHAS[${i}].data_recebimento=this.value">` : ''}
+      </div>
+    </div>`).join('');
+  const algumRecebido = CR_MANUAL_LINHAS.some(l => l.recebido);
+  document.getElementById('cr-manual-forma-wrap').style.display = algumRecebido ? '' : 'none';
+  atualizarSomaCrManual();
+}
+
+function marcarRecebidoCrManual(i, marcado){
+  const l = CR_MANUAL_LINHAS[i];
+  l.recebido = marcado;
+  if(marcado && !l.data_recebimento) l.data_recebimento = l.vencimento || crHoje();
+  renderCrManualLinhas();
+}
+
+function marcarTodasRecebidasCrManual(marcar){
+  CR_MANUAL_LINHAS.forEach(l => { l.recebido = marcar; if(marcar && !l.data_recebimento) l.data_recebimento = l.vencimento || crHoje(); });
+  renderCrManualLinhas();
+}
+
+function adicionarLinhaCrManual(){
+  const ult = CR_MANUAL_LINHAS[CR_MANUAL_LINHAS.length-1];
+  CR_MANUAL_LINHAS.push({ vencimento: ult ? crSomaDias(ult.vencimento, 30) : crHoje(), valor: 0, recebido: !!ult?.recebido, data_recebimento: ult?.recebido ? crSomaDias(ult.vencimento, 30) : '' });
+  renderCrManualLinhas();
+}
+
+function atualizarSomaCrManual(){
+  const soma = CR_MANUAL_LINHAS.reduce((s, l) => s + crCentavos(l.valor), 0);
+  const rec = CR_MANUAL_LINHAS.filter(l => l.recebido).reduce((s, l) => s + crCentavos(l.valor), 0);
+  document.getElementById('cr-manual-soma').innerHTML =
+    `Total: <strong>${fmtMoeda(soma/100)}</strong>` + (rec ? ` · já recebido ${fmtMoeda(rec/100)} · em aberto ${fmtMoeda((soma-rec)/100)}` : '');
+}
+
+async function salvarLancamentoManualCR(){
+  if(!temPermissaoEditar('financeiro')){ toast('Acesso restrito — sem permissão no Financeiro','error'); return; }
+  const nomeDigitado = document.getElementById('cr-manual-cliente').value.trim();
+  if(!nomeDigitado){ toast('Informe o cliente','error'); return; }
+  const dataBase = document.getElementById('cr-manual-data').value;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(dataBase)){ toast('Informe a data da venda','error'); return; }
+  const linhas = CR_MANUAL_LINHAS.filter(l => crCentavos(l.valor) > 0);
+  if(!linhas.length){ toast('Informe o valor de pelo menos uma parcela','error'); return; }
+  if(linhas.some(l => !/^\d{4}-\d{2}-\d{2}$/.test(l.vencimento||''))){ toast('Preencha o vencimento de todas as parcelas','error'); return; }
+  if(linhas.some(l => l.recebido && !/^\d{4}-\d{2}-\d{2}$/.test(l.data_recebimento||''))){ toast('Preencha a data de recebimento das parcelas marcadas como recebidas','error'); return; }
+
+  const cli = CLIENTES_DB.find(c => String(c.nome).trim().toUpperCase() === nomeDigitado.toUpperCase());
+  if(!cli){
+    const ok = await confirmCustom(`"${esc(nomeDigitado)}" não está no cadastro de clientes.\n\nLançar mesmo assim só com o nome?`, 'Lançar');
+    if(!ok) return;
+  }
+  linhas.sort((a, b) => a.vencimento.localeCompare(b.vencimento));
+  const forma = document.getElementById('cr-manual-forma').value;
+  const agoraIso = agora().toISOString();
+  const quem = usuarioLogado?.nome || '';
+  const comum = {
+    manual: true,
+    pedido_id: '',
+    pedido_numero: document.getElementById('cr-manual-pedido').value.trim(),
+    descricao: document.getElementById('cr-manual-desc').value.trim(),
+    cliente_codigo: cli?.codigo || '',
+    cliente_nome: cli?.nome || nomeDigitado,
+    cliente_cidade: cli?.cidade || '',
+    cliente_uf: cli?.uf || '',
+    vendedor_nome: cli?.vendedor_nome || cli?.vendedor || '',
+    forma_pedido: '', condicao: '',
+    data_faturamento: dataBase,
+    obs: '',
+    criado_em: agoraIso,
+    criado_por: quem
+  };
+  const updates = {};
+  const novosAbertos = [], novosBaixados = [];
+  linhas.forEach((l, i) => {
+    const key = db.ref('contas_receber/abertas').push().key;
+    const t = { ...comum, parcela: i+1, parcelas: linhas.length, valor: crCentavos(l.valor)/100, vencimento: l.vencimento };
+    if(l.recebido){
+      const mes = l.data_recebimento.slice(0, 7);
+      Object.assign(t, { valor_recebido: t.valor, data_recebimento: l.data_recebimento, forma_recebimento: forma, obs_recebimento: '', baixado_por: quem, baixado_em: agoraIso });
+      updates['contas_receber/baixadas/'+mes+'/'+key] = t;
+      novosBaixados.push({ mes, key, ...t });
+    } else {
+      updates['contas_receber/abertas/'+key] = t;
+      novosAbertos.push({ key, ...t });
+    }
+  });
+  const btn = document.getElementById('btn-cr-manual-salvar');
+  btn.disabled = true;
+  try {
+    await db.ref().update(updates);
+    // Atualiza só o que já está na memória — mês ainda não aberto é lido quando for consultado
+    if(CR_ABERTAS) CR_ABERTAS.push(...novosAbertos);
+    novosBaixados.forEach(({ mes, ...t }) => { if(CR_BAIXADAS_CACHE[mes]) CR_BAIXADAS_CACHE[mes].push(t); });
+    fecharModal('modal-cr-manual');
+    toast(`✅ ${linhas.length} título(s) lançado(s)` + (novosBaixados.length ? ` — ${novosBaixados.length} como recebido(s)` : ''),'success');
+    renderFinanceiroTela();
+  } catch(e){
+    toast('Erro ao lançar: '+e.message,'error');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // Em Análise (EA) = pedido em análise financeira. Fluxo: AA -> EA -> AP.
