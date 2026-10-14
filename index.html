@@ -2641,7 +2641,15 @@ tbody td{padding:11px 16px;font-size:14px}
     <div id="op-receita-preview" style="display:none"></div>
     <div class="form-row" id="op-qtd-row" style="display:none">
       <div class="form-group"><label>Quantidade a Produzir</label><input type="number" id="op-qtd" value="1" min="1" oninput="atualizarPreviewReceitaOP()"></div>
-      <div class="form-group"><label>Pedido de Origem (opcional)</label><input type="text" id="op-pedido-origem" placeholder="ex: #145"></div>
+      <div class="form-group"><label>Produzir para</label>
+        <div style="display:flex;gap:18px;align-items:center;min-height:40px">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600"><input type="radio" name="op-destino" value="pedido" onchange="alternarDestinoOP()" style="width:18px;height:18px;cursor:pointer"> 🧾 Pedido</label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600"><input type="radio" name="op-destino" value="estoque" onchange="alternarDestinoOP()" style="width:18px;height:18px;cursor:pointer"> 📦 Estoque</label>
+        </div>
+      </div>
+    </div>
+    <div class="form-row single" id="op-pedido-row" style="display:none">
+      <div class="form-group"><label>Número do Pedido</label><input type="text" id="op-pedido-origem" list="op-pedidos-sugeridos" placeholder="ex: 145" autocomplete="off"><datalist id="op-pedidos-sugeridos"></datalist></div>
     </div>
     <div class="form-row single" id="op-urgente-row" style="display:none">
       <div class="form-group">
@@ -8969,7 +8977,7 @@ async function renderProducao(recarregar = true){
           <input type="checkbox" class="check-exportar-op" data-key="${op.key}" ${selecionado?'checked':''} onchange="toggleSelecaoOP('${op.key}',this.checked)" onclick="event.stopPropagation()" style="margin-top:4px;width:16px;height:16px;cursor:pointer">
           <div>
             <div class="pedido-card-num">OP #${op.numero||op.key.slice(-5)} — ${esc(op.produto_nome)} ${urgentePendente?'<span style="background:#dc2626;color:#fff;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:700;margin-left:4px">🔴 URGENTE</span>':''}</div>
-            <div style="font-size:12px;color:var(--muted);margin-top:2px">Código: <span style="font-weight:700;color:#000;font-size:15px">${op.produto_codigo}</span> ${op.pedido_origem?'· Pedido '+op.pedido_origem:''}</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px">Código: <span style="font-weight:700;color:#000;font-size:15px">${op.produto_codigo}</span> ${op.destino==='estoque'?'· <strong style="color:#0369a1">📦 Para estoque</strong>':(op.pedido_origem?'· <strong style="color:#7c3aed">🧾 Pedido '+esc(op.pedido_origem)+'</strong>':'')}</div>
           </div>
         </div>
         <span class="badge" style="background:${si.bg};color:${si.cor}">${si.label}</span>
@@ -9041,7 +9049,7 @@ function exportarOPsSelecionadasExcel(){
     'Qtd Produzida':  op.qtd_produzida || 0,
     '% Conclusão':    op.qtd_solicitada ? Math.round((op.qtd_produzida||0)/op.qtd_solicitada*100)+'%' : '0%',
     'Responsável':    op.responsavel_producao || '—',
-    'Pedido Origem':  op.pedido_origem || '—',
+    'Produzir para':  destinoOPTexto(op),
     'Criada em':      new Date(op.ts_criacao).toLocaleDateString('pt-BR'),
     'Observações':    op.obs || ''
   }));
@@ -9072,6 +9080,76 @@ function limparFiltrosOP(){
   renderProducao(false);
 }
 
+// ── Controle de OP duplicada ──
+// Busca as OPs ABERTAS (pendente / em produção) de um produto direto no Firebase — nunca da memória,
+// porque outra pessoa pode ter lançado agora há pouco. Com ".indexOn": ["produto_codigo"] nas regras
+// de ordens_producao, o Firebase baixa só as OPs desse produto (leitura mínima).
+// Retorna null se não conseguiu consultar.
+async function buscarOPsAbertasProduto(codigo){
+  try {
+    const snap = await db.ref('ordens_producao').orderByChild('produto_codigo').equalTo(codigo).once('value');
+    const data = snap.val() || {};
+    return Object.keys(data).map(k => ({ key:k, ...data[k] }))
+      .filter(o => o.status === 'pendente' || o.status === 'em_producao')
+      .sort((a,b) => (a.ts_criacao||0) - (b.ts_criacao||0));
+  } catch(e){
+    console.warn('Falha ao verificar OPs abertas', e);
+    return null;
+  }
+}
+
+function destinoOPTexto(op){
+  if(op.destino === 'estoque') return 'Estoque';
+  if(op.pedido_origem) return 'Pedido ' + op.pedido_origem;
+  return 'Não informado';
+}
+
+function linhaOPAberta(op){
+  const st = op.status === 'em_producao' ? 'Em produção' : 'Pendente';
+  const dt = op.ts_criacao ? new Date(op.ts_criacao).toLocaleDateString('pt-BR') : '—';
+  return `OP #${op.numero} — ${op.qtd_solicitada||0} un — ${st} — ${esc(destinoOPTexto(op))} — por ${esc(op.responsavel||'?')} em ${dt}`;
+}
+
+// Bloco de aviso exibido nas telas de criação de OP
+function htmlAvisoOPsAbertas(ops){
+  if(ops === null) return `<div style="background:#fef3c7;color:#92400e;padding:10px;border-radius:8px;font-size:13px;margin-bottom:14px">⚠️ Não foi possível verificar se já existe OP aberta para este produto. Confira na aba Produção antes de criar.</div>`;
+  if(!ops.length) return '';
+  const total = ops.reduce((s,o)=>s+(Number(o.qtd_solicitada)||0),0);
+  return `<div style="background:#fef2f2;border:2px solid #dc2626;color:#991b1b;padding:10px 12px;border-radius:8px;font-size:13px;margin-bottom:14px">
+    <div style="font-weight:700;margin-bottom:4px">⚠️ Já existe ${ops.length>1?ops.length+' OPs abertas':'OP aberta'} para este produto (${total} un no total):</div>
+    ${ops.map(o=>`<div>• ${linhaOPAberta(o)}</div>`).join('')}
+  </div>`;
+}
+
+// Confirmação final na hora de criar. Retorna true se pode seguir.
+async function confirmarSeOPDuplicada(codigo, pedidoNovo){
+  const ops = await buscarOPsAbertasProduto(codigo);
+  if(ops === null){
+    return await confirmCustom('⚠️ Não foi possível verificar se já existe OP aberta para este produto.\n\nConfira na aba Produção. Deseja criar a OP mesmo assim?', 'Criar mesmo assim');
+  }
+  if(!ops.length) return true;
+  const mesmoPedido = pedidoNovo && ops.some(o => o.pedido_origem === pedidoNovo);
+  const titulo = mesmoPedido
+    ? `<strong style="color:#dc2626">⚠️ O pedido ${esc(pedidoNovo)} JÁ TEM OP deste produto.</strong>`
+    : `<strong style="color:#dc2626">⚠️ Este produto já tem ${ops.length>1?ops.length+' OPs abertas':'OP aberta'}.</strong>`;
+  const msg = `${titulo}\n\n${ops.map(o=>'• '+linhaOPAberta(o)).join('\n')}\n\nCriar outra OP pode dobrar a produção. Tem certeza que quer criar mesmo assim?`;
+  return await confirmCustom(msg, 'Criar mesmo assim');
+}
+
+function alternarDestinoOP(){
+  const destino = document.querySelector('input[name="op-destino"]:checked')?.value;
+  document.getElementById('op-pedido-row').style.display = destino === 'pedido' ? 'flex' : 'none';
+  if(destino === 'pedido') document.getElementById('op-pedido-origem').focus();
+}
+
+// Padroniza o número digitado para "#145" (mesmo formato usado pela tela de separação)
+function normalizarPedidoOP(v){
+  const n = String(v||'').replace(/#/g,'').trim();
+  return n ? '#' + n : '';
+}
+
+let opCriandoAgora = false; // trava contra duplo clique no "Criar OP" / "Gerar OP"
+
 function abrirModalOP(){
   if(!temPermissaoEditar('producao')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   opProdutoSelecionado = null;
@@ -9084,6 +9162,9 @@ function abrirModalOP(){
   document.getElementById('op-urgente').checked = false;
   document.getElementById('op-qtd').value = 1;
   document.getElementById('op-pedido-origem').value = '';
+  document.querySelectorAll('input[name="op-destino"]').forEach(r => r.checked = false);
+  document.getElementById('op-pedido-row').style.display = 'none';
+  document.getElementById('op-pedidos-sugeridos').innerHTML = '';
   document.getElementById('btn-criar-op').style.display = 'none';
   abrirModal('modal-op');
 }
@@ -9130,15 +9211,24 @@ async function selecionarProdutoOP(codigo){
   const snap = await lerNoCache('pedidos');
   const todos = snap.val() || {};
   let totalPendente = 0, qtdPedidos = 0;
+  const pedidosComItem = [];
   Object.values(todos).forEach(ped => {
     if(ped.status!=='AP' && ped.status!=='EX') return;
     (ped.itens||[]).forEach(item => {
       if(item.codigo===codigo && !item.separado){
         totalPendente += Number(item.qtd)||0;
         qtdPedidos++;
+        pedidosComItem.push({ numero: ped.numero, cliente: ped.cliente_nome||'', qtd: Number(item.qtd)||0 });
       }
     });
   });
+  document.getElementById('op-pedidos-sugeridos').innerHTML = pedidosComItem
+    .map(p => `<option value="${esc(p.numero)}">${esc(p.cliente)} — ${p.qtd} un</option>`).join('');
+
+  // OPs já abertas para este produto (evita lançamento em duplicidade)
+  const opsAbertas = await buscarOPsAbertasProduto(codigo);
+  const qtdEmOPs = (opsAbertas||[]).reduce((s,o)=>s+(Number(o.qtd_solicitada)||0),0);
+  const faltaCobrir = Math.max(0, totalPendente - qtdEmOPs);
 
   document.getElementById('op-produto-selecionado').innerHTML = `
     <div style="background:var(--bg);border-radius:8px;padding:12px 14px;margin-bottom:14px">
@@ -9147,9 +9237,11 @@ async function selecionarProdutoOP(codigo){
         style="float:right;background:none;border:none;cursor:pointer;color:var(--muted)">✕ trocar</button>
       ${totalPendente>0 ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:13px;color:#7c3aed">
         📦 <strong>${totalPendente} unidade(s)</strong> pendente(s) em <strong>${qtdPedidos} pedido(s)</strong> aprovado(s) aguardando este item.
-        <button onclick="document.getElementById('op-qtd').value=${totalPendente};atualizarPreviewReceitaOP()" style="margin-left:6px;background:none;border:none;color:#7c3aed;text-decoration:underline;cursor:pointer;font-size:12px">usar essa quantidade</button>
+        ${qtdEmOPs>0 ? `<br>🏭 <strong>${qtdEmOPs} un</strong> já em OP aberta → falta cobrir <strong>${faltaCobrir} un</strong>.` : ''}
+        <button onclick="document.getElementById('op-qtd').value=${faltaCobrir||1};atualizarPreviewReceitaOP()" style="margin-left:6px;background:none;border:none;color:#7c3aed;text-decoration:underline;cursor:pointer;font-size:12px">usar essa quantidade</button>
       </div>` : `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)">Nenhum pedido pendente aguardando este item no momento.</div>`}
-    </div>`;
+    </div>
+    ${htmlAvisoOPsAbertas(opsAbertas)}`;
   document.getElementById('op-qtd-row').style.display = 'flex';
   document.getElementById('op-urgente-row').style.display = 'block';
   document.getElementById('op-receita-preview').style.display = 'block';
@@ -9197,8 +9289,18 @@ async function criarOP(){
   if(!temPermissaoEditar('producao')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   if(!opProdutoSelecionado){ toast('Selecione um produto','error'); return; }
   const qtd = Number(document.getElementById('op-qtd').value) || 1;
-  const pedidoOrigem = document.getElementById('op-pedido-origem').value.trim();
+  const destino = document.querySelector('input[name="op-destino"]:checked')?.value;
+  if(!destino){ toast('Informe se a produção é para PEDIDO ou para ESTOQUE','error'); return; }
+  const pedidoOrigem = destino === 'pedido' ? normalizarPedidoOP(document.getElementById('op-pedido-origem').value) : '';
+  if(destino === 'pedido' && !pedidoOrigem){ toast('Informe o número do pedido','error'); document.getElementById('op-pedido-origem').focus(); return; }
   const urgente = document.getElementById('op-urgente').checked;
+
+  if(opCriandoAgora) return;
+  opCriandoAgora = true;
+  const btnCriar = document.getElementById('btn-criar-op');
+  btnCriar.disabled = true;
+  try {
+  if(!(await confirmarSeOPDuplicada(opProdutoSelecionado.codigo, pedidoOrigem))) return;
 
   // transaction() incrementa no servidor: duas OPs criadas ao mesmo tempo recebem
   // números diferentes. Com once()+set() as duas liam o mesmo valor e saíam iguais.
@@ -9217,6 +9319,7 @@ async function criarOP(){
     status: 'pendente',
     urgente: urgente || false,
     receita: opProdutoSelecionado.receita,
+    destino,
     pedido_origem: pedidoOrigem || null,
     responsavel: usuarioLogado.nome,
     ts_criacao: agoraTs(),
@@ -9226,6 +9329,10 @@ async function criarOP(){
   fecharModal('modal-op');
   await renderProducao();
   toast(`✓ OP #${numero} criada!`,'success');
+  } finally {
+    opCriandoAgora = false;
+    btnCriar.disabled = false;
+  }
 }
 
 async function verDetalheOP(key){
@@ -9298,7 +9405,7 @@ async function verDetalheOP(key){
     <div class="modal-title">OP #${op.numero} — ${esc(op.produto_nome)}</div>
     <div style="margin-bottom:14px">
       <span class="badge" style="background:${si.bg};color:${si.cor}">${si.label}</span>
-      ${op.pedido_origem?` · Pedido de origem: <strong>${op.pedido_origem}</strong>`:''}
+      ${op.destino==='estoque'?` · Produzir para: <strong>📦 Estoque</strong>`:(op.pedido_origem?` · Produzir para: <strong>🧾 Pedido ${esc(op.pedido_origem)}</strong>`:'')}
     </div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.8">
       📅 Criada em: <strong>${op.ts_criacao?new Date(op.ts_criacao).toLocaleString('pt-BR'):'—'}</strong><br>
@@ -13865,6 +13972,11 @@ async function abrirGerarOPSeparacao(idx){
   });
   const totalNecessarioGeral = faltaEstePedido + totalPendenteOutros;
 
+  // OPs já abertas para este produto (lançadas na Produção ou em outra separação)
+  const opsAbertasSep = await buscarOPsAbertasProduto(item.codigo);
+  const qtdEmOPsSep = (opsAbertasSep||[]).reduce((s,o)=>s+(Number(o.qtd_solicitada)||0),0);
+  const faltaCobrirSep = Math.max(0, totalNecessarioGeral - qtdEmOPsSep);
+
   // Calcular capacidade máxima de produção baseada no insumo mais escasso da receita —
   // embalagem/etiqueta não conta (ter saco/etiqueta sobrando não significa que dá pra produzir mais)
   const receita = RECEITAS_DB[item.codigo];
@@ -13886,7 +13998,7 @@ async function abrirGerarOPSeparacao(idx){
   }
   const temReceita = !!(receita && receita.itens && receita.itens.length);
   const capacidadeFinal = (temReceita && temInsumoReal) ? Math.max(0, capacidadeMaxima) : null;
-  const sugestao = capacidadeFinal !== null ? Math.min(totalNecessarioGeral, capacidadeFinal) : totalNecessarioGeral;
+  const sugestao = capacidadeFinal !== null ? Math.min(faltaCobrirSep, capacidadeFinal) : faltaCobrirSep;
 
   document.getElementById('op-separacao-conteudo').innerHTML = `
     <div class="modal-title">🏭 Gerar OP — ${esc(item.nome)}</div>
@@ -13896,7 +14008,9 @@ async function abrirGerarOPSeparacao(idx){
       <div class="dash-card"><div class="dash-card-label">Falta neste pedido</div><div class="dash-card-value" style="color:#d97706">${faltaEstePedido}</div></div>
       <div class="dash-card"><div class="dash-card-label">Outros pedidos pendentes</div><div class="dash-card-value">${totalPendenteOutros}</div></div>
       <div class="dash-card"><div class="dash-card-label">Total necessário</div><div class="dash-card-value" style="color:#7c3aed">${totalNecessarioGeral}</div></div>
+      ${qtdEmOPsSep>0 ? `<div class="dash-card"><div class="dash-card-label">Já em OP aberta</div><div class="dash-card-value" style="color:#dc2626">${qtdEmOPsSep}</div></div>` : ''}
     </div>
+    ${htmlAvisoOPsAbertas(opsAbertasSep)}
 
     ${capacidadeFinal !== null ? `
       <div style="background:var(--bg);border-radius:10px;padding:14px;margin-bottom:16px">
@@ -13915,7 +14029,7 @@ async function abrirGerarOPSeparacao(idx){
       </div>
     </div>
     <div class="form-row single">
-      <div class="form-group"><label>Pedido de origem</label><input type="text" value="#${pedidoSeparacaoAtual.numero}" disabled></div>
+      <div class="form-group"><label>Produzir para</label><input type="text" value="🧾 Pedido #${pedidoSeparacaoAtual.numero}" disabled></div>
     </div>
     <div class="form-actions">
       <button class="btn btn-outline" onclick="fecharModal('modal-op-separacao')">Cancelar</button>
@@ -13933,6 +14047,11 @@ async function confirmarGerarOPSeparacao(){
   const qtd = Number(document.getElementById('op-sep-qtd').value) || 0;
   if(qtd <= 0){ toast('Quantidade inválida','error'); return; }
 
+  if(opCriandoAgora) return;
+  opCriandoAgora = true;
+  try {
+  if(!(await confirmarSeOPDuplicada(codigo, '#' + pedidoSeparacaoAtual.numero))) return;
+
   const receita = RECEITAS_DB[codigo];
   const numSnap = await db.ref('contador_op').transaction(v=>(v||0)+1);
   const numero = numSnap.snapshot.val();
@@ -13948,6 +14067,7 @@ async function confirmarGerarOPSeparacao(){
     qtd_produzida: 0,
     status: 'pendente',
     receita: receita ? receita.itens : [],
+    destino: 'pedido',
     pedido_origem: '#' + pedidoSeparacaoAtual.numero,
     responsavel: usuarioLogado.nome,
     ts_criacao: agoraTs(),
@@ -13957,6 +14077,9 @@ async function confirmarGerarOPSeparacao(){
   fecharModal('modal-op-separacao');
   opSeparacaoContexto = null;
   toast(`✓ OP #${numero} criada para ${nome}!`,'success');
+  } finally {
+    opCriandoAgora = false;
+  }
 }
 
 // ── Bipagem final ──
