@@ -1796,6 +1796,12 @@ tbody td{padding:11px 16px;font-size:14px}
         </select>
       </div>
     </div>
+    <div class="form-row single" id="vend-semtrava-row">
+      <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="vend-sem-trava-preco" style="margin-top:3px">
+        <span><strong>Editar pedidos sem restrição de preço</strong><br><span style="color:var(--muted);font-size:12px">Ignora preço mínimo, desconto máximo e o limite de 1h para editar. Admin já tem isso.</span></span>
+      </label>
+    </div>
     <div class="form-row" id="vend-comissao-row" style="display:none">
       <div class="form-group" style="max-width:220px">
         <label>% de Comissão</label>
@@ -2799,6 +2805,16 @@ const MODULOS_EXPEDICAO_EDITAR = ['separacao','coleta','producao'];
 function ehExpedicao(){
   if(!usuarioLogado) return false;
   return usuarioLogado.tipo === 'expedicao';
+}
+
+// Usuário liberado de TODAS as travas de preço no pedido (preço mínimo, desconto máximo,
+// preço fechado de campanha, item bloqueado pra venda) e do limite de 1h pra editar.
+// Admin sempre; outros só com a opção marcada no cadastro do usuário (usuarios/{id}/sem_trava_preco).
+// Criado pra expedição tirar do pedido, na bipagem, item que entrou sem estoque — o pedido
+// antigo era revalidado contra o mínimo atual e não deixava salvar.
+function semTravaPreco(){
+  if(!usuarioLogado) return false;
+  return !!usuarioLogado.admin || usuarioLogado.sem_trava_preco === true;
 }
 
 // Retorna true se o usuário logado é um perfil de Produção — personalizado, com acesso
@@ -4667,7 +4683,7 @@ function podeEditar(p){
   if(p.status==='Orçamento') return true;
   // Admin e Expedição podem editar a qualquer momento — necessário para corrigir pedidos travados na
   // separação/bipagem quando falta item em estoque e não há como produzir a tempo
-  if(usuarioLogado?.admin || ehExpedicao()) return true;
+  if(usuarioLogado?.admin || ehExpedicao() || semTravaPreco()) return true;
   const agora = agoraTs();
   const criado = new Date(p.data).getTime();
   return (agora - criado) <= 60*60*1000; // 1 hora
@@ -6136,7 +6152,7 @@ async function clonarPedido(id){
     const precoMinimoAtual = Number(cadastro.preco_minimo) || 0;
     item.preco_minimo = precoMinimoAtual; // atualiza pro mínimo vigente, não o congelado do pedido antigo
 
-    if(precoMinimoAtual > 0 && Number(cadastro.preco_venda||0) < precoMinimoAtual && !usuarioLogado?.admin){
+    if(precoMinimoAtual > 0 && Number(cadastro.preco_venda||0) < precoMinimoAtual && !semTravaPreco()){
       itensBloqueados.push(item.nome);
       return false; // remove do clone — item está bloqueado pra venda hoje
     }
@@ -7230,7 +7246,7 @@ function adicionarItem(cod){
   // que o item está BLOQUEADO para venda de propósito (sem estoque/descontinuado).
   // Admin pode ver o aviso mas ainda decide se quer prosseguir; vendedor não passa disso.
   if(precoMinimo > 0 && precoUsado < precoMinimo){
-    if(!usuarioLogado?.admin){
+    if(!semTravaPreco()){
       alert(`🚫 "${p.nome}" (${p.codigo}) não pode ser vendido no momento.\n\nO cadastro está com Preço de Venda travado (${fmtMoeda(precoUsado)}, abaixo do mínimo de ${fmtMoeda(precoMinimo)}) — isso indica que o item está indisponível para venda. Fale com o admin se precisar vender mesmo assim.`);
       return;
     } else {
@@ -7276,7 +7292,7 @@ function renderItemStaging(){
         </div>
         <div class="form-group" style="width:120px;margin:0">
           <label>Preço Unit.</label>
-          <input type="number" id="staging-preco" value="${it.preco.toFixed(2)}" step="0.01" ${usuarioLogado?.admin?'':`min="${it.preco_minimo}"`} oninput="atualizarItemStaging()">
+          <input type="number" id="staging-preco" value="${it.preco.toFixed(2)}" step="0.01" ${semTravaPreco()?'':`min="${it.preco_minimo}"`} oninput="atualizarItemStaging()">
         </div>
         <div class="form-group" style="width:118px;margin:0">
           <label>Desconto</label>
@@ -7311,7 +7327,7 @@ function atualizarItemStaging(){
   }
 
   // Mesma trava de sempre: vendedor comum não passa do preço mínimo, nem por preço nem por desconto
-  if(!usuarioLogado?.admin && itemEmEstagio.preco_minimo > 0){
+  if(!semTravaPreco() && itemEmEstagio.preco_minimo > 0){
     if(preco < itemEmEstagio.preco_minimo){
       alert(`Preço mínimo: ${fmtMoeda(itemEmEstagio.preco_minimo)}`);
       preco = itemEmEstagio.preco_minimo;
@@ -7389,9 +7405,9 @@ function renderItens(){
     return `<div class="item-row">
       <span style="display:flex;align-items:center;gap:8px">${foto}<span><strong style="color:var(--accent)">${item.codigo}</strong> — ${item.nome.length>30?item.nome.substring(0,30)+'…':item.nome}${selo}</span></span>
       <input type="number" min="1" value="${item.qtd}" onchange="atualizarQtd(${idx},this.value)">
-      <input type="number" ${usuarioLogado?.admin?'':`min="${piso}"`} step="0.01" value="${item.preco.toFixed(2)}" onchange="atualizarPreco(${idx},this.value)" title="${usuarioLogado?.admin?'Admin: sem restrição de preço mínimo':'Mín: R$ '+piso.toFixed(2)}">
+      <input type="number" ${semTravaPreco()?'':`min="${piso}"`} step="0.01" value="${item.preco.toFixed(2)}" onchange="atualizarPreco(${idx},this.value)" title="${semTravaPreco()?'Sem restrição de preço mínimo':'Mín: R$ '+piso.toFixed(2)}">
       <span style="display:flex;gap:3px;align-items:center;min-width:0">
-        <input type="number" min="0" step="0.01" value="${Math.round(((item.desc_modo==='R$')?(item.desc_valor!=null?item.desc_valor:(item.preco*(item.desconto_item||0)/100)):(item.desconto_item||0))*100)/100}" onchange="atualizarDescItem(${idx},this.value)" placeholder="0" ${(itemPrecoFechado(item)&&!usuarioLogado?.admin)?'readonly style="min-width:0;width:100%;background:#f1f5f9;color:var(--muted);cursor:not-allowed"':'style="min-width:0;width:100%"'} title="${(itemPrecoFechado(item)&&!usuarioLogado?.admin)?'Preço fechado na campanha — não aceita desconto':'Desconto por '+(item.desc_modo==='R$'?'valor (R$/unid)':'percentual (%)')}">
+        <input type="number" min="0" step="0.01" value="${Math.round(((item.desc_modo==='R$')?(item.desc_valor!=null?item.desc_valor:(item.preco*(item.desconto_item||0)/100)):(item.desconto_item||0))*100)/100}" onchange="atualizarDescItem(${idx},this.value)" placeholder="0" ${(itemPrecoFechado(item)&&!semTravaPreco())?'readonly style="min-width:0;width:100%;background:#f1f5f9;color:var(--muted);cursor:not-allowed"':'style="min-width:0;width:100%"'} title="${(itemPrecoFechado(item)&&!usuarioLogado?.admin)?'Preço fechado na campanha — não aceita desconto':'Desconto por '+(item.desc_modo==='R$'?'valor (R$/unid)':'percentual (%)')}">
         <button type="button" onclick="toggleModoDescItem(${idx})" title="Alternar % / R$" style="flex:0 0 auto;padding:2px 5px;font-size:11px;font-weight:700;border:1px solid var(--border);border-radius:5px;background:var(--card);cursor:pointer;color:var(--accent);line-height:1.4">${item.desc_modo==='R$'?'R$':'%'}</button>
       </span>
       <span><strong>${fmtMoeda(item.qtd*item.preco*(1-(item.desconto_item||0)/100))}</strong></span>
@@ -7441,7 +7457,7 @@ function atualizarDescItem(idx, val){
 
   // Preço fechado não aceita desconto nenhum — avisa direto em vez de deixar
   // o vendedor digitar e só ser barrado na hora de salvar.
-  if(!usuarioLogado?.admin && itemPrecoFechado(item) && desconto > 0){
+  if(!semTravaPreco() && itemPrecoFechado(item) && desconto > 0){
     alert(`"${item.nome}" está com preço fechado na campanha ${item.promo_campanha||''} — o preço de ${fmtMoeda(item.preco)} é final e não aceita desconto, nem à vista.`);
     item.desconto_item = 0;
     item.desc_valor = 0;
@@ -7449,7 +7465,7 @@ function atualizarDescItem(idx, val){
     return;
   }
 
-  if(!usuarioLogado?.admin && pisoDescEfetivo > 0){
+  if(!semTravaPreco() && pisoDescEfetivo > 0){
     const precoComDesconto = Math.round(item.preco * (1 - desconto/100) * 100) / 100;
     const minimoArredondado = Math.round(pisoDescEfetivo * 100) / 100;
     if(precoComDesconto < minimoArredondado){
@@ -7488,7 +7504,7 @@ function atualizarPreco(idx,val){
   const v=parseFloat(val)||0;
   const item=pedidoAtual.itens[idx];
   const pisoPreco = pisoItem(item);
-  if(v<pisoPreco && !usuarioLogado?.admin){
+  if(v<pisoPreco && !semTravaPreco()){
     alert(`Preço mínimo: ${fmtMoeda(pisoPreco)}`);
     renderItens();
     return;
@@ -7543,7 +7559,7 @@ function calcTotal(){
 // gravar no Firebase, não importa se o item chegou ali por busca manual, clone, ou
 // qualquer outro caminho — garante que não escapa nenhum item abaixo do mínimo.
 function validarPedidoPrecosMinimos(){
-  if(usuarioLogado?.admin) return null; // admin pode vender abaixo do mínimo
+  if(semTravaPreco()) return null; // admin / usuário liberado pode vender abaixo do mínimo
   const dg = parseFloat(document.getElementById('desc-geral')?.value) || 0;
   const dv = getDescValor();
   const b = calcBasesDesconto();
@@ -7572,7 +7588,7 @@ function atualizarTotais(){
   renderCampanhaStatus();
   // Trava de preço mínimo: se os descontos gerais (% e/ou R$) derrubarem qualquer item
   // abaixo do preço mínimo dele, limita automaticamente o campo que acabou de ser mexido.
-  if(!usuarioLogado?.admin){
+  if(!semTravaPreco()){
     const dgEl = document.getElementById('desc-geral');
     const dvEl = document.getElementById('desc-geral-valor');
     const dg = parseFloat(dgEl.value)||0;
@@ -13645,6 +13661,7 @@ function renderModalSeparacao(){
         ${!jaSeparado ? `
           <button class="btn btn-outline btn-sm" onclick="marcarItemSeparado(${idx})">✓ Marcar separado</button>
           ${!temEstoqueSuficiente ? `<button class="btn btn-outline btn-sm" style="color:#7c3aed;border-color:#7c3aed" onclick="abrirGerarOPSeparacao(${idx})">🏭 Gerar OP</button>` : ''}
+          ${!temEstoqueSuficiente && podeRemoverItemSemEstoque() ? `<button class="btn btn-outline btn-sm" style="color:#dc2626;border-color:#dc2626" onclick="removerItemSemEstoque(${idx},'separacao')">🚫 Sem estoque — tirar do pedido</button>` : ''}
         ` : `<button class="btn btn-outline btn-sm" onclick="desmarcarItemSeparado(${idx})">↺ Desfazer</button>`}
       </div>
     </div>`;
@@ -13674,7 +13691,7 @@ function renderModalSeparacao(){
         <button class="btn btn-primary" style="width:100%;background:#16a34a;border-color:#16a34a" onclick="finalizarPedidoBipado()">✅ Concluir pedido (terminar baixa)</button>`
     : !bloqueiaBipagem
       ? `<button class="btn btn-primary" style="width:100%" onclick="irParaBipagem()">📷 Iniciar Bipagem Final</button>`
-      : `<div style="text-align:center;color:#dc2626;font-size:13px;padding:8px;background:#fef2f2;border-radius:8px">⚠️ Há itens sem estoque suficiente e sem OP de produção em andamento. Gere a OP para liberar a bipagem.</div>`
+      : `<div style="text-align:center;color:#dc2626;font-size:13px;padding:8px;background:#fef2f2;border-radius:8px">⚠️ Há itens sem estoque suficiente e sem OP de produção em andamento. Gere a OP ou tire o item do pedido para liberar a bipagem.</div>`
     }
   `;
 }
@@ -13689,6 +13706,141 @@ async function desmarcarItemSeparado(idx){
   pedidoSeparacaoAtual.itens[idx].separado = false;
   await db.ref('pedidos/'+pedidoSeparacaoAtual.id+'/itens').set(pedidoSeparacaoAtual.itens);
   renderModalSeparacao();
+}
+
+// ── Sem estoque: tirar item do pedido direto na separação/bipagem ──
+// A expedição tira do pedido o item (ou só as unidades) que não tem para enviar, sem abrir a
+// edição do pedido — então não vê preço, desconto nem total. O sistema recalcula o total com
+// a mesma conta da tela de pedido (descontos e crédito do jeito que já estavam, preços dos itens
+// que ficam não mudam), libera a reserva só do que saiu e registra no histórico de edições.
+let REMOVENDO_ITEM_SEM_ESTOQUE = false;
+
+function podeRemoverItemSemEstoque(){
+  return temPermissaoEditar('separacao') || semTravaPreco();
+}
+
+// Mesma conta de calcTotalSemCredito/calcTotal, mas sobre uma lista de itens qualquer (sem DOM)
+function totaisPedidoPorItens(itens, dg, dv, credito){
+  let fixa = 0, desc = 0;
+  for(const i of (itens||[])){
+    const v = (Number(i.qtd)||0) * (Number(i.preco)||0) * (1-(Number(i.desconto_item)||0)/100);
+    if(itemPrecoFechado(i)) fixa += v; else desc += v;
+  }
+  const sub = fixa + desc;
+  const semCredito = fixa + Math.max(0, desc * (1 - (Number(dg)||0)/100) - (Number(dv)||0));
+  const total = Math.max(0, semCredito - (Number(credito)||0));
+  return { sub, semCredito, total };
+}
+
+async function removerItemSemEstoque(idx, origem){
+  if(!podeRemoverItemSemEstoque()){ toast('Acesso restrito — sem permissão para alterar este pedido','error'); return; }
+  if(REMOVENDO_ITEM_SEM_ESTOQUE || FINALIZANDO_BIPAGEM) return;
+  const atual = pedidoSeparacaoAtual;
+  if(!atual || !atual.id) return;
+  const itemTela = (atual.itens||[])[idx];
+  if(!itemTela) return;
+  REMOVENDO_ITEM_SEM_ESTOQUE = true;
+  try {
+    // Lê o pedido DIRETO do banco (nunca da memória): outra tela pode ter mexido nele
+    const snap = await db.ref('pedidos/'+atual.id).once('value');
+    const p = snap.val();
+    if(!p){ toast('Pedido não encontrado','error'); return; }
+    if(!['AP','EX'].includes(p.status) || p.baixa_estoque_ts){
+      toast(`Pedido #${p.numero} não está mais em separação — não dá pra tirar item por aqui`,'error'); return;
+    }
+    if(p.faturado){
+      toast(`Pedido #${p.numero} já está faturado — fale com o admin para tirar o item`,'error'); return;
+    }
+    const itens = (Array.isArray(p.itens) ? p.itens : Object.values(p.itens||{})).filter(Boolean);
+    const item = itens[idx];
+    if(!item || item.codigo !== itemTela.codigo){
+      toast('O pedido foi alterado em outra tela — feche e abra de novo','error'); return;
+    }
+
+    const qtdPedida = Number(item.qtd)||0;
+    const jaBipada = Number(item.qtd_bipada||0);
+    const maxTirar = qtdPedida - jaBipada;
+    if(maxTirar <= 0){ toast('Esse item já foi todo bipado — não há o que tirar','error'); return; }
+    const prod = PRODUTOS_DB.find(x=>x.codigo===item.codigo);
+    const estoque = prod ? Number(prod.quantidade||0) : 0;
+    const falta = qtdPedida - estoque;
+    const sugestao = (falta > 0 && falta < maxTirar) ? falta : maxTirar;
+
+    const resp = prompt(
+      `🚫 Tirar do pedido #${p.numero}\n\n${item.codigo} — ${item.nome}\n` +
+      `Pedido: ${qtdPedida} un.${jaBipada ? ` (${jaBipada} já bipada${jaBipada>1?'s':''})` : ''} · Estoque no sistema: ${estoque}\n\n` +
+      `Quantas unidades tirar? (máximo ${maxTirar})`, String(sugestao));
+    if(resp === null) return;
+    const qtdTirar = Math.floor(Number(String(resp).replace(',','.')));
+    if(!(qtdTirar >= 1 && qtdTirar <= maxTirar)){ toast(`Quantidade inválida — informe de 1 a ${maxTirar}`,'error'); return; }
+
+    const novaQtd = qtdPedida - qtdTirar;
+    const itensNovos = itens.map(i => ({ ...i }));
+    if(novaQtd <= 0) itensNovos.splice(idx, 1);
+    else {
+      itensNovos[idx].qtd = novaQtd;
+      if(Number(itensNovos[idx].qtd_bipada||0) > novaQtd) itensNovos[idx].qtd_bipada = novaQtd;
+    }
+    if(!itensNovos.length){
+      alert(`Esse é o único item do pedido #${p.numero} — o pedido ficaria vazio.\n\nFale com o vendedor ou o admin para cancelar o pedido.`);
+      return;
+    }
+
+    // Recalcula o total com os mesmos descontos/crédito que o pedido já tinha
+    const dg = Number(p.desconto_geral)||0;
+    const dv = Number(p.desconto_valor)||0;
+    const credito = Number(p.credito_aplicado)||0;
+    const t = totaisPedidoPorItens(itensNovos, dg, dv, credito);
+    if(credito > t.semCredito + 0.001){
+      // Devolver crédito ao cliente é com quem cuida do financeiro — não faz isso daqui
+      alert(`Não dá pra tirar esse item por aqui: o pedido #${p.numero} usa crédito do cliente e o valor ficaria menor que o crédito aplicado.\n\nPeça ao admin para editar o pedido.`);
+      return;
+    }
+
+    const textoAcao = novaQtd <= 0
+      ? `TIRAR o item do pedido (${qtdTirar} un.)`
+      : `reduzir de ${qtdPedida} para ${novaQtd} un. (tirar ${qtdTirar})`;
+    if(!confirm(`Confirmar no pedido #${p.numero}?\n\n${item.codigo} — ${item.nome}\n→ ${textoAcao}\n\nO valor do pedido é recalculado automaticamente e o vendedor vê a alteração no histórico do pedido.`)) return;
+
+    const parcelasAntigas = Array.isArray(p.parcelas) ? p.parcelas : Object.values(p.parcelas||{});
+    const parcelas = parcelasAntigas.map(pa => ({ ...pa, valor: parcelasAntigas.length ? t.total/parcelasAntigas.length : 0 }));
+    const historico = [...(Array.isArray(p.historico_edicoes) ? p.historico_edicoes : Object.values(p.historico_edicoes||{})), {
+      ts: agoraTs(),
+      usuario_nome: usuarioLogado.nome,
+      usuario_tipo: usuarioLogado.admin ? 'admin' : (usuarioLogado.tipo || 'vendedor'),
+      alteracoes: [ novaQtd <= 0
+        ? `− Item removido por falta de estoque (${origem==='bipagem'?'bipagem':'separação'}): ${esc(item.nome)} (qtd ${qtdPedida})`
+        : `± ${esc(item.nome)}: quantidade ${qtdPedida} → ${novaQtd} — falta de estoque (${origem==='bipagem'?'bipagem':'separação'})` ]
+    }];
+
+    // Trava: o pedido não pode ter mudado entre a leitura e a gravação
+    const confere = (await db.ref('pedidos/'+p.id+'/status').once('value')).val();
+    if(!['AP','EX'].includes(confere)){ toast('O status do pedido mudou — nada foi alterado','error'); return; }
+
+    await db.ref('pedidos/'+atual.id).update({
+      itens: itensNovos,
+      subtotal: t.sub,
+      desconto_total: t.sub - t.total,
+      total: t.total,
+      parcelas,
+      historico_edicoes: historico
+    });
+    invalidarCachePedidos();
+
+    // Libera só a reserva do que saiu (produto que não existe mais no cadastro é ignorado)
+    const prodExiste = (await db.ref('produtos/'+item.codigo).once('value')).exists();
+    if(prodExiste) await liberarReservaEstoquePedido([{ codigo:item.codigo, nome:item.nome, qtd:qtdTirar }]);
+
+    pedidoSeparacaoAtual = { ...atual, ...p, itens: itensNovos, historico_edicoes: historico };
+    const cache = PEDIDOS_SEPARACAO_CACHE.find(x=>x.id===atual.id);
+    if(cache) cache.itens = itensNovos;
+    toast(novaQtd <= 0 ? `✓ ${item.codigo} tirado do pedido #${p.numero}` : `✓ ${item.codigo}: quantidade ajustada para ${novaQtd}`,'success');
+    if(origem === 'bipagem') renderModalBipagem(); else renderModalSeparacao();
+  } catch(e){
+    toast('Erro ao tirar o item: '+(e.message||e),'error');
+  } finally {
+    REMOVENDO_ITEM_SEM_ESTOQUE = false;
+  }
 }
 
 // ── Gerar OP direto da tela de separação, com sugestão inteligente ──
@@ -13882,6 +14034,7 @@ function renderModalBipagem(){
         ${(()=>{ const l = String(PRODUTOS_DB.find(x=>x.codigo===itemAtual.codigo)?.localizacao||'').trim(); return l ? `<div style="margin-top:6px"><span style="background:#1F3A5F;color:#fff;border-radius:5px;padding:2px 10px;font-weight:700;font-size:13px">📍 ${esc(l)}</span></div>` : ''; })()}
         <div style="font-size:28px;font-weight:900;font-family:'DM Sans',sans-serif;color:#d97706;margin-top:8px">${Number(itemAtual.qtd_bipada||0)} / ${itemAtual.qtd}</div>
         ${pendentesBip > 1 ? `<button class="btn btn-outline btn-sm" style="margin-top:10px" onclick="adiarItemBipagem()">⏭ Deixar para o final (aguardando produção)</button>` : (itemAtual.bip_adiado ? `<div style="margin-top:8px;font-size:12px;color:#92400e">⏭ Item que tinha sido deixado para o final</div>` : '')}
+        ${podeRemoverItemSemEstoque() ? `<div><button class="btn btn-outline btn-sm" style="margin-top:8px;color:#dc2626;border-color:#dc2626" onclick="enfileirarBipagem(()=>removerItemSemEstoque(${idxAtual},'bipagem'))">🚫 Sem estoque — tirar do pedido</button></div>` : ''}
       </div>
     ` : `<div style="text-align:center;color:var(--success);font-weight:700;padding:12px">✅ Todos os itens bipados!</div>
       <button class="btn btn-primary" style="width:100%;margin-bottom:16px;background:#16a34a;border-color:#16a34a" onclick="finalizarPedidoBipado()">✅ Concluir pedido</button>`}
@@ -17208,6 +17361,7 @@ function abrirModalVendedor(){
   if(!temPermissaoEditar('vendedores')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   ['vend-id','vend-nome','vend-user','vend-pass','vend-tel','vend-email','vend-comissao'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('vend-tipo').value = 'vendedor';
+  document.getElementById('vend-sem-trava-preco').checked = false;
   montarPermissoesTabela({});
   atualizarVisibilidadePermissoes();
   document.getElementById('modal-vendedor-titulo').textContent = 'Cadastrar Usuário';
@@ -17229,6 +17383,7 @@ async function editarVendedor(id){
   document.getElementById('vend-email').value = v.email || '';
   document.getElementById('vend-tipo').value = v.tipo || (v.admin ? 'admin' : 'vendedor');
   document.getElementById('vend-comissao').value = v.comissao_pct || '';
+  document.getElementById('vend-sem-trava-preco').checked = v.sem_trava_preco === true;
   montarPermissoesTabela(v.permissoes || {});
   atualizarVisibilidadePermissoes();
   document.getElementById('modal-vendedor-titulo').textContent = 'Editar Usuário';
@@ -17247,6 +17402,7 @@ async function salvarVendedor(){
   const admin = tipo==='admin';
   const permissoes = tipo==='personalizado' ? lerPermissoesTabela() : null;
   const comissaoPct = tipo==='vendedor' ? (Number(document.getElementById('vend-comissao').value)||0) : 0;
+  const semTrava = !admin && document.getElementById('vend-sem-trava-preco').checked;
   if(!nome||!user){ toast('Nome e usuário são obrigatórios','error'); return; }
 
   if(id){
@@ -17254,7 +17410,8 @@ async function salvarVendedor(){
     const dados = {
       nome, usuario:user, telefone:document.getElementById('vend-tel').value,
       email:document.getElementById('vend-email').value, admin, tipo,
-      permissoes: permissoes || null, comissao_pct: comissaoPct
+      permissoes: permissoes || null, comissao_pct: comissaoPct,
+      sem_trava_preco: semTrava || null
     };
     if(pass) dados.senha = pass; // só atualiza a senha se foi digitada uma nova
     await db.ref('usuarios/'+id).update(dados);
@@ -17269,7 +17426,8 @@ async function salvarVendedor(){
     await db.ref('usuarios/'+novoId).set({ id:novoId, nome, usuario:user, senha:pass,
       telefone:document.getElementById('vend-tel').value,
       email:document.getElementById('vend-email').value, admin, tipo,
-      permissoes: permissoes || null, comissao_pct: comissaoPct, ativo:true });
+      permissoes: permissoes || null, comissao_pct: comissaoPct, ativo:true,
+      sem_trava_preco: semTrava || null });
     fecharModal('modal-vendedor'); renderVendedores();
     toast(`✓ Usuário ${nome} cadastrado!`,'success');
   }
