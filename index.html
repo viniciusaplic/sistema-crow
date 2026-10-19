@@ -9495,6 +9495,24 @@ function confirmarImpressaoEtiquetasOP(){
   imprimirEtiquetasProdutoEmLote(opContextoEtiquetas.codigo, opContextoEtiquetas.tipo, qtd);
 }
 
+// Código de barras da etiqueta com tamanho FÍSICO fixo (~42mm x 13mm), nunca esticado nem encolhido:
+// cada barra fina = 0,375mm = exatamente 3 pontos numa impressora térmica de 203dpi. Antes o código
+// era espremido em 30mm (≈2,2 pontos por barra): a impressora arredondava umas barras pra 2 e outras
+// pra 3 pontos e o leitor não reconhecia. Inclui a área branca lateral que o leitor precisa.
+const ETQ_MODULO_MM = 0.375;
+function gerarSvgCodigoBarrasEtiqueta(gtinLimpo){
+  const svgTemp = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  JsBarcode(svgTemp, gtinLimpo, { format: "EAN13", displayValue: true, font: "Arial", fontSize: 9, width: 1, height: 26, margin: 0, marginRight: 6, textMargin: 1, background: "#ffffff", lineColor: "#000000" });
+  const vb = (svgTemp.getAttribute('viewBox')||'').split(/\s+/).map(Number);
+  const w = vb[2] || parseFloat(svgTemp.getAttribute('width')) || 113;
+  const h = vb[3] || parseFloat(svgTemp.getAttribute('height')) || 36;
+  svgTemp.setAttribute('width', (w*ETQ_MODULO_MM).toFixed(2)+'mm');
+  svgTemp.setAttribute('height', (h*ETQ_MODULO_MM).toFixed(2)+'mm');
+  svgTemp.setAttribute('shape-rendering', 'crispEdges');
+  svgTemp.removeAttribute('style');
+  return svgTemp.outerHTML;
+}
+
 // Imprime múltiplas etiquetas do mesmo item numa única página/janela (evita bloqueio de pop-up por excesso de janelas)
 function imprimirEtiquetasProdutoEmLote(codigo, tipo, quantidade){
   const item = buscarItemParaEtiqueta(codigo, tipo);
@@ -9507,12 +9525,7 @@ function imprimirEtiquetasProdutoEmLote(codigo, tipo, quantidade){
 
   let svgBarcode;
   try {
-    const svgTemp = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    JsBarcode(svgTemp, gtinLimpo, { format: "EAN13", displayValue: true, fontSize: 9, width: 0.9, height: 22, margin: 0, textMargin: 2 });
-    svgTemp.setAttribute('width', '30mm');
-    svgTemp.setAttribute('height', '13mm');
-    svgTemp.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-    svgBarcode = svgTemp.outerHTML;
+    svgBarcode = gerarSvgCodigoBarrasEtiqueta(gtinLimpo);
   } catch(e){
     toast('Erro ao gerar código de barras: GTIN inválido (' + e.message + ')', 'error');
     return;
@@ -9520,11 +9533,11 @@ function imprimirEtiquetasProdutoEmLote(codigo, tipo, quantidade){
 
   const etiquetaHtml = `
     <div class="etq">
-      <div class="nome">${esc(item.nome)}</div>
-      <div class="linha-inferior">
-        <div class="barcode-wrap">${svgBarcode}</div>
+      <div class="topo">
+        <div class="nome">${esc(item.nome)}</div>
         <div class="codigo-lateral">${codigo}</div>
       </div>
+      <div class="barcode-wrap">${svgBarcode}</div>
     </div>`;
 
   const win = window.open('', '_blank');
@@ -9534,15 +9547,17 @@ function imprimirEtiquetasProdutoEmLote(codigo, tipo, quantidade){
       @page { size: 50mm 30mm; margin: 0; }
       body { margin: 0; font-family: Arial, sans-serif; }
       .etq {
-        width: 44mm; height: 28mm; box-sizing: border-box; padding: 1mm;
-        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        width: 44mm; height: 28mm; box-sizing: border-box; padding: 1mm 0.5mm;
+        display: flex; flex-direction: column; align-items: center; justify-content: space-between;
         overflow: hidden; page-break-after: always;
       }
       .etq:last-child { page-break-after: auto; }
-      .nome { width: 100%; font-size: 10px; font-weight: 700; line-height: 1.1; text-align: center; overflow: hidden; margin-bottom: 0.5mm; }
-      .linha-inferior { width: 100%; display: flex; align-items: center; flex-shrink: 0; }
-      .barcode-wrap { width: 30mm; flex-shrink: 0; overflow: hidden; }
-      .codigo-lateral { width: 10mm; flex-shrink: 0; font-size: 10px; font-weight: 900; white-space: nowrap; text-align: right; padding-left: 1mm; }
+      .topo { width: 100%; flex: 1 1 auto; min-height: 0; display: flex; align-items: flex-start; gap: 1mm; overflow: hidden; }
+      .nome { flex: 1 1 auto; min-width: 0; font-size: 10px; font-weight: 700; line-height: 1.1; text-align: center; overflow: hidden;
+        display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+      .barcode-wrap { flex: 0 0 auto; display: flex; justify-content: center; background: #fff; }
+      .barcode-wrap svg { display: block; flex: 0 0 auto; }
+      .codigo-lateral { flex: 0 0 auto; font-size: 10px; font-weight: 900; white-space: nowrap; text-align: right; }
     </style>
     </head><body>
       ${etiquetaHtml.repeat(quantidade)}
@@ -10832,10 +10847,7 @@ function imprimirEtiquetaProduto(codigo, tipo){
   // Gera o código de barras na página principal (onde JsBarcode está carregado)
   let svgBarcode;
   try {
-    const svgTemp = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    // Código de barras reduzido para sobrar mais espaço para o nome completo do item
-    JsBarcode(svgTemp, gtinLimpo, { format: "EAN13", displayValue: true, fontSize: 9, width: 1.4, height: 32, margin: 1, textMargin: 2 });
-    svgBarcode = svgTemp.outerHTML;
+    svgBarcode = gerarSvgCodigoBarrasEtiqueta(gtinLimpo);
   } catch(e){
     toast('Erro ao gerar código de barras: GTIN inválido (' + e.message + ')', 'error');
     return;
@@ -10873,7 +10885,8 @@ function imprimirEtiquetaProduto(codigo, tipo){
         flex: 1 1 auto; min-height: 0; overflow: hidden;
         display: flex; align-items: center; justify-content: center;
       }
-      .barcode-wrap svg { display: block; width: 100% !important; height: 100% !important; max-width: 100%; max-height: 100%; }
+      .barcode-wrap { background: #fff; }
+      .barcode-wrap svg { display: block; flex: 0 0 auto; }
     </style>
     </head><body>
       <div class="etq">
@@ -14223,6 +14236,24 @@ async function adiarItemBipagem(){
   });
 }
 
+// Compara o GTIN lido pelo coletor com o cadastrado, aceitando as diferenças de formato que
+// fazem um código CERTO ser recusado: espaços/pontos no cadastro, zero à esquerda (leitor que
+// manda EAN-13 iniciado em 0 como UPC-A de 12 dígitos) e cadastro de 12 dígitos sem o dígito
+// verificador (a etiqueta imprime 13: os 12 + o verificador).
+function digitoVerificadorGTIN(base){
+  let soma = 0;
+  for(let i = base.length - 1, peso = 3; i >= 0; i--, peso = 4 - peso) soma += Number(base[i]) * peso;
+  return String((10 - soma % 10) % 10);
+}
+function gtinBate(cadastrado, lido){
+  const a = String(cadastrado||'').replace(/\D/g,'').replace(/^0+/,'');
+  const b = String(lido||'').replace(/\D/g,'').replace(/^0+/,'');
+  if(a.length < 7 || b.length < 7) return false; // evita confundir com códigos internos curtos
+  if(a === b) return true;
+  const [curto, longo] = a.length < b.length ? [a, b] : [b, a];
+  return longo.length === curto.length + 1 && longo.startsWith(curto) && longo.slice(-1) === digitoVerificadorGTIN(curto);
+}
+
 async function _processarBipagemAgora(codigoLido){
   const p = pedidoSeparacaoAtual;
   if(!p) return;
@@ -14245,13 +14276,13 @@ async function _processarBipagemAgora(codigoLido){
 
   // Só aceita o código/GTIN do item que está na vez — bloqueia bipar fora de ordem
   const codigoNormalizado = codigoLido.trim().toUpperCase();
-  const bate = (gtinAtual && gtinAtual.trim().toUpperCase()===codigoNormalizado) || (itemAtual.codigo.trim().toUpperCase()===codigoNormalizado);
+  const bate = (gtinAtual && (gtinAtual.trim().toUpperCase()===codigoNormalizado || gtinBate(gtinAtual, codigoNormalizado))) || (itemAtual.codigo.trim().toUpperCase()===codigoNormalizado);
   if(!bate){
     // Verifica se o código pertence a outro item do pedido, para dar mensagem mais clara
     const pertenceOutro = p.itens.some(i => {
       const prod = PRODUTOS_DB.find(x=>x.codigo===i.codigo);
       const gtin = (prod && prod.gtin) ? prod.gtin : i.gtin;
-      return (gtin && gtin.trim().toUpperCase()===codigoNormalizado) || i.codigo.trim().toUpperCase()===codigoNormalizado;
+      return (gtin && (gtin.trim().toUpperCase()===codigoNormalizado || gtinBate(gtin, codigoNormalizado))) || i.codigo.trim().toUpperCase()===codigoNormalizado;
     });
     msg.innerHTML = pertenceOutro
       ? `<span style="color:#dc2626">❌ Não é a vez deste item. Bipe primeiro: <strong>${esc(itemAtual.nome)}</strong></span>`
