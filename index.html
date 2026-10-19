@@ -1282,28 +1282,50 @@ tbody td{padding:11px 16px;font-size:14px}
         </div>
       </div>
       <div class="dashboard-cards" id="cr-cards"></div>
+      <datalist id="cr-clientes-lista"></datalist>
       <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
         <button class="btn btn-sm btn-secondary" id="cr-subaba-abertas" onclick="trocarSubabaCR('abertas')">A receber</button>
         <button class="btn btn-sm btn-outline" id="cr-subaba-baixadas" onclick="trocarSubabaCR('baixadas')">Recebidos</button>
       </div>
-      <div id="cr-filtros-abertas" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-        <input class="search-input" id="cr-busca" placeholder="Cliente ou nº do pedido…" oninput="renderTabelaCR()">
-        <select class="search-input" id="cr-situacao" style="width:auto" onchange="renderTabelaCR()">
-          <option value="">Todas</option>
-          <option value="vencidas">Vencidas</option>
-          <option value="hoje">Vencem hoje</option>
-          <option value="7">Próximos 7 dias</option>
-          <option value="30">Próximos 30 dias</option>
-        </select>
+      <div id="cr-filtros-abertas" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;align-items:flex-end">
+        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Cliente</label>
+          <input class="search-input" id="cr-cliente" list="cr-clientes-lista" autocomplete="off" placeholder="Todos" oninput="renderTabelaCR()"></div>
+        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Nº do pedido</label>
+          <input class="search-input" id="cr-busca" style="width:120px" placeholder="Todos" oninput="renderTabelaCR()"></div>
+        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Forma de pagamento</label>
+          <select class="search-input" id="cr-forma" style="width:auto" onchange="renderTabelaCR()"></select></div>
+        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Situação</label>
+          <select class="search-input" id="cr-situacao" style="width:auto" onchange="renderTabelaCR()">
+            <option value="">Todas</option>
+            <option value="vencidas">Vencidas</option>
+            <option value="hoje">Vencem hoje</option>
+            <option value="avencer">A vencer</option>
+          </select></div>
+        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Vencimento de</label>
+          <input type="date" class="search-input" id="cr-de" style="width:auto" onchange="renderTabelaCR()"></div>
+        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">até</label>
+          <input type="date" class="search-input" id="cr-ate" style="width:auto" onchange="renderTabelaCR()"></div>
+        <button class="btn btn-outline btn-sm" onclick="limparFiltrosCR()">Limpar</button>
+        <button class="btn btn-success btn-sm" id="btn-cr-baixar-sel" style="display:none" onclick="abrirReceberCR()"></button>
       </div>
-      <div id="cr-filtros-baixadas" style="display:none;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-        <input type="month" class="search-input" id="cr-mes" style="width:auto" onchange="aoMudarMesCR()">
-        <input class="search-input" id="cr-busca-baixadas" placeholder="Cliente ou nº do pedido…" oninput="renderTabelaCR()">
+      <div id="cr-filtros-baixadas" style="display:none;gap:10px;flex-wrap:wrap;margin-bottom:12px;align-items:flex-end">
+        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Cliente</label>
+          <input class="search-input" id="crb-cliente" list="cr-clientes-lista" autocomplete="off" placeholder="Todos" oninput="renderTabelaCR()"></div>
+        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Nº do pedido ou observação</label>
+          <input class="search-input" id="crb-busca" placeholder="Todos" oninput="renderTabelaCR()"></div>
+        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Forma de pagamento</label>
+          <select class="search-input" id="crb-forma" style="width:auto" onchange="renderTabelaCR()"></select></div>
+        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Recebido de</label>
+          <input type="date" class="search-input" id="crb-de" style="width:auto" onchange="aoMudarPeriodoBaixadas()"></div>
+        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">até</label>
+          <input type="date" class="search-input" id="crb-ate" style="width:auto" onchange="aoMudarPeriodoBaixadas()"></div>
+        <button class="btn btn-outline btn-sm" onclick="limparFiltrosCR()">Limpar</button>
       </div>
       <div class="table-wrap" style="overflow-x:auto"><div id="cr-tabela"></div></div>
     </div>
 
-    <!-- PEDIDOS DE COMPRA -->
+    
+<!-- PEDIDOS DE COMPRA -->
     <div id="tab-compras" style="display:none">
       <div class="section-header">
         <div class="section-title">🛒 Pedidos de Compra</div>
@@ -2106,9 +2128,10 @@ tbody td{padding:11px 16px;font-size:14px}
     <div id="cr-gerar-linhas"></div>
     <button type="button" class="btn btn-outline btn-sm" onclick="adicionarLinhaCrGerar()">+ Parcela</button>
     <div id="cr-gerar-soma" style="font-size:13px;margin:12px 0"></div>
-    <div class="form-group">
-      <label>Observação (opcional)</label>
-      <input type="text" id="cr-gerar-obs" maxlength="200" placeholder="Ex.: boleto enviado por e-mail">
+    <div class="form-row">
+      <div class="form-group"><label>Forma de pagamento *</label><select id="cr-gerar-forma"></select></div>
+      <div class="form-group"><label>Observação (opcional)</label>
+      <input type="text" id="cr-gerar-obs" maxlength="200" placeholder="Ex.: boleto enviado por e-mail"></div>
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
       <button class="btn btn-outline" onclick="fecharModal('modal-cr-gerar')">Agora não</button>
@@ -2135,17 +2158,18 @@ tbody td{padding:11px 16px;font-size:14px}
 </div>
 
 <div class="modal-overlay" id="modal-cr-receber">
-  <div class="modal" style="max-width:440px">
+  <div class="modal" style="max-width:520px">
     <button class="modal-close" onclick="fecharModal('modal-cr-receber')">×</button>
     <div class="modal-title">✅ Registrar Recebimento</div>
     <div id="cr-receber-info" style="font-size:14px;margin-bottom:14px"></div>
     <div class="form-row">
       <div class="form-group"><label>Data do recebimento</label><input type="date" id="cr-receber-data"></div>
-      <div class="form-group"><label>Valor recebido</label><input type="number" id="cr-receber-valor" min="0" step="0.01" oninput="atualizarSaldoReceberCR()"></div>
+      <div class="form-group"><label>Forma de pagamento</label><select id="cr-receber-forma"></select></div>
     </div>
-    <div class="form-row">
-      <div class="form-group"><label>Forma</label><select id="cr-receber-forma"></select></div>
-      <div class="form-group"><label>Observação</label><input type="text" id="cr-receber-obs" maxlength="200"></div>
+    <div class="form-group" id="cr-receber-valor-wrap" style="margin-bottom:12px"><label>Valor recebido</label><input type="number" id="cr-receber-valor" min="0" step="0.01" oninput="atualizarSaldoReceberCR()"></div>
+    <div class="form-group" style="margin-bottom:12px">
+      <label>Observação / destino do pagamento</label>
+      <input type="text" id="cr-receber-obs" maxlength="300" placeholder="Ex.: depositado no Itaú, usado para pagar fornecedor X…">
     </div>
     <label id="cr-receber-saldo-wrap" style="display:none;align-items:center;gap:8px;font-size:13px;margin-bottom:8px">
       <input type="checkbox" id="cr-receber-saldo" checked style="width:18px;height:18px;accent-color:var(--accent)">
@@ -2162,16 +2186,15 @@ tbody td{padding:11px 16px;font-size:14px}
     <div style="font-size:13px;color:var(--muted);margin-bottom:14px">Para histórico de antes do módulo ou vendas que não passaram pelo faturamento do sistema. Marque "Já recebida" nas parcelas que já foram pagas.</div>
     <div class="form-group" style="margin-bottom:12px">
       <label>Cliente *</label>
-      <input type="text" id="cr-manual-cliente" list="cr-manual-clientes-lista" autocomplete="off" placeholder="Digite para buscar no cadastro">
-      <datalist id="cr-manual-clientes-lista"></datalist>
+      <input type="text" id="cr-manual-cliente" list="cr-clientes-lista" autocomplete="off" placeholder="Digite para buscar no cadastro">
     </div>
     <div class="form-row">
       <div class="form-group"><label>Data da venda *</label><input type="date" id="cr-manual-data"></div>
       <div class="form-group"><label>Nº do pedido / NF (referência)</label><input type="text" id="cr-manual-pedido" maxlength="40"></div>
     </div>
-    <div class="form-group" style="margin-bottom:12px">
-      <label>Descrição</label>
-      <input type="text" id="cr-manual-desc" maxlength="200" placeholder="Ex.: pedido W3 1234, saldo de acordo…">
+    <div class="form-row">
+      <div class="form-group"><label>Forma de pagamento *</label><select id="cr-manual-forma"></select></div>
+      <div class="form-group"><label>Observação</label><input type="text" id="cr-manual-obs" maxlength="200" placeholder="Ex.: pedido W3 1234, saldo de acordo…"></div>
     </div>
     <div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:12px">
       <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Atalho: preencha o total e a condição e clique em Gerar parcelas</div>
@@ -2191,9 +2214,9 @@ tbody td{padding:11px 16px;font-size:14px}
     <div id="cr-manual-linhas"></div>
     <button type="button" class="btn btn-outline btn-sm" onclick="adicionarLinhaCrManual()">+ Parcela</button>
     <div id="cr-manual-soma" style="font-size:13px;margin:12px 0"></div>
-    <div class="form-group" id="cr-manual-forma-wrap" style="display:none;margin-bottom:12px">
-      <label>Forma de recebimento (parcelas já recebidas)</label>
-      <select id="cr-manual-forma"></select>
+    <div class="form-group" id="cr-manual-obs-rec-wrap" style="display:none;margin-bottom:12px">
+      <label>Observação / destino do pagamento (parcelas já recebidas)</label>
+      <input type="text" id="cr-manual-obs-rec" maxlength="300" placeholder="Ex.: depositado no Itaú">
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn btn-outline" onclick="fecharModal('modal-cr-manual')">Cancelar</button>
@@ -2211,7 +2234,8 @@ tbody td{padding:11px 16px;font-size:14px}
       <div class="form-group"><label>Vencimento</label><input type="date" id="cr-editar-venc"></div>
       <div class="form-group"><label>Valor</label><input type="number" id="cr-editar-valor" min="0" step="0.01"></div>
     </div>
-    <div class="form-group"><label>Observação</label><input type="text" id="cr-editar-obs" maxlength="200"></div>
+    <div class="form-group" style="margin-bottom:12px"><label>Forma de pagamento</label><select id="cr-editar-forma"></select></div>
+    <div class="form-group"><label>Observação</label><input type="text" id="cr-editar-obs" maxlength="300"></div>
     <button class="btn btn-primary" style="margin-top:14px" onclick="salvarEditarCR()">💾 Salvar</button>
   </div>
 </div>
@@ -5259,27 +5283,34 @@ async function confirmarFaturamentoPedido(){
 
 // ══════════════════════════════════════════════
 // ══ FINANCEIRO — CONTAS A RECEBER ══
-// Os títulos nascem do pedido de venda na hora em que ele é marcado como Faturado:
-// o sistema pergunta "Deseja criar um contas a receber?" e só os pedidos escolhidos
-// geram título. Cada parcela da condição de pagamento vira um título, com vencimento
-// contado a partir da data do faturamento (dá pra ajustar valor e data antes de salvar).
+// Títulos nascem de três jeitos: (1) ao marcar o pedido como Faturado o sistema pergunta
+// "Deseja criar um contas a receber?"; (2) faturamento em lote, escolhendo os pedidos;
+// (3) lançamento manual (histórico de antes do módulo, vendas fora do sistema), que pode
+// entrar já como recebido. Cada título tem forma de pagamento: Boleto, Cheque ou
+// Crédito em conta.
 //
 // Economia de leitura no Firebase:
-// - contas_receber/abertas: só os títulos em aberto. A aba lê esse nó uma vez por
-//   sessão (o botão Atualizar relê) e cada gravação atualiza a lista na memória.
-// - contas_receber/baixadas/{AAAA-MM}: títulos recebidos, separados pelo mês do
-//   recebimento. Só é lido o mês selecionado na tela, e uma vez só.
-// - pedidos/{id}/contas_receber = {chave:true}: o pedido sabe se já tem título sem
-//   precisar varrer o financeiro.
+// - contas_receber/abertas: só os títulos em aberto. Lido uma vez por sessão (o botão
+//   Atualizar relê); toda gravação atualiza a lista na memória.
+// - contas_receber/baixadas/{AAAA-MM}: recebidos, separados pelo mês do recebimento.
+//   O filtro de período lê só os meses que ele cobre, cada um uma vez por sessão.
+// - pedidos/{id}/contas_receber = {chave:true}: o pedido sabe se tem título sem varrer
+//   o financeiro.
+// - Filtros (cliente, forma, período, situação) rodam na memória: zero leitura.
+// - Clientes para a busca vêm do CLIENTES_DB, já carregado no login.
 // Datas gravadas como texto (AAAA-MM-DD / ISO), igual ao resto do sistema.
 // ══════════════════════════════════════════════
+const CR_FORMAS = ['Boleto','Cheque','Crédito em conta'];
 let CR_ABERTAS = null;          // [{key, ...titulo}] — null = ainda não carregado nesta sessão
 let CR_BAIXADAS_CACHE = {};     // 'AAAA-MM' -> [{key, ...titulo}]
 let CR_SUBABA = 'abertas';
 let CR_GERAR_CTX = null;        // { pedidoId, p, dataBase, linhas:[{vencimento, valor}], aoFechar }
 let CR_LOTE = [];               // [{ id, p }] pedidos recém-faturados em lote, sem título
-let CR_ACAO_KEY = null;         // título aberto no modal de receber/editar
-const CR_FORMAS = ['PIX','Boleto','Transferência','Dinheiro','Cartão','Cheque','Outro'];
+let CR_SEL = new Set();         // chaves marcadas em "A receber" para baixar juntas
+let CR_BAIXA_KEYS = [];         // títulos no modal de recebimento (1 ou vários)
+let CR_ACAO_KEY = null;         // título no modal de edição
+let CR_FILTRO_LOTE = null;      // lote_id filtrado em Recebidos
+let CR_MANUAL_LINHAS = [];
 
 function crCentavos(v){ return Math.round((Number(v)||0)*100); }
 function crHoje(){ return ymdLocal(agora()); }
@@ -5292,6 +5323,22 @@ function crDiasAte(isoDia){
   return Math.round((new Date(isoDia+'T00:00:00') - new Date(crHoje()+'T00:00:00')) / 86400000);
 }
 function crTemTitulos(p){ return !!(p && p.contas_receber && Object.keys(p.contas_receber).length); }
+function crIsoValido(v){ return /^\d{4}-\d{2}-\d{2}$/.test(v||''); }
+function crOpcoesForma(sel){ return CR_FORMAS.map(f => `<option ${f===sel?'selected':''}>${f}</option>`).join(''); }
+
+// Forma do pedido (BOLETO / CHEQUE / CREDITO EM CONTA / DINHEIRO) → forma do título.
+// Sem correspondência devolve '' e a tela obriga a escolher.
+function crFormaDoPedido(f){
+  const s = String(f||'').toUpperCase();
+  if(s.includes('BOLETO')) return 'Boleto';
+  if(s.includes('CHEQUE')) return 'Cheque';
+  if(s.includes('CREDITO') || s.includes('CRÉDITO')) return 'Crédito em conta';
+  return '';
+}
+// Forma do título (títulos criados antes deste campo existir caem na do pedido)
+function crFormaTitulo(t){ return t.forma || crFormaDoPedido(t.forma_pedido) || ''; }
+// Observação única: títulos antigos podem ter "descricao" (lançamento manual) e "obs"
+function crObsTitulo(t){ return [t.descricao, t.obs].filter(Boolean).join(' · '); }
 
 // Dias de cada parcela: usa o que ficou gravado no pedido; se não tiver, lê a condição
 // com a mesma regra de calcularParcelas (AVISTA, "28 DIAS", "30/60/90").
@@ -5321,9 +5368,20 @@ function crDataBasePedido(p){
   return p.data_faturamento ? String(p.data_faturamento).split('T')[0] : crHoje();
 }
 
+// Lista de clientes do cadastro para os campos de busca (sem leitura: CLIENTES_DB)
+function crPreencherListaClientes(idLista){
+  const el = document.getElementById(idLista);
+  if(!el || el.dataset.ok) return;
+  const vistos = new Set();
+  el.innerHTML = (CLIENTES_DB||[])
+    .filter(c => { const k = String(c.nome).trim().toUpperCase(); if(vistos.has(k)) return false; vistos.add(k); return true; })
+    .map(c => `<option value="${esc(c.nome)}">${esc([c.cidade, c.uf].filter(Boolean).join('/'))}</option>`).join('');
+  if(el.children.length) el.dataset.ok = '1';
+}
+
 // Grava os títulos de UM pedido. A trava é a transaction em pedidos/{id}/contas_receber:
 // só passa se o pedido ainda não tiver título — duas abas ou clique duplo não duplicam.
-async function crGravarTitulos(pedidoId, p, dataBase, linhas, obs){
+async function crGravarTitulos(pedidoId, p, dataBase, linhas, obs, forma){
   const ref = db.ref('contas_receber/abertas');
   const chaves = linhas.map(() => ref.push().key);
   const mapa = {};
@@ -5347,6 +5405,7 @@ async function crGravarTitulos(pedidoId, p, dataBase, linhas, obs){
       cliente_cidade: p.cliente_cidade || '',
       cliente_uf: p.cliente_uf || '',
       vendedor_nome: p.vendedor_nome || '',
+      forma: forma,
       forma_pedido: p.forma || '',
       condicao: p.condicao || '',
       data_faturamento: dataBase,
@@ -5365,7 +5424,7 @@ async function crGravarTitulos(pedidoId, p, dataBase, linhas, obs){
   updates['pedidos/'+pedidoId+'/historico_edicoes/'+hist] = {
     ts: agoraTs(), usuario_nome: usuarioLogado?.nome || '',
     usuario_tipo: usuarioLogado?.admin ? 'admin' : (usuarioLogado?.tipo || 'vendedor'),
-    alteracoes: [`💵 Contas a receber criado: ${linhas.length} título(s), total ${fmtMoeda(novos.reduce((s,t)=>s+t.valor,0))}`]
+    alteracoes: [`💵 Contas a receber criado: ${linhas.length} título(s) em ${forma}, total ${fmtMoeda(novos.reduce((s,t)=>s+t.valor,0))}`]
   };
   try {
     await db.ref().update(updates);
@@ -5397,6 +5456,7 @@ async function abrirGerarContasReceber(pedidoId, opts = {}){
   document.getElementById('cr-gerar-info').innerHTML = `
     <div><strong>Pedido #${esc(p.numero)}</strong> · ${esc(p.cliente_nome)}</div>
     <div style="color:var(--muted);margin-top:2px">Total ${fmtMoeda(p.total)} · ${esc(p.forma||'—')} · ${esc(p.condicao||'—')} · faturado em ${fmtData(dataBase)}</div>`;
+  document.getElementById('cr-gerar-forma').innerHTML = '<option value="">Selecione...</option>' + crOpcoesForma(crFormaDoPedido(p.forma));
   document.getElementById('cr-gerar-obs').value = '';
   renderCrGerarLinhas();
   abrirModal('modal-cr-gerar');
@@ -5434,9 +5494,11 @@ function atualizarSomaCrGerar(){
 
 async function salvarGerarContasReceber(){
   const ctx = CR_GERAR_CTX; if(!ctx) return;
+  const forma = document.getElementById('cr-gerar-forma').value;
+  if(!forma){ toast('Escolha a forma de pagamento','error'); return; }
   const linhas = ctx.linhas.filter(l => crCentavos(l.valor) > 0);
   if(!linhas.length){ toast('Informe o valor de pelo menos uma parcela','error'); return; }
-  if(linhas.some(l => !/^\d{4}-\d{2}-\d{2}$/.test(l.vencimento||''))){ toast('Preencha o vencimento de todas as parcelas','error'); return; }
+  if(linhas.some(l => !crIsoValido(l.vencimento))){ toast('Preencha o vencimento de todas as parcelas','error'); return; }
   const soma = linhas.reduce((s, l) => s + crCentavos(l.valor), 0);
   const total = crCentavos(ctx.p.total);
   if(soma !== total){
@@ -5447,7 +5509,7 @@ async function salvarGerarContasReceber(){
   const btn = document.getElementById('btn-cr-gerar-salvar');
   btn.disabled = true;
   try {
-    const qtd = await crGravarTitulos(ctx.pedidoId, ctx.p, ctx.dataBase, linhas, document.getElementById('cr-gerar-obs').value.trim());
+    const qtd = await crGravarTitulos(ctx.pedidoId, ctx.p, ctx.dataBase, linhas, document.getElementById('cr-gerar-obs').value.trim(), forma);
     toast(`✅ ${qtd} título(s) lançado(s) no Contas a Receber`,'success');
     fecharModal('modal-cr-gerar');
     const aoFechar = ctx.aoFechar;
@@ -5465,13 +5527,13 @@ async function salvarGerarContasReceber(){
 function abrirCrLote(itens, dataFat){
   CR_LOTE = itens;
   document.getElementById('cr-lote-info').innerHTML =
-    `${itens.length} pedido(s) faturado(s) em ${fmtData(dataFat)}. Marque os que vão para o contas a receber — as parcelas seguem a condição de pagamento de cada pedido (dá pra ajustar depois na aba Financeiro).`;
-  document.getElementById('cr-lote-lista').innerHTML = itens.map(({ id, p }, i) => `
-    <label style="display:flex;gap:10px;align-items:center;padding:9px 4px;border-bottom:1px solid var(--border);cursor:pointer">
+    `${itens.length} pedido(s) faturado(s) em ${fmtData(dataFat)}. Marque os que vão para o contas a receber e confira a forma de pagamento — as parcelas seguem a condição de cada pedido (dá pra ajustar depois na aba Financeiro).`;
+  document.getElementById('cr-lote-lista').innerHTML = itens.map(({ p }, i) => `
+    <div style="display:flex;gap:10px;align-items:center;padding:9px 4px;border-bottom:1px solid var(--border);flex-wrap:wrap">
       <input type="checkbox" class="cr-lote-chk" data-i="${i}" style="width:18px;height:18px;accent-color:var(--accent)">
-      <span style="flex:1"><strong>#${esc(p.numero)}</strong> · ${esc(p.cliente_nome)}<br><span style="font-size:12px;color:var(--muted)">${esc(p.forma||'—')} · ${esc(p.condicao||'—')} · ${crDiasDaCondicao(p).length} parcela(s)</span></span>
-      <span style="font-weight:600;white-space:nowrap">${fmtMoeda(p.total)}</span>
-    </label>`).join('');
+      <span style="flex:1;min-width:180px"><strong>#${esc(p.numero)}</strong> · ${esc(p.cliente_nome)}<br><span style="font-size:12px;color:var(--muted)">${esc(p.condicao||'—')} · ${crDiasDaCondicao(p).length} parcela(s) · ${fmtMoeda(p.total)}</span></span>
+      <select class="search-input cr-lote-forma" data-i="${i}" style="width:auto"><option value="">Forma...</option>${crOpcoesForma(crFormaDoPedido(p.forma))}</select>
+    </div>`).join('');
   abrirModal('modal-cr-lote');
 }
 
@@ -5480,18 +5542,23 @@ function marcarTodosCrLote(marcar){
 }
 
 async function confirmarCrLote(){
-  const marcados = Array.from(document.querySelectorAll('.cr-lote-chk:checked')).map(c => CR_LOTE[Number(c.dataset.i)]);
+  const marcados = Array.from(document.querySelectorAll('.cr-lote-chk:checked')).map(c => {
+    const i = Number(c.dataset.i);
+    return { ...CR_LOTE[i], forma: document.querySelector(`.cr-lote-forma[data-i="${i}"]`).value };
+  });
   if(!marcados.length){ fecharModal('modal-cr-lote'); return; }
+  const semForma = marcados.filter(m => !m.forma);
+  if(semForma.length){ toast(`Escolha a forma de pagamento de: ${semForma.map(m => '#'+m.p.numero).join(', ')}`,'error'); return; }
   const btn = document.getElementById('btn-cr-lote-salvar');
   btn.disabled = true;
   let ok = 0; const erros = [];
-  for(const { id, p } of marcados){
+  for(const { id, p, forma } of marcados){
     try {
       // Relê o pedido: precisa do historico/contas_receber atuais (gravação, não relatório)
       const atual = (await db.ref('pedidos/'+id).once('value')).val();
       if(!atual || crTemTitulos(atual)){ erros.push(`#${p.numero} (já tinha título)`); continue; }
       const dataBase = crDataBasePedido(atual);
-      await crGravarTitulos(id, atual, dataBase, crMontarParcelas(atual, dataBase), '');
+      await crGravarTitulos(id, atual, dataBase, crMontarParcelas(atual, dataBase), '', forma);
       ok++;
     } catch(e){ erros.push(`#${p.numero} (${e.message})`); }
   }
@@ -5503,10 +5570,36 @@ async function confirmarCrLote(){
 }
 
 // ── Aba Financeiro ──
+function crPrimeiroDiaMes(){ return crHoje().slice(0, 8) + '01'; }
+function crUltimoDiaMes(){ const d = agora(); return ymdLocal(new Date(d.getFullYear(), d.getMonth()+1, 0)); }
+
+// Meses ('AAAA-MM') cobertos por um período
+function crMesesDoPeriodo(de, ate){
+  const meses = [];
+  let [a, m] = de.slice(0, 7).split('-').map(Number);
+  const fim = ate.slice(0, 7);
+  while(true){
+    const k = a+'-'+String(m).padStart(2,'0');
+    meses.push(k);
+    if(k >= fim || meses.length > 36) break;
+    m++; if(m > 12){ m = 1; a++; }
+  }
+  return meses;
+}
+
 async function renderFinanceiro(forcar = false){
-  const btnManual = document.getElementById('btn-cr-manual');
-  if(btnManual) btnManual.style.display = temPermissaoEditar('financeiro') ? '' : 'none';
-  if(!document.getElementById('cr-mes').value) document.getElementById('cr-mes').value = crHoje().slice(0, 7);
+  const pode = temPermissaoEditar('financeiro');
+  ['btn-cr-manual'].forEach(id => { const b = document.getElementById(id); if(b) b.style.display = pode ? '' : 'none'; });
+  if(!document.getElementById('crb-de').value){
+    document.getElementById('crb-de').value = crPrimeiroDiaMes();
+    document.getElementById('crb-ate').value = crUltimoDiaMes();
+  }
+  ['cr-forma','crb-forma'].forEach(id => {
+    const el = document.getElementById(id);
+    if(!el.options.length) el.innerHTML = '<option value="">Todas as formas</option>' + crOpcoesForma('');
+  });
+  if(!CLIENTES_DB.length) await carregarClientesFirebase();
+  crPreencherListaClientes('cr-clientes-lista');
   const el = document.getElementById('cr-tabela');
   if(forcar || !CR_ABERTAS){
     el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">Carregando…</div>';
@@ -5518,11 +5611,11 @@ async function renderFinanceiro(forcar = false){
       el.innerHTML = `<div style="padding:24px;color:#dc2626">Erro ao carregar: ${esc(e.message)}</div>`;
       return;
     }
-    if(forcar) CR_BAIXADAS_CACHE = {};
+    if(forcar){ CR_BAIXADAS_CACHE = {}; CR_SEL.clear(); }
   }
-  // "Recebido no mês" do card: mês corrente, 1 leitura pequena por sessão
+  // Card "Recebido no mês": mês corrente, 1 leitura pequena por sessão
   await carregarBaixadasMes(crHoje().slice(0, 7));
-  if(CR_SUBABA === 'baixadas') await carregarBaixadasMes(document.getElementById('cr-mes').value);
+  if(CR_SUBABA === 'baixadas') await carregarBaixadasPeriodo();
   renderFinanceiroTela();
 }
 
@@ -5535,16 +5628,39 @@ async function carregarBaixadasMes(mes){
   } catch(e){ toast('Erro ao carregar recebidos: '+e.message,'error'); }
 }
 
-async function aoMudarMesCR(){
-  await carregarBaixadasMes(document.getElementById('cr-mes').value);
+async function carregarBaixadasPeriodo(){
+  const de = document.getElementById('crb-de').value, ate = document.getElementById('crb-ate').value;
+  if(!crIsoValido(de) || !crIsoValido(ate) || de > ate) return;
+  const meses = crMesesDoPeriodo(de, ate).filter(m => !CR_BAIXADAS_CACHE[m]);
+  if(meses.length){
+    document.getElementById('cr-tabela').innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">Carregando…</div>';
+    await Promise.all(meses.map(carregarBaixadasMes));
+  }
+}
+
+async function aoMudarPeriodoBaixadas(){
+  await carregarBaixadasPeriodo();
   renderTabelaCR();
 }
 
 function trocarSubabaCR(sub){
   CR_SUBABA = sub;
-  if(sub === 'baixadas'){
-    carregarBaixadasMes(document.getElementById('cr-mes').value).then(renderFinanceiroTela);
-  } else renderFinanceiroTela();
+  if(sub === 'baixadas') carregarBaixadasPeriodo().then(renderFinanceiroTela);
+  else renderFinanceiroTela();
+}
+
+function limparFiltrosCR(){
+  if(CR_SUBABA === 'abertas'){
+    ['cr-cliente','cr-busca','cr-forma','cr-situacao','cr-de','cr-ate'].forEach(id => document.getElementById(id).value = '');
+  } else {
+    ['crb-cliente','crb-busca','crb-forma'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('crb-de').value = crPrimeiroDiaMes();
+    document.getElementById('crb-ate').value = crUltimoDiaMes();
+    CR_FILTRO_LOTE = null;
+    carregarBaixadasPeriodo().then(renderTabelaCR);
+    return;
+  }
+  renderTabelaCR();
 }
 
 function renderFinanceiroTela(){
@@ -5554,9 +5670,8 @@ function renderFinanceiroTela(){
   CR_ABERTAS.forEach(t => {
     const c = crCentavos(t.valor);
     aberto += c; qAberto++;
-    const d = crDiasAte(t.vencimento);
     if(t.vencimento < hoje){ vencido += c; qVencido++; }
-    else if(d <= 7){ sete += c; qSete++; }
+    else if(crDiasAte(t.vencimento) <= 7){ sete += c; qSete++; }
   });
   const recMes = (CR_BAIXADAS_CACHE[hoje.slice(0, 7)] || []).reduce((s, t) => s + crCentavos(t.valor_recebido), 0);
   document.getElementById('cr-cards').innerHTML = `
@@ -5572,20 +5687,57 @@ function renderFinanceiroTela(){
   renderTabelaCR();
 }
 
-function crCasaBusca(t, termo){
-  if(!termo) return true;
-  if(/^\d+$/.test(termo) && String(t.pedido_numero) === termo) return true;
-  const tl = termo.toLowerCase();
-  return String(t.cliente_nome||'').toLowerCase().includes(tl) || String(t.descricao||'').toLowerCase().includes(tl)
-    || (!!t.manual && String(t.pedido_numero||'').toLowerCase().includes(tl));
-}
-
 function crBadgeSituacao(t){
   const d = crDiasAte(t.vencimento);
   if(d < 0) return `<span class="badge badge-red">Vencida há ${-d} dia(s)</span>`;
   if(d === 0) return `<span class="badge badge-yellow">Vence hoje</span>`;
   if(d <= 7) return `<span class="badge badge-yellow">Vence em ${d} dia(s)</span>`;
   return `<span class="badge badge-blue">A vencer</span>`;
+}
+
+function crCasaCliente(t, termo){
+  return !termo || String(t.cliente_nome||'').toLowerCase().includes(termo.toLowerCase());
+}
+function crCasaPedido(t, termo){
+  if(!termo) return true;
+  if(/^\d+$/.test(termo) && String(t.pedido_numero) === termo) return true;
+  return !!t.manual && String(t.pedido_numero||'').toLowerCase().includes(termo.toLowerCase());
+}
+
+// Resumo do que está filtrado: total + quebra por forma
+function crRodape(lista, campoValor, campoForma, rotulo){
+  const porForma = {};
+  let soma = 0;
+  lista.forEach(t => {
+    const c = crCentavos(t[campoValor]);
+    soma += c;
+    const f = campoForma(t) || 'Sem forma';
+    porForma[f] = (porForma[f] || 0) + c;
+  });
+  const quebra = Object.keys(porForma).length > 1
+    ? Object.entries(porForma).map(([f, v]) => `${esc(f)}: <strong>${fmtMoeda(v/100)}</strong>`).join(' · ')
+    : '';
+  return `<div style="padding:12px 16px;border-top:1px solid var(--border);font-size:13px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    <span>${lista.length} ${rotulo}${quebra ? ` &nbsp;·&nbsp; ${quebra}` : ''}</span><strong style="font-size:15px">Total ${fmtMoeda(soma/100)}</strong></div>`;
+}
+
+function crListaAbertasFiltrada(){
+  const cliente = document.getElementById('cr-cliente').value.trim();
+  const pedido = document.getElementById('cr-busca').value.trim();
+  const forma = document.getElementById('cr-forma').value;
+  const sit = document.getElementById('cr-situacao').value;
+  const de = document.getElementById('cr-de').value, ate = document.getElementById('cr-ate').value;
+  return CR_ABERTAS.filter(t => {
+    if(!crCasaCliente(t, cliente) || !crCasaPedido(t, pedido)) return false;
+    if(forma && crFormaTitulo(t) !== forma) return false;
+    if(de && t.vencimento < de) return false;
+    if(ate && t.vencimento > ate) return false;
+    const d = crDiasAte(t.vencimento);
+    if(sit === 'vencidas') return d < 0;
+    if(sit === 'hoje') return d === 0;
+    if(sit === 'avencer') return d >= 0;
+    return true;
+  }).sort((a, b) => (a.vencimento||'').localeCompare(b.vencimento||'') || String(a.cliente_nome).localeCompare(String(b.cliente_nome)));
 }
 
 function renderTabelaCR(){
@@ -5595,137 +5747,197 @@ function renderTabelaCR(){
   const linkPedido = t => t.pedido_id
     ? `<a href="#" onclick="event.preventDefault();verPedido('${t.pedido_id}')" style="color:var(--accent);font-weight:600">#${esc(t.pedido_numero)}</a>`
     : `${t.pedido_numero ? esc(t.pedido_numero)+'<br>' : ''}<span class="badge badge-gray" title="Lançado manualmente">manual</span>`;
-  const detalhe = (t, campoObs) => [t.descricao, t[campoObs]].filter(Boolean).map(x => `<div style="font-size:12px;color:var(--muted)">${esc(x)}</div>`).join('');
+  const linhaObs = txt => txt ? `<div style="font-size:12px;color:var(--muted)">${esc(txt)}</div>` : '';
 
   if(CR_SUBABA === 'abertas'){
-    const termo = document.getElementById('cr-busca').value.trim();
-    const sit = document.getElementById('cr-situacao').value;
-    const lista = CR_ABERTAS.filter(t => {
-      if(!crCasaBusca(t, termo)) return false;
-      const d = crDiasAte(t.vencimento);
-      if(sit === 'vencidas') return d < 0;
-      if(sit === 'hoje') return d === 0;
-      if(sit === '7') return d >= 0 && d <= 7;
-      if(sit === '30') return d >= 0 && d <= 30;
-      return true;
-    }).sort((a, b) => (a.vencimento||'').localeCompare(b.vencimento||'') || String(a.cliente_nome).localeCompare(String(b.cliente_nome)));
+    const lista = crListaAbertasFiltrada();
+    // Seleção só vale para o que está na tela
+    const visiveis = new Set(lista.map(t => t.key));
+    [...CR_SEL].forEach(k => { if(!visiveis.has(k)) CR_SEL.delete(k); });
+    atualizarBotaoBaixaLoteCR();
     if(!lista.length){ el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">Nenhum título em aberto com esses filtros.</div>'; return; }
-    const soma = lista.reduce((s, t) => s + crCentavos(t.valor), 0);
-    el.innerHTML = `<table><thead><tr><th>Vencimento</th><th>Cliente</th><th>Pedido</th><th>Parcela</th><th style="text-align:right">Valor</th><th>Situação</th>${pode?'<th></th>':''}</tr></thead><tbody>
-      ${lista.map(t => `<tr>
+    const todosMarcados = lista.every(t => CR_SEL.has(t.key));
+    el.innerHTML = `<table><thead><tr>
+      ${pode?`<th style="width:34px"><input type="checkbox" title="Marcar todos da lista" ${todosMarcados?'checked':''} onchange="marcarTodosCR(this.checked)" style="width:17px;height:17px;accent-color:var(--success)"></th>`:''}
+      <th>Vencimento</th><th>Cliente</th><th>Pedido</th><th>Parcela</th><th>Forma</th><th style="text-align:right">Valor</th><th>Situação</th>${pode?'<th></th>':''}</tr></thead><tbody>
+      ${lista.map(t => `<tr${CR_SEL.has(t.key)?' style="background:#f0fdf4"':''}>
+        ${pode?`<td><input type="checkbox" ${CR_SEL.has(t.key)?'checked':''} onchange="alternarSelecaoCR('${t.key}',this.checked)" style="width:17px;height:17px;accent-color:var(--success)"></td>`:''}
         <td style="white-space:nowrap">${fmtData(t.vencimento)}</td>
-        <td>${esc(t.cliente_nome)}${detalhe(t,'obs')}</td>
+        <td>${esc(t.cliente_nome)}${linhaObs(crObsTitulo(t))}</td>
         <td>${linkPedido(t)}</td>
         <td>${t.parcela}/${t.parcelas}</td>
+        <td style="white-space:nowrap">${esc(crFormaTitulo(t)) || '<span style="color:var(--muted)">—</span>'}</td>
         <td style="text-align:right;white-space:nowrap;font-weight:600">${fmtMoeda(t.valor)}</td>
         <td>${crBadgeSituacao(t)}</td>
         ${pode?`<td style="white-space:nowrap;text-align:right">
-          <button class="btn btn-sm btn-success" onclick="abrirReceberCR('${t.key}')">✅ Receber</button>
+          <button class="btn btn-sm btn-success" onclick="abrirReceberCR(['${t.key}'])">✅ Receber</button>
           <button class="btn btn-outline btn-sm" title="Editar" onclick="abrirEditarCR('${t.key}')">✏️</button>
           <button class="btn btn-outline btn-sm" title="Excluir" onclick="excluirTituloCR('${t.key}')">🗑️</button>
         </td>`:''}
       </tr>`).join('')}
-      </tbody></table>
-      <div style="padding:12px 16px;border-top:1px solid var(--border);font-size:13px;display:flex;justify-content:space-between"><span>${lista.length} título(s)</span><strong>${fmtMoeda(soma/100)}</strong></div>`;
+      </tbody></table>${crRodape(lista, 'valor', crFormaTitulo, 'título(s)')}`;
     return;
   }
 
-  const mes = document.getElementById('cr-mes').value;
-  const termo = document.getElementById('cr-busca-baixadas').value.trim();
-  const lista = (CR_BAIXADAS_CACHE[mes] || []).filter(t => crCasaBusca(t, termo))
-    .sort((a, b) => (b.data_recebimento||'').localeCompare(a.data_recebimento||''));
-  if(!lista.length){ el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">Nenhum recebimento neste mês.</div>'; return; }
-  const soma = lista.reduce((s, t) => s + crCentavos(t.valor_recebido), 0);
-  el.innerHTML = `<table><thead><tr><th>Recebido em</th><th>Cliente</th><th>Pedido</th><th>Parcela</th><th>Vencimento</th><th style="text-align:right">Recebido</th><th>Forma</th>${pode?'<th></th>':''}</tr></thead><tbody>
+  const de = document.getElementById('crb-de').value, ate = document.getElementById('crb-ate').value;
+  if(!crIsoValido(de) || !crIsoValido(ate) || de > ate){ el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">Informe um período válido.</div>'; return; }
+  const cliente = document.getElementById('crb-cliente').value.trim();
+  const busca = document.getElementById('crb-busca').value.trim();
+  const forma = document.getElementById('crb-forma').value;
+  const formaRec = t => t.forma_recebimento || crFormaTitulo(t);
+  const lista = crMesesDoPeriodo(de, ate).flatMap(m => CR_BAIXADAS_CACHE[m] || [])
+    .filter(t => {
+      if(t.data_recebimento < de || t.data_recebimento > ate) return false;
+      if(CR_FILTRO_LOTE && t.lote_id !== CR_FILTRO_LOTE) return false;
+      if(!crCasaCliente(t, cliente)) return false;
+      if(forma && formaRec(t) !== forma) return false;
+      if(busca && !crCasaPedido(t, busca) && !String(t.obs_recebimento||'').toLowerCase().includes(busca.toLowerCase())) return false;
+      return true;
+    })
+    .sort((a, b) => (b.data_recebimento||'').localeCompare(a.data_recebimento||'') || String(a.cliente_nome).localeCompare(String(b.cliente_nome)));
+  const avisoLote = CR_FILTRO_LOTE
+    ? `<div style="padding:10px 16px;background:#f0fdf4;border-bottom:1px solid var(--border);font-size:13px;display:flex;justify-content:space-between;align-items:center">Mostrando só os títulos baixados juntos neste lote <button class="btn btn-outline btn-sm" onclick="CR_FILTRO_LOTE=null;renderTabelaCR()">✕ Ver todos</button></div>` : '';
+  if(!lista.length){ el.innerHTML = avisoLote + '<div style="padding:24px;text-align:center;color:var(--muted)">Nenhum recebimento com esses filtros.</div>'; return; }
+  el.innerHTML = avisoLote + `<table><thead><tr><th>Recebido em</th><th>Cliente</th><th>Pedido</th><th>Parcela</th><th>Vencimento</th><th>Forma</th><th style="text-align:right">Recebido</th><th>Observação / destino</th>${pode?'<th></th>':''}</tr></thead><tbody>
     ${lista.map(t => `<tr>
       <td style="white-space:nowrap">${fmtData(t.data_recebimento)}</td>
-      <td>${esc(t.cliente_nome)}${detalhe(t,'obs_recebimento')}</td>
+      <td>${esc(t.cliente_nome)}${linhaObs(crObsTitulo(t))}</td>
       <td>${linkPedido(t)}</td>
       <td>${t.parcela}/${t.parcelas}</td>
       <td style="white-space:nowrap">${fmtData(t.vencimento)}</td>
+      <td style="white-space:nowrap">${esc(formaRec(t))}</td>
       <td style="text-align:right;white-space:nowrap;font-weight:600">${fmtMoeda(t.valor_recebido)}${crCentavos(t.valor_recebido)!==crCentavos(t.valor)?`<div style="font-size:11px;color:var(--muted);font-weight:400">título ${fmtMoeda(t.valor)}</div>`:''}</td>
-      <td>${esc(t.forma_recebimento||'')}</td>
-      ${pode?`<td style="text-align:right"><button class="btn btn-outline btn-sm" onclick="estornarBaixaCR('${mes}','${t.key}')">↩️ Estornar</button></td>`:''}
+      <td style="font-size:13px">${esc(t.obs_recebimento||'')}${t.lote_id?`<div><a href="#" onclick="event.preventDefault();CR_FILTRO_LOTE='${t.lote_id}';renderTabelaCR()" class="badge badge-green" style="text-decoration:none" title="Ver os títulos baixados junto">lote de ${t.lote_qtd||'?'} título(s)</a></div>`:''}</td>
+      ${pode?`<td style="text-align:right"><button class="btn btn-outline btn-sm" onclick="estornarBaixaCR('${(t.data_recebimento||'').slice(0,7)}','${t.key}')">↩️ Estornar</button></td>`:''}
     </tr>`).join('')}
-    </tbody></table>
-    <div style="padding:12px 16px;border-top:1px solid var(--border);font-size:13px;display:flex;justify-content:space-between"><span>${lista.length} recebimento(s)</span><strong>${fmtMoeda(soma/100)}</strong></div>`;
+    </tbody></table>${crRodape(lista, 'valor_recebido', formaRec, 'recebimento(s)')}`;
 }
 
 // Do pedido para a aba, já filtrando pelo número dele
 function irParaFinanceiroPedido(numero){
   fecharModal('modal-ver-pedido');
   CR_SUBABA = 'abertas';
+  ['cr-cliente','cr-forma','cr-situacao','cr-de','cr-ate'].forEach(id => { const e = document.getElementById(id); if(e) e.value = ''; });
   document.getElementById('cr-busca').value = String(numero);
-  document.getElementById('cr-situacao').value = '';
   showTab('financeiro', document.querySelector('.nav-tab[data-tab="financeiro"]'));
 }
 
-// ── Receber (baixa) ──
-function abrirReceberCR(key){
-  const t = (CR_ABERTAS||[]).find(x => x.key === key); if(!t) return;
-  CR_ACAO_KEY = key;
-  document.getElementById('cr-receber-info').innerHTML =
-    `<strong>${esc(t.cliente_nome)}</strong> · Pedido #${esc(t.pedido_numero)} · parcela ${t.parcela}/${t.parcelas}<br><span style="color:var(--muted)">Vencimento ${fmtData(t.vencimento)} · valor ${fmtMoeda(t.valor)}</span>`;
+// ── Seleção para baixa em lote ──
+function alternarSelecaoCR(key, marcado){
+  if(marcado) CR_SEL.add(key); else CR_SEL.delete(key);
+  renderTabelaCR();
+}
+function marcarTodosCR(marcar){
+  crListaAbertasFiltrada().forEach(t => marcar ? CR_SEL.add(t.key) : CR_SEL.delete(t.key));
+  renderTabelaCR();
+}
+function atualizarBotaoBaixaLoteCR(){
+  const btn = document.getElementById('btn-cr-baixar-sel');
+  if(!btn) return;
+  const sel = (CR_ABERTAS||[]).filter(t => CR_SEL.has(t.key));
+  btn.style.display = sel.length && temPermissaoEditar('financeiro') ? '' : 'none';
+  btn.textContent = `✅ Baixar selecionados (${sel.length}) — ${fmtMoeda(sel.reduce((s, t) => s + crCentavos(t.valor), 0)/100)}`;
+}
+
+// ── Receber (baixa) — um título ou vários de uma vez ──
+function abrirReceberCR(keys){
+  if(!keys) keys = [...CR_SEL];
+  const titulos = keys.map(k => (CR_ABERTAS||[]).find(x => x.key === k)).filter(Boolean);
+  if(!titulos.length) return;
+  CR_BAIXA_KEYS = titulos.map(t => t.key);
+  const um = titulos.length === 1;
+  const t0 = titulos[0];
+  const total = titulos.reduce((s, t) => s + crCentavos(t.valor), 0);
+  document.querySelector('#modal-cr-receber .modal-title').textContent = um ? '✅ Registrar Recebimento' : `✅ Baixar ${titulos.length} títulos`;
+  document.getElementById('cr-receber-info').innerHTML = um
+    ? `<strong>${esc(t0.cliente_nome)}</strong> · Pedido ${t0.pedido_id ? '#'+esc(t0.pedido_numero) : esc(t0.pedido_numero||'manual')} · parcela ${t0.parcela}/${t0.parcelas}<br><span style="color:var(--muted)">Vencimento ${fmtData(t0.vencimento)} · valor ${fmtMoeda(t0.valor)} · ${esc(crFormaTitulo(t0)||'sem forma')}</span>`
+    : `<div style="max-height:30vh;overflow-y:auto;border:1px solid var(--border);border-radius:8px">${titulos.map(t => `
+        <div style="display:flex;justify-content:space-between;gap:10px;padding:7px 10px;border-bottom:1px solid var(--border);font-size:13px">
+          <span>${esc(t.cliente_nome)} · ${t.pedido_id ? '#'+esc(t.pedido_numero) : esc(t.pedido_numero||'manual')} · ${t.parcela}/${t.parcelas} · vence ${fmtData(t.vencimento)}</span>
+          <strong style="white-space:nowrap">${fmtMoeda(t.valor)}</strong>
+        </div>`).join('')}</div>
+       <div style="text-align:right;margin-top:8px;font-size:15px">Total: <strong>${fmtMoeda(total/100)}</strong></div>`;
+  document.getElementById('cr-receber-valor-wrap').style.display = um ? '' : 'none';
   document.getElementById('cr-receber-data').value = crHoje();
-  document.getElementById('cr-receber-valor').value = Number(t.valor).toFixed(2);
-  document.getElementById('cr-receber-forma').innerHTML = CR_FORMAS.map(f => `<option ${f===(t.forma_pedido||'')?'selected':''}>${f}</option>`).join('');
+  document.getElementById('cr-receber-valor').value = (total/100).toFixed(2);
+  const formas = [...new Set(titulos.map(crFormaTitulo))];
+  document.getElementById('cr-receber-forma').innerHTML = crOpcoesForma(formas.length === 1 ? formas[0] : '');
   document.getElementById('cr-receber-obs').value = '';
   atualizarSaldoReceberCR();
   abrirModal('modal-cr-receber');
 }
 
 function atualizarSaldoReceberCR(){
-  const t = (CR_ABERTAS||[]).find(x => x.key === CR_ACAO_KEY); if(!t) return;
-  const saldo = crCentavos(t.valor) - crCentavos(document.getElementById('cr-receber-valor').value);
   const wrap = document.getElementById('cr-receber-saldo-wrap');
-  wrap.style.display = saldo > 0 ? '' : 'none';
+  if(CR_BAIXA_KEYS.length !== 1){ wrap.style.display = 'none'; return; }
+  const t = (CR_ABERTAS||[]).find(x => x.key === CR_BAIXA_KEYS[0]); if(!t) return;
+  const saldo = crCentavos(t.valor) - crCentavos(document.getElementById('cr-receber-valor').value);
+  wrap.style.display = saldo > 0 ? 'flex' : 'none';
   document.getElementById('cr-receber-saldo-txt').textContent = `Manter o saldo de ${fmtMoeda(saldo/100)} em aberto (mesmo vencimento)`;
 }
 
 async function confirmarReceberCR(){
   if(!temPermissaoEditar('financeiro')){ toast('Acesso restrito — sem permissão no Financeiro','error'); return; }
-  const key = CR_ACAO_KEY;
+  const keys = CR_BAIXA_KEYS.slice();
+  const um = keys.length === 1;
   const data = document.getElementById('cr-receber-data').value;
+  const forma = document.getElementById('cr-receber-forma').value;
+  const obs = document.getElementById('cr-receber-obs').value.trim();
+  if(!crIsoValido(data)){ toast('Informe a data do recebimento','error'); return; }
   const recebidoC = crCentavos(document.getElementById('cr-receber-valor').value);
-  if(!/^\d{4}-\d{2}-\d{2}$/.test(data)){ toast('Informe a data do recebimento','error'); return; }
-  if(recebidoC <= 0){ toast('Informe o valor recebido','error'); return; }
+  if(um && recebidoC <= 0){ toast('Informe o valor recebido','error'); return; }
   const btn = document.getElementById('btn-cr-receber');
   btn.disabled = true;
   try {
-    // Gravação: confere direto no banco se o título ainda está em aberto
-    const snap = await db.ref('contas_receber/abertas/'+key).once('value');
-    const t = snap.val();
-    if(!t){ toast('Este título não está mais em aberto — clique em Atualizar','error'); return; }
-    const saldoC = crCentavos(t.valor) - recebidoC;
-    const manterSaldo = saldoC > 0 && document.getElementById('cr-receber-saldo').checked;
+    // Gravação: confere direto no banco se os títulos ainda estão em aberto
+    const snaps = await Promise.all(keys.map(k => db.ref('contas_receber/abertas/'+k).once('value')));
+    const titulos = snaps.map((s, i) => ({ key: keys[i], t: s.val() }));
+    const sumiram = titulos.filter(x => !x.t);
+    if(sumiram.length){ toast(`${sumiram.length} título(s) não estão mais em aberto — clique em Atualizar`,'error'); return; }
+
     const mes = data.slice(0, 7);
-    const baixa = {
-      ...t,
-      valor_recebido: recebidoC / 100,
-      data_recebimento: data,
-      forma_recebimento: document.getElementById('cr-receber-forma').value,
-      obs_recebimento: document.getElementById('cr-receber-obs').value.trim(),
-      baixado_por: usuarioLogado?.nome || '',
-      baixado_em: agora().toISOString()
-    };
-    if(manterSaldo) baixa.valor = recebidoC / 100; // o título baixado fica com o que foi pago; o resto vira título novo
+    const quem = usuarioLogado?.nome || '', quando = agora().toISOString();
+    const loteId = um ? null : db.ref('contas_receber/abertas').push().key;
     const updates = {};
-    updates['contas_receber/abertas/'+key] = null;
-    updates['contas_receber/baixadas/'+mes+'/'+key] = baixa;
-    let novo = null;
-    if(manterSaldo){
-      const nk = db.ref('contas_receber/abertas').push().key;
-      novo = { ...t, valor: saldoC / 100, saldo_de: key, obs: ('Saldo de recebimento parcial' + (t.obs ? ' · '+t.obs : '')).slice(0, 200), criado_em: agora().toISOString(), criado_por: usuarioLogado?.nome || '' };
-      updates['contas_receber/abertas/'+nk] = novo;
-      if(t.pedido_id) updates['pedidos/'+t.pedido_id+'/contas_receber/'+nk] = true;
-      novo = { key: nk, ...novo };
+    const baixados = [];
+    let novo = null, saldoC = 0;
+    for(const { key, t } of titulos){
+      const baixa = {
+        ...t,
+        valor_recebido: um ? recebidoC/100 : t.valor,
+        data_recebimento: data,
+        forma_recebimento: forma,
+        obs_recebimento: obs,
+        baixado_por: quem,
+        baixado_em: quando
+      };
+      if(loteId){ baixa.lote_id = loteId; baixa.lote_qtd = titulos.length; }
+      if(um){
+        saldoC = crCentavos(t.valor) - recebidoC;
+        if(saldoC > 0 && document.getElementById('cr-receber-saldo').checked){
+          baixa.valor = recebidoC / 100; // o baixado fica com o que foi pago; o resto vira título novo
+          const nk = db.ref('contas_receber/abertas').push().key;
+          novo = { ...t, valor: saldoC/100, saldo_de: key, obs: ('Saldo de recebimento parcial' + (crObsTitulo(t) ? ' · '+crObsTitulo(t) : '')).slice(0, 200), descricao: null, criado_em: quando, criado_por: quem };
+          updates['contas_receber/abertas/'+nk] = novo;
+          if(t.pedido_id) updates['pedidos/'+t.pedido_id+'/contas_receber/'+nk] = true;
+          novo = { key: nk, ...novo };
+        } else saldoC = 0;
+      }
+      updates['contas_receber/abertas/'+key] = null;
+      updates['contas_receber/baixadas/'+mes+'/'+key] = baixa;
+      baixados.push({ key, ...baixa });
     }
     await db.ref().update(updates);
-    CR_ABERTAS = CR_ABERTAS.filter(x => x.key !== key);
+    const kset = new Set(keys);
+    CR_ABERTAS = CR_ABERTAS.filter(x => !kset.has(x.key));
     if(novo) CR_ABERTAS.push(novo);
-    if(CR_BAIXADAS_CACHE[mes]) CR_BAIXADAS_CACHE[mes].push({ key, ...baixa });
+    keys.forEach(k => CR_SEL.delete(k));
+    if(CR_BAIXADAS_CACHE[mes]) CR_BAIXADAS_CACHE[mes].push(...baixados);
     fecharModal('modal-cr-receber');
-    toast(manterSaldo ? `✅ Recebido ${fmtMoeda(recebidoC/100)} — saldo de ${fmtMoeda(saldoC/100)} continua em aberto` : '✅ Recebimento registrado','success');
+    const totalRec = baixados.reduce((s, b) => s + crCentavos(b.valor_recebido), 0);
+    toast(um
+      ? (novo ? `✅ Recebido ${fmtMoeda(recebidoC/100)} — saldo de ${fmtMoeda(saldoC/100)} continua em aberto` : '✅ Recebimento registrado')
+      : `✅ ${baixados.length} títulos baixados — ${fmtMoeda(totalRec/100)}`, 'success');
     renderFinanceiroTela();
   } catch(e){
     toast('Erro ao registrar recebimento: '+e.message,'error');
@@ -5739,10 +5951,10 @@ async function estornarBaixaCR(mes, key){
   const snap = await db.ref('contas_receber/baixadas/'+mes+'/'+key).once('value');
   const t = snap.val();
   if(!t){ toast('Recebimento não encontrado — clique em Atualizar','error'); return; }
-  const ok = await confirmCustom(`Estornar o recebimento de ${fmtMoeda(t.valor_recebido)} de ${t.cliente_nome} (pedido #${t.pedido_numero})?\n\nO título volta para "A receber".`, 'Estornar');
+  const ok = await confirmCustom(`Estornar o recebimento de ${fmtMoeda(t.valor_recebido)} de ${esc(t.cliente_nome)} (${t.pedido_id ? 'pedido #'+esc(t.pedido_numero) : 'lançamento manual'})?\n\nO título volta para "A receber".`, 'Estornar');
   if(!ok) return;
   const volta = { ...t };
-  ['valor_recebido','data_recebimento','forma_recebimento','obs_recebimento','baixado_por','baixado_em'].forEach(c => delete volta[c]);
+  ['valor_recebido','data_recebimento','forma_recebimento','obs_recebimento','baixado_por','baixado_em','lote_id','lote_qtd'].forEach(c => delete volta[c]);
   try {
     await db.ref().update({
       ['contas_receber/baixadas/'+mes+'/'+key]: null,
@@ -5759,10 +5971,11 @@ async function estornarBaixaCR(mes, key){
 function abrirEditarCR(key){
   const t = (CR_ABERTAS||[]).find(x => x.key === key); if(!t) return;
   CR_ACAO_KEY = key;
-  document.getElementById('cr-editar-info').innerHTML = `<strong>${esc(t.cliente_nome)}</strong> · Pedido #${esc(t.pedido_numero)} · parcela ${t.parcela}/${t.parcelas}`;
+  document.getElementById('cr-editar-info').innerHTML = `<strong>${esc(t.cliente_nome)}</strong> · ${t.pedido_id ? 'Pedido #'+esc(t.pedido_numero) : esc(t.pedido_numero||'Lançamento manual')} · parcela ${t.parcela}/${t.parcelas}`;
   document.getElementById('cr-editar-venc').value = t.vencimento || '';
   document.getElementById('cr-editar-valor').value = Number(t.valor).toFixed(2);
-  document.getElementById('cr-editar-obs').value = t.obs || '';
+  document.getElementById('cr-editar-forma').innerHTML = '<option value="">Selecione...</option>' + crOpcoesForma(crFormaTitulo(t));
+  document.getElementById('cr-editar-obs').value = crObsTitulo(t);
   abrirModal('modal-cr-editar');
 }
 
@@ -5771,15 +5984,18 @@ async function salvarEditarCR(){
   const key = CR_ACAO_KEY;
   const venc = document.getElementById('cr-editar-venc').value;
   const valorC = crCentavos(document.getElementById('cr-editar-valor').value);
-  if(!/^\d{4}-\d{2}-\d{2}$/.test(venc)){ toast('Informe o vencimento','error'); return; }
+  const forma = document.getElementById('cr-editar-forma').value;
+  if(!crIsoValido(venc)){ toast('Informe o vencimento','error'); return; }
   if(valorC <= 0){ toast('Informe o valor','error'); return; }
+  if(!forma){ toast('Escolha a forma de pagamento','error'); return; }
   try {
     const snap = await db.ref('contas_receber/abertas/'+key).once('value');
     if(!snap.exists()){ toast('Este título não está mais em aberto — clique em Atualizar','error'); return; }
-    const mud = { vencimento: venc, valor: valorC/100, obs: document.getElementById('cr-editar-obs').value.trim(), editado_por: usuarioLogado?.nome || '', editado_em: agora().toISOString() };
+    // Observação única: o texto salvo SUBSTITUI o anterior (inclusive a antiga "descricao")
+    const mud = { vencimento: venc, valor: valorC/100, forma, obs: document.getElementById('cr-editar-obs').value.trim(), descricao: null, editado_por: usuarioLogado?.nome || '', editado_em: agora().toISOString() };
     await db.ref('contas_receber/abertas/'+key).update(mud);
     const t = CR_ABERTAS.find(x => x.key === key);
-    if(t) Object.assign(t, mud);
+    if(t){ Object.assign(t, mud); delete t.descricao; }
     fecharModal('modal-cr-editar');
     toast('✓ Título atualizado','success');
     renderFinanceiroTela();
@@ -5789,13 +6005,14 @@ async function salvarEditarCR(){
 async function excluirTituloCR(key){
   if(!temPermissaoEditar('financeiro')){ toast('Acesso restrito — sem permissão no Financeiro','error'); return; }
   const t = (CR_ABERTAS||[]).find(x => x.key === key); if(!t) return;
-  const ok = await confirmCustom(`Excluir o título de ${fmtMoeda(t.valor)} (pedido #${t.pedido_numero}, parcela ${t.parcela}/${t.parcelas}, vence ${fmtData(t.vencimento)})?`, 'Excluir');
+  const ok = await confirmCustom(`Excluir o título de ${fmtMoeda(t.valor)} (${t.pedido_id ? 'pedido #'+esc(t.pedido_numero) : esc(t.cliente_nome)}, parcela ${t.parcela}/${t.parcelas}, vence ${fmtData(t.vencimento)})?`, 'Excluir');
   if(!ok) return;
   try {
     const upd = { ['contas_receber/abertas/'+key]: null };
     if(t.pedido_id) upd['pedidos/'+t.pedido_id+'/contas_receber/'+key] = null;
     await db.ref().update(upd);
     CR_ABERTAS = CR_ABERTAS.filter(x => x.key !== key);
+    CR_SEL.delete(key);
     toast('🗑️ Título excluído','success');
     renderFinanceiroTela();
   } catch(e){ toast('Erro ao excluir: '+e.message,'error'); }
@@ -5803,22 +6020,16 @@ async function excluirTituloCR(key){
 
 // ── Lançamento manual ──
 // Título que não nasce do faturamento: histórico de antes do módulo existir, venda
-// fora do sistema, acordo etc. Pode ser lançado já como recebido (vai direto para
+// fora do sistema, acordo etc. Pode entrar já como recebido (vai direto para
 // contas_receber/baixadas/{mês do recebimento}) ou em aberto. Não fica vinculado a um
-// pedido do sistema — o nº do pedido, se informado, é só referência (sem leitura extra).
-// A busca de cliente usa CLIENTES_DB, que já está na memória desde o login.
-let CR_MANUAL_LINHAS = [];
-
+// pedido do sistema — o nº do pedido, se informado, é só referência.
 async function abrirLancamentoManualCR(){
   if(!temPermissaoEditar('financeiro')){ toast('Acesso restrito — sem permissão no Financeiro','error'); return; }
   if(!CLIENTES_DB.length) await carregarClientesFirebase();
-  const vistos = new Set();
-  document.getElementById('cr-manual-clientes-lista').innerHTML = CLIENTES_DB
-    .filter(c => { const k = String(c.nome).trim().toUpperCase(); if(vistos.has(k)) return false; vistos.add(k); return true; })
-    .map(c => `<option value="${esc(c.nome)}">${esc([c.cidade, c.uf].filter(Boolean).join('/'))}</option>`).join('');
-  ['cr-manual-cliente','cr-manual-pedido','cr-manual-desc','cr-manual-total','cr-manual-condicao'].forEach(id => document.getElementById(id).value = '');
+  crPreencherListaClientes('cr-clientes-lista');
+  ['cr-manual-cliente','cr-manual-pedido','cr-manual-obs','cr-manual-total','cr-manual-condicao','cr-manual-obs-rec'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('cr-manual-data').value = crHoje();
-  document.getElementById('cr-manual-forma').innerHTML = CR_FORMAS.map(f => `<option>${f}</option>`).join('');
+  document.getElementById('cr-manual-forma').innerHTML = '<option value="">Selecione...</option>' + crOpcoesForma('');
   CR_MANUAL_LINHAS = [{ vencimento: crHoje(), valor: 0, recebido: false, data_recebimento: '' }];
   renderCrManualLinhas();
   abrirModal('modal-cr-manual');
@@ -5855,8 +6066,7 @@ function renderCrManualLinhas(){
           <input type="date" class="search-input" style="width:auto" value="${l.data_recebimento||''}" onchange="CR_MANUAL_LINHAS[${i}].data_recebimento=this.value">` : ''}
       </div>
     </div>`).join('');
-  const algumRecebido = CR_MANUAL_LINHAS.some(l => l.recebido);
-  document.getElementById('cr-manual-forma-wrap').style.display = algumRecebido ? '' : 'none';
+  document.getElementById('cr-manual-obs-rec-wrap').style.display = CR_MANUAL_LINHAS.some(l => l.recebido) ? '' : 'none';
   atualizarSomaCrManual();
 }
 
@@ -5890,11 +6100,13 @@ async function salvarLancamentoManualCR(){
   const nomeDigitado = document.getElementById('cr-manual-cliente').value.trim();
   if(!nomeDigitado){ toast('Informe o cliente','error'); return; }
   const dataBase = document.getElementById('cr-manual-data').value;
-  if(!/^\d{4}-\d{2}-\d{2}$/.test(dataBase)){ toast('Informe a data da venda','error'); return; }
+  if(!crIsoValido(dataBase)){ toast('Informe a data da venda','error'); return; }
+  const forma = document.getElementById('cr-manual-forma').value;
+  if(!forma){ toast('Escolha a forma de pagamento','error'); return; }
   const linhas = CR_MANUAL_LINHAS.filter(l => crCentavos(l.valor) > 0);
   if(!linhas.length){ toast('Informe o valor de pelo menos uma parcela','error'); return; }
-  if(linhas.some(l => !/^\d{4}-\d{2}-\d{2}$/.test(l.vencimento||''))){ toast('Preencha o vencimento de todas as parcelas','error'); return; }
-  if(linhas.some(l => l.recebido && !/^\d{4}-\d{2}-\d{2}$/.test(l.data_recebimento||''))){ toast('Preencha a data de recebimento das parcelas marcadas como recebidas','error'); return; }
+  if(linhas.some(l => !crIsoValido(l.vencimento))){ toast('Preencha o vencimento de todas as parcelas','error'); return; }
+  if(linhas.some(l => l.recebido && !crIsoValido(l.data_recebimento))){ toast('Preencha a data de recebimento das parcelas marcadas como recebidas','error'); return; }
 
   const cli = CLIENTES_DB.find(c => String(c.nome).trim().toUpperCase() === nomeDigitado.toUpperCase());
   if(!cli){
@@ -5902,22 +6114,22 @@ async function salvarLancamentoManualCR(){
     if(!ok) return;
   }
   linhas.sort((a, b) => a.vencimento.localeCompare(b.vencimento));
-  const forma = document.getElementById('cr-manual-forma').value;
   const agoraIso = agora().toISOString();
   const quem = usuarioLogado?.nome || '';
+  const obsRec = document.getElementById('cr-manual-obs-rec').value.trim();
   const comum = {
     manual: true,
     pedido_id: '',
     pedido_numero: document.getElementById('cr-manual-pedido').value.trim(),
-    descricao: document.getElementById('cr-manual-desc').value.trim(),
     cliente_codigo: cli?.codigo || '',
     cliente_nome: cli?.nome || nomeDigitado,
     cliente_cidade: cli?.cidade || '',
     cliente_uf: cli?.uf || '',
-    vendedor_nome: cli?.vendedor_nome || cli?.vendedor || '',
+    vendedor_nome: cli?.vendedor_nome || '',
+    forma,
     forma_pedido: '', condicao: '',
     data_faturamento: dataBase,
-    obs: '',
+    obs: document.getElementById('cr-manual-obs').value.trim(),
     criado_em: agoraIso,
     criado_por: quem
   };
@@ -5928,7 +6140,7 @@ async function salvarLancamentoManualCR(){
     const t = { ...comum, parcela: i+1, parcelas: linhas.length, valor: crCentavos(l.valor)/100, vencimento: l.vencimento };
     if(l.recebido){
       const mes = l.data_recebimento.slice(0, 7);
-      Object.assign(t, { valor_recebido: t.valor, data_recebimento: l.data_recebimento, forma_recebimento: forma, obs_recebimento: '', baixado_por: quem, baixado_em: agoraIso });
+      Object.assign(t, { valor_recebido: t.valor, data_recebimento: l.data_recebimento, forma_recebimento: forma, obs_recebimento: obsRec, baixado_por: quem, baixado_em: agoraIso });
       updates['contas_receber/baixadas/'+mes+'/'+key] = t;
       novosBaixados.push({ mes, key, ...t });
     } else {
