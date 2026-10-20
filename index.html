@@ -11659,6 +11659,11 @@ async function salvarPedidoCompra(){
 
   const statusAnterior = compraAtual.status;
   const novoStatus = document.getElementById('compra-status').value;
+  // Concluído só depois de Recebido — é no Recebido que o estoque entra. Pular direto
+  // pra Concluído deixaria a mercadoria fora do estoque.
+  if(novoStatus === 'concluido' && !['recebido','concluido'].includes(statusAnterior)){
+    toast('Só é possível concluir um pedido de compra que já foi marcado como Recebido. Marque como Recebido primeiro.','error'); return;
+  }
 
   compraAtual.fornecedor = fornecedor;
   compraAtual.nf = document.getElementById('compra-nf').value.trim();
@@ -12189,7 +12194,7 @@ async function abrirDetalheCompra(id){
         <option value="importacao" ${c.status==='importacao'?'disabled':''}>Importação</option>
         <option value="transito" ${c.status==='transito'?'disabled':''}>Em Trânsito</option>
         <option value="recebido" ${c.status==='recebido'?'disabled':''}>Recebido</option>
-        <option value="concluido" ${c.status==='concluido'?'disabled':''}>Concluído</option>
+        <option value="concluido" ${c.status!=='recebido'?'disabled':''}>Concluído${c.status!=='recebido'&&c.status!=='concluido'?' (só após Recebido)':''}</option>
       </select>
     </div>
     <div class="dashboard-cards" style="margin-bottom:16px">
@@ -12252,6 +12257,11 @@ async function alterarStatusManualCompra(id, novoStatus){
   if(!temPermissaoEditar('compras')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const c = COMPRAS_CACHE.find(x=>x.id===id);
   const statusAnterior = c?.status;
+  if(novoStatus === 'concluido' && statusAnterior !== 'recebido'){
+    toast('Só é possível concluir um pedido de compra que já foi marcado como Recebido. Marque como Recebido primeiro.','error');
+    const sel = document.getElementById('compra-detalhe-status-select'); if(sel) sel.value = '';
+    return;
+  }
 
   if(novoStatus === 'recebido' && statusAnterior !== 'recebido'){
     if(!confirm(`Marcar como "Recebido"?\n\nIsso vai dar entrada automática no estoque de ${c.itens.length} item(ns).`)) return;
@@ -12284,6 +12294,9 @@ async function avancarStatusCompra(id, novoStatus){
   if(!temPermissaoEditar('compras')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const c = COMPRAS_CACHE.find(x=>x.id===id);
   const statusAnterior = c?.status;
+  if(novoStatus === 'concluido' && statusAnterior !== 'recebido'){
+    toast('Só é possível concluir um pedido de compra que já foi marcado como Recebido. Marque como Recebido primeiro.','error'); return;
+  }
   await db.ref('pedidos_compra/'+id+'/status').set(novoStatus);
   await registrarHistoricoStatusCompra(id, statusAnterior, novoStatus);
   fecharModal('modal-compra-detalhe');
@@ -19716,10 +19729,10 @@ async function carregarConsumoAnualSugestao(forcar){
     }
   });
 
-  // Em trânsito: compras já fora da negociação (Separação em diante)
+  // Em trânsito: só compras Em Separação ou Em Trânsito (Importação não entra)
   const snapCompras = await lerNoCache('pedidos_compra');
   Object.values(snapCompras.val() || {}).forEach(c=>{
-    if(!['separacao','importacao','transito'].includes(c.status)) return;
+    if(!['separacao','transito'].includes(c.status)) return;
     (c.itens||[]).forEach(it=>{
       const bucket = it.tipo === 'insumo' ? emTransito.insumo : emTransito.vendavel;
       bucket[it.codigo] = (bucket[it.codigo]||0) + Number(it.qtd||0);
@@ -20195,6 +20208,21 @@ async function relEstoqueAbaixoMinimo(el){
   const filtroTipo = document.getElementById('rel-em-tipo')?.value || '';
   const filtroFornecedor = document.getElementById('rel-em-fornecedor')?.value || '';
 
+  // A caminho: pedidos de compra com status Em Separação ou Em Trânsito (só informativo —
+  // NÃO é descontado do déficit). Usa lerNoCache: mesma leitura já compartilhada com os
+  // outros relatórios, sem custo extra de banda do Firebase.
+  const aCaminho = { vendavel:{}, insumo:{} };
+  const snapComprasMin = await lerNoCache('pedidos_compra');
+  Object.values(snapComprasMin.val() || {}).forEach(c=>{
+    if(!['separacao','transito'].includes(c.status)) return;
+    (c.itens||[]).forEach(it=>{
+      const bucket = it.tipo === 'insumo' ? aCaminho.insumo : aCaminho.vendavel;
+      if(!bucket[it.codigo]) bucket[it.codigo] = { qtd:0, pedidos:[] };
+      bucket[it.codigo].qtd += Number(it.qtd||0);
+      bucket[it.codigo].pedidos.push(`#${c.numero_origem||'—'} (${statusInfoCompra(c.status).label}): ${Number(it.qtd||0)}`);
+    });
+  });
+
   // Monta lista unificada (vendáveis + insumos) conforme filtro
   const itens = [];
 
@@ -20206,8 +20234,10 @@ async function relEstoqueAbaixoMinimo(el){
       if(estq >= min) return; // acima do mínimo, ignora
       const fornecedor = fornecedorPadrao(p);
       if(filtroFornecedor && fornecedor !== filtroFornecedor) return;
+      const ac = aCaminho.vendavel[p.codigo];
       itens.push({ tipo:'Vendável', codigo:p.codigo, nome:p.nome, unidade:p.unidade||'UN',
-        fornecedor, estoque:estq, minimo:min, diferenca:estq-min });
+        fornecedor, estoque:estq, minimo:min, diferenca:estq-min,
+        aCaminho: ac ? ac.qtd : 0, aCaminhoPedidos: ac ? ac.pedidos : [] });
     });
   }
 
@@ -20219,8 +20249,10 @@ async function relEstoqueAbaixoMinimo(el){
       if(estq >= min) return;
       const fornecedor = fornecedorPadrao(i);
       if(filtroFornecedor && fornecedor !== filtroFornecedor) return;
+      const ac = aCaminho.insumo[i.codigo];
       itens.push({ tipo:'Insumo', codigo:i.codigo, nome:i.nome, unidade:i.unidade||'UN',
-        fornecedor, estoque:estq, minimo:min, diferenca:estq-min });
+        fornecedor, estoque:estq, minimo:min, diferenca:estq-min,
+        aCaminho: ac ? ac.qtd : 0, aCaminhoPedidos: ac ? ac.pedidos : [] });
     });
   }
 
@@ -20253,10 +20285,11 @@ async function relEstoqueAbaixoMinimo(el){
         <th style="padding:10px 12px;text-align:center">Estoque Atual</th>
         <th style="padding:10px 12px;text-align:center">Mínimo</th>
         <th style="padding:10px 12px;text-align:center">Déficit</th>
+        <th style="padding:10px 12px;text-align:center" title="Pedidos de compra Em Separação ou Em Trânsito — apenas informativo, não abate do déficit">A Caminho</th>
       </tr></thead>
       <tbody>
         ${Object.entries(porFornecedor).map(([forn, lista])=>`
-          <tr style="background:#f8f9fa"><td colspan="7" style="padding:8px 12px;font-weight:700;color:var(--primary)">📦 ${forn} (${lista.length} item(ns))</td></tr>
+          <tr style="background:#f8f9fa"><td colspan="8" style="padding:8px 12px;font-weight:700;color:var(--primary)">📦 ${forn} (${lista.length} item(ns))</td></tr>
           ${lista.map((i,idx)=>{
             const pct = Math.round(i.estoque/i.minimo*100);
             const cor = pct === 0 ? '#dc2626' : pct < 50 ? '#d97706' : '#ca8a04';
@@ -20268,6 +20301,7 @@ async function relEstoqueAbaixoMinimo(el){
               <td style="padding:9px 12px;text-align:center;font-weight:700;color:${cor}">${i.estoque.toLocaleString('pt-BR')}</td>
               <td style="padding:9px 12px;text-align:center">${i.minimo.toLocaleString('pt-BR')}</td>
               <td style="padding:9px 12px;text-align:center;font-weight:700;color:#dc2626">${i.diferenca.toLocaleString('pt-BR')}</td>
+              <td style="padding:9px 12px;text-align:center;${i.aCaminho>0?'font-weight:700;color:#1565c0;cursor:help':'color:var(--muted)'}" title="${esc(i.aCaminhoPedidos.join('\n'))}">${i.aCaminho>0?i.aCaminho.toLocaleString('pt-BR'):'—'}</td>
             </tr>`;
           }).join('')}`).join('')}
       </tbody>
@@ -20284,7 +20318,9 @@ function exportarRelatorioExcelEstoqueMinimo(lista){
     'Fornecedor': i.fornecedor,
     'Estoque Atual': i.estoque,
     'Estoque Mínimo': i.minimo,
-    'Déficit': i.diferenca
+    'Déficit': i.diferenca,
+    'A Caminho (Separação/Trânsito)': i.aCaminho || 0,
+    'Pedidos de Compra': (i.aCaminhoPedidos||[]).join(' | ')
   }));
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(dados);
@@ -20498,11 +20534,11 @@ async function calcularMRP(){
       consumoPorCodigo[m.codigo] = (consumoPorCodigo[m.codigo]||0) + Number(m.qtd||0);
     });
 
-    // Em trânsito: pedidos de compra de insumo já saíram da negociação (Separação em diante),
+    // Em trânsito: pedidos de compra de insumo com status Em Separação ou Em Trânsito,
     // ainda não recebidos — negociação é considerada especulativa demais pra contar como garantido
     const snapCompras = await lerNoCache('pedidos_compra');
     Object.values(snapCompras.val() || {}).forEach(c=>{
-      if(!['separacao','importacao','transito'].includes(c.status)) return;
+      if(!['separacao','transito'].includes(c.status)) return; // A Caminho: só Em Separação e Em Trânsito
       (c.itens||[]).forEach(it=>{
         if(it.tipo !== 'insumo') return;
         emTransitoPorCodigo[it.codigo] = (emTransitoPorCodigo[it.codigo]||0) + Number(it.qtd||0);
@@ -20522,10 +20558,10 @@ async function calcularMRP(){
       });
     });
 
-    // Em trânsito: pedidos de compra do produto (revenda), já saídos da negociação, + OPs abertas
+    // Em trânsito: pedidos de compra do produto (revenda), Em Separação ou Em Trânsito, + OPs abertas
     const snapCompras = await lerNoCache('pedidos_compra');
     Object.values(snapCompras.val() || {}).forEach(c=>{
-      if(!['separacao','importacao','transito'].includes(c.status)) return;
+      if(!['separacao','transito'].includes(c.status)) return; // A Caminho: só Em Separação e Em Trânsito
       (c.itens||[]).forEach(it=>{
         if(it.tipo !== 'vendavel') return;
         emTransitoPorCodigo[it.codigo] = (emTransitoPorCodigo[it.codigo]||0) + Number(it.qtd||0);
