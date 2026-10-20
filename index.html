@@ -15939,7 +15939,50 @@ async function buscarCNPJ(){
   finally { document.getElementById('cnpj-loading').style.display='none'; }
 }
 
+// ── Índice de CNPJ/CPF de clientes (clientes_cnpj/<só dígitos> = chave do cliente) ──
+// A lista CLIENTES_DB é carregada uma vez no login, então não enxerga cliente cadastrado
+// por outra pessoa/aba depois disso. Este índice é consultado direto no Firebase na hora
+// de salvar (lê 1 nó minúsculo, não baixa a lista de clientes) e trava o CNPJ via transaction.
+// Retorna { ok:true } se o CNPJ ficou reservado para "key", ou { ok:false, dono } se já é de outro.
+async function reservarCnpjCliente(cnpjLimpo, key){
+  const ref = db.ref('clientes_cnpj/' + cnpjLimpo);
+  let r = await ref.transaction(atual => (atual === null || atual === key) ? key : undefined);
+  if(r.committed) return { ok:true };
+  const dono = r.snapshot.val();
+  // Entrada velha? (cliente dono foi apagado/mesclado ou teve o CNPJ trocado) — confere só o campo cpf_cnpj
+  const snapCpf = await db.ref('clientes/' + dono + '/cpf_cnpj').once('value');
+  const cpfDono = String(snapCpf.val() || '').replace(/\D/g,'');
+  if(cpfDono === cnpjLimpo) return { ok:false, dono };
+  r = await ref.transaction(atual => (atual === null || atual === dono || atual === key) ? key : undefined);
+  return r.committed ? { ok:true } : { ok:false, dono: r.snapshot.val() };
+}
+async function liberarCnpjCliente(cnpjLimpo, key){
+  if(!cnpjLimpo) return;
+  try { await db.ref('clientes_cnpj/' + cnpjLimpo).transaction(atual => atual === key ? null : undefined); }
+  catch(e){ console.warn('Falha ao liberar índice de CNPJ:', e.message); }
+}
+function avisarCnpjDuplicado(dono){
+  const c = CLIENTES_DB.find(x => x._key === dono || ('c'+x.codigo) === dono);
+  toast(`Já existe um cliente cadastrado com esse CNPJ/CPF${c ? ': "'+c.nome+'"' : ' (cadastrado por outra pessoa — recarregue a página para vê-lo)'}`,'error');
+}
+
+// Trava contra clique duplo: antes, dois cliques rápidos em "Salvar Cliente" rodavam a
+// checagem de CNPJ duplicado ao mesmo tempo (o 1º ainda não tinha entrado na lista),
+// e os dois gravavam — gerando o mesmo cliente duas vezes.
+let salvandoCliente = false;
 async function salvarCliente(){
+  if(salvandoCliente) return;
+  salvandoCliente = true;
+  const btnSalvarCli = document.querySelector('#modal-cliente button[onclick="salvarCliente()"]');
+  if(btnSalvarCli){ btnSalvarCli.disabled = true; btnSalvarCli.dataset.txt = btnSalvarCli.textContent; btnSalvarCli.textContent = 'Salvando...'; }
+  try { await _salvarClienteInterno(); }
+  finally {
+    salvandoCliente = false;
+    if(btnSalvarCli){ btnSalvarCli.disabled = false; btnSalvarCli.textContent = btnSalvarCli.dataset.txt || 'Salvar Cliente'; }
+  }
+}
+
+async function _salvarClienteInterno(){
   if(!temPermissaoEditar('clientes')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const nome = document.getElementById('cli-nome').value.trim();
   const cpfCnpjVal = document.getElementById('cli-cpf').value.trim();
@@ -16028,8 +16071,14 @@ async function salvarCliente(){
     if(codigoEdicao){
       // Modo edição: atualiza o cliente existente, mantendo código e flags como 'novo' e 'inativo'
       const key = 'c' + codigoEdicao;
-      await db.ref('clientes/' + key).update(dados);
       const cExistente = CLIENTES_DB.find(x=>x.codigo===codigoEdicao);
+      const cnpjAntigo = String(cExistente?.cpf_cnpj || '').replace(/\D/g,'');
+      if(cpfCnpjLimpo && cpfCnpjLimpo !== cnpjAntigo){
+        const res = await reservarCnpjCliente(cpfCnpjLimpo, key);
+        if(!res.ok){ avisarCnpjDuplicado(res.dono); return; }
+      }
+      await db.ref('clientes/' + key).update(dados);
+      if(cnpjAntigo && cnpjAntigo !== cpfCnpjLimpo) await liberarCnpjCliente(cnpjAntigo, key);
       if(cExistente) Object.assign(cExistente, dados);
       fecharModal('modal-cliente');
       renderClientes();
@@ -16038,8 +16087,13 @@ async function salvarCliente(){
       // Modo criação manual: cliente ainda não existe no W3 — marcado como pendente de cadastro lá
       const novo = { codigo:'N'+agoraTs(), ...dados, novo:true, pendente_w3: true, ts_cadastro: agoraTs(), criado_por: usuarioLogado.nome };
       const key = 'c' + novo.codigo;
-      await db.ref('clientes/' + key).set(novo);
-      CLIENTES_DB.push(novo);
+      if(cpfCnpjLimpo){
+        const res = await reservarCnpjCliente(cpfCnpjLimpo, key);
+        if(!res.ok){ avisarCnpjDuplicado(res.dono); return; }
+      }
+      try { await db.ref('clientes/' + key).set(novo); }
+      catch(e){ await liberarCnpjCliente(cpfCnpjLimpo, key); throw e; }
+      CLIENTES_DB.push({ _key:key, ...novo });
       fecharModal('modal-cliente');
       renderClientes();
       toast('✓ Cliente cadastrado! ⚠️ Lembre de cadastrá-lo no W3 antes de faturar.','success');
@@ -16324,6 +16378,11 @@ async function confirmarMesclagemCliente(chavePrincipal, chaveDuplicado){
     // 3) Remove o cadastro duplicado — usa a chave real do Firebase, não 'clientes/c'+codigo
     // (que pode não ser o caminho real se o registro foi criado por outro fluxo)
     await db.ref('clientes/'+duplicado._key).remove();
+    const cnpjPrincipal = String(principal.cpf_cnpj || '').replace(/\D/g,'');
+    if(cnpjPrincipal){
+      try { await db.ref('clientes_cnpj/' + cnpjPrincipal).set(principal._key); }
+      catch(e){ console.warn('Falha ao atualizar índice de CNPJ na mesclagem:', e.message); }
+    }
     const idx = CLIENTES_DB.findIndex(c => c._key === duplicado._key);
     if(idx > -1) CLIENTES_DB.splice(idx, 1);
 
