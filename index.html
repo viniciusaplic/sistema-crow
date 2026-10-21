@@ -14347,6 +14347,7 @@ function idxAtualBipagemRota(itens){
 function renderModalBipagem(){
   const p = pedidoSeparacaoAtual;
   const itens = p.itens || [];
+  const inputLeitorAntigo = document.getElementById('input-bipagem');
   const gPendBip = garantiasAguardandoEnvio(p.cliente_codigo);
   const avisoGarantiaBip = gPendBip.length ? `
     <div style="background:#fef3c7;border:2px solid #d97706;border-radius:8px;padding:10px 14px;margin-bottom:10px">
@@ -14395,7 +14396,7 @@ function renderModalBipagem(){
         ${(()=>{ const l = String(PRODUTOS_DB.find(x=>x.codigo===itemAtual.codigo)?.localizacao||'').trim(); return l ? `<div style="margin-top:6px"><span style="background:#1F3A5F;color:#fff;border-radius:5px;padding:2px 10px;font-weight:700;font-size:13px">📍 ${esc(l)}</span></div>` : ''; })()}
         <div style="font-size:28px;font-weight:900;font-family:'DM Sans',sans-serif;color:#d97706;margin-top:8px">${Number(itemAtual.qtd_bipada||0)} / ${itemAtual.qtd}</div>
         ${pendentesBip > 1 ? `<button class="btn btn-outline btn-sm" style="margin-top:10px" onclick="adiarItemBipagem()">⏭ Deixar para o final (aguardando produção)</button>` : (itemAtual.bip_adiado ? `<div style="margin-top:8px;font-size:12px;color:#92400e">⏭ Item que tinha sido deixado para o final</div>` : '')}
-        ${podeRemoverItemSemEstoque() ? `<div><button class="btn btn-outline btn-sm" style="margin-top:8px;color:#dc2626;border-color:#dc2626" onclick="enfileirarBipagem(()=>removerItemSemEstoque(${idxAtual},'bipagem'))">🚫 Sem estoque — tirar do pedido</button></div>` : ''}
+        ${podeRemoverItemSemEstoque() ? `<div><button class="btn btn-outline btn-sm" style="margin-top:8px;color:#dc2626;border-color:#dc2626" onclick="enfileirarBipagemSincronizado(()=>removerItemSemEstoque(${idxAtual},'bipagem'))">🚫 Sem estoque — tirar do pedido</button></div>` : ''}
       </div>
     ` : `<div style="text-align:center;color:var(--success);font-weight:700;padding:12px">✅ Todos os itens bipados!</div>
       <button class="btn btn-primary" style="width:100%;margin-bottom:16px;background:#16a34a;border-color:#16a34a" onclick="finalizarPedidoBipado()">✅ Concluir pedido</button>`}
@@ -14413,8 +14414,15 @@ function renderModalBipagem(){
       ${linhasConcluidas}
     </div>
     <div id="bipagem-msg" style="margin-bottom:12px;font-size:13px;text-align:center"></div>
+    <div id="bipagem-sync" style="margin-bottom:8px;font-size:11px;text-align:center;color:var(--muted)">${_bipGravandoQtd ? `☁️ salvando ${_bipGravandoQtd}...` : ''}</div>
     <button class="btn btn-outline" style="width:100%;color:#dc2626;border-color:#dc2626" onclick="confirmarReiniciarBipagem()">↺ Reiniciar Bipagem (zerar tudo)</button>
   `;
+  // Reaproveita o campo antigo: o leitor pode estar digitando o próximo código neste instante
+  const inputLeitorNovo = document.getElementById('input-bipagem');
+  if(inputLeitorAntigo && inputLeitorNovo && inputLeitorAntigo !== inputLeitorNovo){
+    inputLeitorNovo.replaceWith(inputLeitorAntigo);
+  }
+  document.getElementById('input-bipagem')?.focus();
   setTimeout(()=>document.getElementById('input-bipagem')?.focus(), 100);
 }
 
@@ -14427,9 +14435,36 @@ async function recarregarItensBipagem(){
   const v = snap.val();
   if(!v) return false;
   const novos = (Array.isArray(v) ? v : Object.values(v)).filter(Boolean);
+  // Só dá pra gravar campo a campo (itens/N/qtd_bipada) se o índice da tela = chave no banco
+  p._itensContiguos = Array.isArray(v) && novos.length === v.length;
   const mudou = JSON.stringify(novos) !== JSON.stringify(p.itens||[]);
   p.itens = novos;
   return mudou;
+}
+
+// Gravações da bipagem rodam em segundo plano (a tela não espera o servidor a cada bipe).
+// Tudo que lê/regrava o pedido inteiro espera estas gravações terminarem antes.
+let _bipGravacoes = Promise.resolve();
+let _bipGravandoQtd = 0;
+function _atualizarIndicadorSyncBip(){
+  const el = document.getElementById('bipagem-sync');
+  if(el) el.textContent = _bipGravandoQtd ? `☁️ salvando ${_bipGravandoQtd}...` : '';
+}
+function gravarBipagemEmSegundoPlano(pedidoId, upd){
+  _bipGravandoQtd++; _atualizarIndicadorSyncBip();
+  const w = db.ref('pedidos/'+pedidoId).update(upd)
+    .catch(async e => {
+      console.error(e);
+      toast('⚠️ Falha ao salvar um bipe — a tela foi recarregada, confira a contagem','error');
+      try { await recarregarItensBipagem(); renderModalBipagem(); } catch(_){}
+    })
+    .finally(() => { _bipGravandoQtd--; _atualizarIndicadorSyncBip(); });
+  _bipGravacoes = _bipGravacoes.then(() => w);
+  return w;
+}
+function esperarGravacoesBipagem(){ return _bipGravacoes; }
+function enfileirarBipagemSincronizado(fn){
+  return enfileirarBipagem(async () => { await esperarGravacoesBipagem(); return fn(); });
 }
 
 // Fila: processa um bipe (ou um "deixar para o final") por vez, para nenhuma leitura se perder
@@ -14445,7 +14480,7 @@ function processarBipagem(codigoLido){
 }
 
 async function adiarItemBipagem(){
-  return enfileirarBipagem(async () => {
+  return enfileirarBipagemSincronizado(async () => {
     const p = pedidoSeparacaoAtual;
     await recarregarItensBipagem();
     const idx = idxAtualBipagemRota(p.itens);
@@ -14479,10 +14514,9 @@ function gtinBate(cadastrado, lido){
   return longo.length === curto.length + 1 && longo.startsWith(curto) && longo.slice(-1) === digitoVerificadorGTIN(curto);
 }
 
-async function _processarBipagemAgora(codigoLido){
+async function _processarBipagemAgora(codigoLido, jaRecarregou){
   const p = pedidoSeparacaoAtual;
   if(!p) return;
-  if(await recarregarItensBipagem()) renderModalBipagem(); // alguém mudou o pedido: mostra a versão atual
   const msg = document.getElementById('bipagem-msg') || { innerHTML: '' };
 
   // Encontra o item atual da fila (primeiro não-completo, na ORDEM DE ROTA — igual à folha impressa)
@@ -14495,14 +14529,21 @@ async function _processarBipagemAgora(codigoLido){
   const gtinAtual = (produtoCadastro && produtoCadastro.gtin) ? produtoCadastro.gtin : itemAtual.gtin;
 
   // Se o GTIN do cadastro for diferente do gravado no pedido, atualiza o item silenciosamente
+  let gtinMudou = false;
   if(produtoCadastro && produtoCadastro.gtin && produtoCadastro.gtin !== itemAtual.gtin){
     itemAtual.gtin = produtoCadastro.gtin;
+    gtinMudou = true;
   }
 
   // Só aceita o código/GTIN do item que está na vez — bloqueia bipar fora de ordem
   const codigoNormalizado = codigoLido.trim().toUpperCase();
   const bate = (gtinAtual && (gtinAtual.trim().toUpperCase()===codigoNormalizado || gtinBate(gtinAtual, codigoNormalizado))) || (itemAtual.codigo.trim().toUpperCase()===codigoNormalizado);
   if(!bate){
+    // Antes de recusar, confere no banco se o pedido mudou em outra tela (só 1 leitura, só quando recusa)
+    if(!jaRecarregou){
+      await esperarGravacoesBipagem();
+      if(await recarregarItensBipagem()){ renderModalBipagem(); return _processarBipagemAgora(codigoLido, true); }
+    }
     // Verifica se o código pertence a outro item do pedido, para dar mensagem mais clara
     const pertenceOutro = p.itens.some(i => {
       const prod = PRODUTOS_DB.find(x=>x.codigo===i.codigo);
@@ -14516,17 +14557,27 @@ async function _processarBipagemAgora(codigoLido){
   }
 
   itemAtual.qtd_bipada = Number(itemAtual.qtd_bipada||0) + 1;
-  await db.ref('pedidos/'+p.id+'/itens').set(p.itens);
 
+  // UMA gravação só (contagem + log juntos), em segundo plano — a tela já avança na hora.
+  // Grava só o campo que mudou: não sobrescreve alteração feita no pedido em outra tela.
+  const upd = {};
+  if(p._itensContiguos){
+    upd['itens/'+idxAtual+'/qtd_bipada'] = itemAtual.qtd_bipada;
+    if(gtinMudou) upd['itens/'+idxAtual+'/gtin'] = itemAtual.gtin;
+  } else {
+    upd['itens'] = p.itens; // lista com buracos no banco: regrava inteira (normaliza)
+    p._itensContiguos = true;
+  }
   // Registra o timestamp exato dessa unidade bipada — usado para localizar a gravação da câmera
   const logKey = db.ref('pedidos/'+p.id+'/log_bipagem').push().key;
-  await db.ref('pedidos/'+p.id+'/log_bipagem/'+logKey).set({
+  upd['log_bipagem/'+logKey] = {
     codigo: itemAtual.codigo,
     nome: itemAtual.nome,
     unidade_numero: itemAtual.qtd_bipada,
     ts: agoraTs(),
     usuario: usuarioLogado?.nome || ''
-  });
+  };
+  gravarBipagemEmSegundoPlano(p.id, upd);
 
   const restante = itemAtual.qtd - itemAtual.qtd_bipada;
   msg.innerHTML = restante > 0
@@ -14536,17 +14587,29 @@ async function _processarBipagemAgora(codigoLido){
   const totalUnidades = p.itens.reduce((s,i)=>s+Number(i.qtd),0);
   const totalBipado = p.itens.reduce((s,i)=>s+Number(i.qtd_bipada||0),0);
   if(totalBipado >= totalUnidades){
+    // Último bipe: só finaliza depois de TUDO salvo e conferido no banco
+    renderModalBipagem();
+    await esperarGravacoesBipagem();
+    await recarregarItensBipagem();
+    const aindaFalta = (p.itens||[]).some(i => Number(i.qtd_bipada||0) < Number(i.qtd));
+    if(aindaFalta){
+      renderModalBipagem();
+      const m = document.getElementById('bipagem-msg');
+      if(m) m.innerHTML = `<span style="color:#dc2626">⚠️ A contagem no banco não fechou — confira os itens e continue bipando</span>`;
+      return;
+    }
     await finalizarPedidoBipado();
   } else {
+    const htmlMsg = msg.innerHTML;
     renderModalBipagem();
-    setTimeout(()=>{ const m=document.getElementById('bipagem-msg'); if(m) m.innerHTML = msg.innerHTML; }, 10);
+    const m = document.getElementById('bipagem-msg'); if(m) m.innerHTML = htmlMsg;
   }
 }
 
 function confirmarReiniciarBipagem(){
   const p = pedidoSeparacaoAtual;
   if(!confirm(`Reiniciar TODA a bipagem do pedido #${p.numero}?\n\nIsso vai zerar a contagem de todos os itens — você terá que bipar tudo de novo desde o começo.`)) return;
-  enfileirarBipagem(async () => {
+  enfileirarBipagemSincronizado(async () => {
     await recarregarItensBipagem(); // zera em cima da versão atual do pedido, sem desfazer edições
     p.itens.forEach(item => { item.qtd_bipada = 0; delete item.bip_adiado; });
     await db.ref('pedidos/'+p.id+'/itens').set(p.itens);
@@ -14699,6 +14762,7 @@ async function finalizarPedidoBipado(){
   window.addEventListener('beforeunload', avisoSaidaFinalizacao);
   overlayFinalizacao('Preparando a baixa de estoque...');
   try {
+    await esperarGravacoesBipagem();
     const p = pedidoSeparacaoAtual;
 
     const statusSnap = await db.ref('pedidos/'+p.id+'/status').once('value');
