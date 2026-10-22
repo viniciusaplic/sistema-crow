@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 22/10/2026 14:55\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 22/10/2026 14:55</span>
+            onclick="alert('Versão desta build: 22/10/2026 15:33\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 22/10/2026 15:33</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -1886,6 +1886,12 @@ tbody td{padding:11px 16px;font-size:14px}
         <span><strong>Controla fretes e entregas</strong><br><span style="color:var(--muted);font-size:12px">Vê e edita a tela 🚚 Fretes e Entregas (valores de frete, CT-e, boletos, reversos). Admin já tem isso.</span></span>
       </label>
     </div>
+    <div class="form-row single" id="vend-clientesw3-row">
+      <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="vend-acesso-clientes-w3" style="margin-top:3px">
+        <span><strong>Cadastra clientes novos no W3</strong><br><span style="color:var(--muted);font-size:12px">Vê no Painel os clientes criados no sistema que ainda não estão no W3 e marca como cadastrado. Admin já tem isso.</span></span>
+      </label>
+    </div>
     <div class="form-row" id="vend-comissao-row" style="display:none">
       <div class="form-group" style="max-width:220px">
         <label>% de Comissão</label>
@@ -3003,6 +3009,13 @@ function ehProducao(){
   return usuarioLogado.tipo === 'personalizado' && podeVer('producao');
 }
 
+// Quem cuida de cadastrar no W3 os clientes novos criados no sistema (lista no Painel).
+// Admin sempre; outros só com a opção marcada no cadastro (usuarios/{id}/acesso_clientes_w3).
+function podeCadastrarClientesW3(){
+  if(!usuarioLogado) return false;
+  return !!usuarioLogado.admin || usuarioLogado.acesso_clientes_w3 === true;
+}
+
 // Pode VER o módulo (aparece no menu / acessa a tela)?
 function podeVer(modulo){
   if(!usuarioLogado) return false;
@@ -3884,8 +3897,9 @@ async function renderPainel(){
   if(usuarioLogado.admin) renderMetaMes(mesInicio, meusPedidos);
   else { const elMeta=document.getElementById('dash-meta-mes'); if(elMeta) elMeta.innerHTML=''; }
 
-  // Clientes novos pendentes de cadastro no W3 — visível só pra admin, direto no painel
-  if(usuarioLogado.admin){
+  // Clientes novos pendentes de cadastro no W3 — admin e quem tem "Cadastra clientes novos
+  // no W3" marcado no cadastro do usuário (usuarios/{id}/acesso_clientes_w3)
+  if(podeCadastrarClientesW3()){
     try {
       // Usa a lista de clientes que já está em memória (CLIENTES_DB, carregada uma vez no
       // login) em vez de baixar a coleção inteira de clientes do Firebase toda vez que o
@@ -3911,7 +3925,7 @@ async function renderPainel(){
                   ${c.ts_cadastro ? ' · ' + new Date(c.ts_cadastro).toLocaleString('pt-BR') : ''}
                 </div>
               </div>
-              <button class="btn btn-outline btn-sm" style="color:#16a34a;border-color:#16a34a" onclick="marcarClienteW3Ok('${c.codigo}')">✅ Cadastrado no W3</button>
+              <button class="btn btn-outline btn-sm" style="color:#16a34a;border-color:#16a34a" onclick="marcarClienteW3Ok('${c.codigo}', this)">✅ Cadastrado no W3</button>
             </div>
             <div class="pedido-card-info">📄 ${c.cpf_cnpj||'Sem CNPJ/CPF'} ${c.telefone?' · 📞 '+c.telefone:''}</div>
           </div>`).join('');
@@ -17357,12 +17371,27 @@ async function _salvarClienteInterno(){
   } catch(e){ toast('Erro ao salvar: '+e.message,'error'); }
 }
 
-async function marcarClienteW3Ok(codigo){
+async function marcarClienteW3Ok(codigo, botao){
+  if(!podeCadastrarClientesW3() && !temPermissaoEditar('clientes')){ toast('Sem permissão','error'); return; }
+  // Não recria cliente apagado (gravar num caminho inexistente criaria um registro fantasma)
+  const ex = await db.ref('clientes/c'+codigo+'/nome').once('value');
+  if(!ex.exists()){ toast('Esse cliente não existe mais no sistema','error'); return; }
   await db.ref('clientes/c'+codigo+'/pendente_w3').set(false);
   const c = CLIENTES_DB.find(x=>x.codigo===codigo);
   if(c) c.pendente_w3 = false;
   toast('✅ Cliente marcado como cadastrado no W3','success');
-  renderClientes();
+  // No Painel: tira o cartão e atualiza o contador, sem recarregar a tela inteira
+  const card = botao && botao.closest('.pedido-card');
+  if(card){
+    const wrap = card.parentElement; card.remove();
+    const restantes = wrap ? wrap.querySelectorAll('.pedido-card').length : 0;
+    const headerEl = document.getElementById('dash-clientes-novos-header');
+    if(headerEl){
+      if(restantes) headerEl.querySelector('.section-title').textContent = `👤 Clientes Novos — Pendentes no W3 (${restantes})`;
+      else headerEl.style.display = 'none';
+    }
+  }
+  if(document.getElementById('tab-clientes')?.style.display !== 'none') renderClientes();
 }
 
 // Normaliza nome de cliente para comparação: remove acentos, espaços duplicados e caixa —
@@ -19044,6 +19073,7 @@ function abrirModalVendedor(){
   document.getElementById('vend-tipo').value = 'vendedor';
   document.getElementById('vend-sem-trava-preco').checked = false;
   document.getElementById('vend-acesso-fretes').checked = false;
+  document.getElementById('vend-acesso-clientes-w3').checked = false;
   montarPermissoesTabela({});
   atualizarVisibilidadePermissoes();
   document.getElementById('modal-vendedor-titulo').textContent = 'Cadastrar Usuário';
@@ -19067,6 +19097,7 @@ async function editarVendedor(id){
   document.getElementById('vend-comissao').value = v.comissao_pct || '';
   document.getElementById('vend-sem-trava-preco').checked = v.sem_trava_preco === true;
   document.getElementById('vend-acesso-fretes').checked = v.acesso_fretes === true;
+  document.getElementById('vend-acesso-clientes-w3').checked = v.acesso_clientes_w3 === true;
   montarPermissoesTabela(v.permissoes || {});
   atualizarVisibilidadePermissoes();
   document.getElementById('modal-vendedor-titulo').textContent = 'Editar Usuário';
@@ -19087,6 +19118,7 @@ async function salvarVendedor(){
   const comissaoPct = tipo==='vendedor' ? (Number(document.getElementById('vend-comissao').value)||0) : 0;
   const semTrava = !admin && document.getElementById('vend-sem-trava-preco').checked;
   const acessoFretes = !admin && document.getElementById('vend-acesso-fretes').checked;
+  const acessoClientesW3 = !admin && document.getElementById('vend-acesso-clientes-w3').checked;
   if(!nome||!user){ toast('Nome e usuário são obrigatórios','error'); return; }
 
   if(id){
@@ -19096,7 +19128,8 @@ async function salvarVendedor(){
       email:document.getElementById('vend-email').value, admin, tipo,
       permissoes: permissoes || null, comissao_pct: comissaoPct,
       sem_trava_preco: semTrava || null,
-      acesso_fretes: acessoFretes || null
+      acesso_fretes: acessoFretes || null,
+      acesso_clientes_w3: acessoClientesW3 || null
     };
     if(pass) dados.senha = pass; // só atualiza a senha se foi digitada uma nova
     await db.ref('usuarios/'+id).update(dados);
@@ -19113,7 +19146,8 @@ async function salvarVendedor(){
       email:document.getElementById('vend-email').value, admin, tipo,
       permissoes: permissoes || null, comissao_pct: comissaoPct, ativo:true,
       sem_trava_preco: semTrava || null,
-      acesso_fretes: acessoFretes || null });
+      acesso_fretes: acessoFretes || null,
+      acesso_clientes_w3: acessoClientesW3 || null });
     fecharModal('modal-vendedor'); renderVendedores();
     toast(`✓ Usuário ${nome} cadastrado!`,'success');
   }
