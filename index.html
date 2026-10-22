@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 22/10/2026 15:54\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 22/10/2026 15:54</span>
+            onclick="alert('Versão desta build: 22/10/2026 16:10\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 22/10/2026 16:10</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -1316,6 +1316,9 @@ tbody td{padding:11px 16px;font-size:14px}
 
     <!-- FINANCEIRO — CONTAS A RECEBER -->
     <div id="tab-financeiro" style="display:none">
+      <button id="cr-btn-topo" type="button" title="Voltar ao topo" onclick="window.scrollTo({top:0,behavior:'smooth'})"
+        style="display:none;position:fixed;right:20px;bottom:24px;z-index:900;width:46px;height:46px;border-radius:50%;border:none;background:var(--accent);color:#fff;font-size:22px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.25)">↑</button>
+      <script>window.addEventListener('scroll',function(){var b=document.getElementById('cr-btn-topo');if(b)b.style.display=window.scrollY>400?'block':'none';},{passive:true});</script>
       <div class="section-header">
         <div class="section-title">💵 Contas a Receber</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -2199,7 +2202,7 @@ tbody td{padding:11px 16px;font-size:14px}
     <div class="form-row">
       <div class="form-group"><label>Forma de pagamento *</label><select id="cr-gerar-forma"></select></div>
       <div class="form-group"><label>Observação (opcional)</label>
-      <input type="text" id="cr-gerar-obs" maxlength="200" placeholder="Ex.: boleto enviado por e-mail"></div>
+      <textarea id="cr-gerar-obs" maxlength="200" rows="2" style="resize:vertical;min-height:70px;width:100%;line-height:1.4" placeholder="Ex.: boleto enviado por e-mail"></textarea></div>
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
       <button class="btn btn-outline" onclick="fecharModal('modal-cr-gerar')">Agora não</button>
@@ -2237,7 +2240,7 @@ tbody td{padding:11px 16px;font-size:14px}
     <div class="form-group" id="cr-receber-valor-wrap" style="margin-bottom:12px"><label>Valor recebido</label><input type="number" id="cr-receber-valor" min="0" step="0.01" oninput="atualizarSaldoReceberCR()"></div>
     <div class="form-group" style="margin-bottom:12px">
       <label>Observação / destino do pagamento</label>
-      <input type="text" id="cr-receber-obs" maxlength="300" placeholder="Ex.: depositado no Itaú, usado para pagar fornecedor X…">
+      <textarea id="cr-receber-obs" maxlength="300" rows="2" style="resize:vertical;min-height:70px;width:100%;line-height:1.4" placeholder="Ex.: depositado no Itaú, usado para pagar fornecedor X…"></textarea>
     </div>
     <label id="cr-receber-saldo-wrap" style="display:none;align-items:center;gap:8px;font-size:13px;margin-bottom:8px">
       <input type="checkbox" id="cr-receber-saldo" checked style="width:18px;height:18px;accent-color:var(--accent)">
@@ -2262,7 +2265,7 @@ tbody td{padding:11px 16px;font-size:14px}
     </div>
     <div class="form-row">
       <div class="form-group"><label>Forma de pagamento *</label><select id="cr-manual-forma"></select></div>
-      <div class="form-group"><label>Observação</label><input type="text" id="cr-manual-obs" maxlength="200" placeholder="Ex.: pedido W3 1234, saldo de acordo…"></div>
+      <div class="form-group"><label>Observação</label><textarea id="cr-manual-obs" maxlength="200" rows="2" style="resize:vertical;min-height:70px;width:100%;line-height:1.4" placeholder="Ex.: pedido W3 1234, saldo de acordo…"></textarea></div>
     </div>
     <div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:12px">
       <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Atalho: preencha o total e a condição e clique em Gerar parcelas</div>
@@ -2284,7 +2287,7 @@ tbody td{padding:11px 16px;font-size:14px}
     <div id="cr-manual-soma" style="font-size:13px;margin:12px 0"></div>
     <div class="form-group" id="cr-manual-obs-rec-wrap" style="display:none;margin-bottom:12px">
       <label>Observação / destino do pagamento (parcelas já recebidas)</label>
-      <input type="text" id="cr-manual-obs-rec" maxlength="300" placeholder="Ex.: depositado no Itaú">
+      <textarea id="cr-manual-obs-rec" maxlength="300" rows="2" style="resize:vertical;min-height:70px;width:100%;line-height:1.4" placeholder="Ex.: depositado no Itaú"></textarea>
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn btn-outline" onclick="fecharModal('modal-cr-manual')">Cancelar</button>
@@ -2303,7 +2306,7 @@ tbody td{padding:11px 16px;font-size:14px}
       <div class="form-group"><label>Valor</label><input type="number" id="cr-editar-valor" min="0" step="0.01"></div>
     </div>
     <div class="form-group" style="margin-bottom:12px"><label>Forma de pagamento</label><select id="cr-editar-forma"></select></div>
-    <div class="form-group"><label>Observação</label><input type="text" id="cr-editar-obs" maxlength="300"></div>
+    <div class="form-group"><label>Observação</label><textarea id="cr-editar-obs" maxlength="300" rows="3" style="resize:vertical;min-height:70px;width:100%;line-height:1.4"></textarea></div>
     <button class="btn btn-primary" style="margin-top:14px" onclick="salvarEditarCR()">💾 Salvar</button>
   </div>
 </div>
