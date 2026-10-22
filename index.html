@@ -143,6 +143,7 @@ tbody td{padding:11px 16px;font-size:14px}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
 .form-row.single{grid-template-columns:1fr}
 .form-row.triple{grid-template-columns:1fr 1fr 1fr}
+.form-row.end-num{grid-template-columns:3fr 1fr}
 .form-group{display:flex;flex-direction:column;gap:6px}
 .form-group label{font-size:12px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
 .form-group input,.form-group select,.form-group textarea{border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:14px;font-family:'DM Sans',sans-serif;outline:none;transition:border-color .2s;background:var(--card)}
@@ -359,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 10/08/2026 13:22\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 10/08/2026 13:22</span>
+            onclick="alert('Versão desta build: 22/10/2026 10:06\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 22/10/2026 10:06</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -598,6 +599,7 @@ tbody td{padding:11px 16px;font-size:14px}
         <div class="section-title">Clientes</div>
         <button class="btn btn-outline btn-sm admin-only" onclick="verificarClientesDuplicadosCNPJ()">🔍 Clientes Duplicados (CNPJ)</button>
         <button class="btn btn-outline btn-sm admin-only" onclick="verificarVendedorNomeDessincronizado()">🔍 Nome de Vendedor Desatualizado</button>
+        <button class="btn btn-outline btn-sm admin-only" onclick="analisarEnderecosClientes()">📍 Separar Nº e Bairro</button>
         <button class="btn btn-primary admin-only" onclick="abrirModalCliente()" id="btn-novo-cliente" style="display:none">+ Novo Cliente</button>
       </div>
       <div id="clientes-duplicados-resultado"></div>
@@ -1743,10 +1745,24 @@ tbody td{padding:11px 16px;font-size:14px}
         <input type="email" id="cli-email" placeholder="email@empresa.com">
       </div>
     </div>
-    <div class="form-row single">
+    <div class="form-row end-num">
       <div class="form-group">
-        <label>Endereço (Rua, Nº, Bairro) *</label>
-        <input type="text" id="cli-end" placeholder="Rua das Flores, 123, Centro">
+        <label>Rua / Logradouro *</label>
+        <input type="text" id="cli-end" placeholder="Rua das Flores">
+      </div>
+      <div class="form-group">
+        <label>Nº *</label>
+        <input type="text" id="cli-numero" placeholder="123 ou S/N">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Complemento</label>
+        <input type="text" id="cli-complemento" placeholder="Loja 2, Galpão B...">
+      </div>
+      <div class="form-group">
+        <label>Bairro *</label>
+        <input type="text" id="cli-bairro" placeholder="Centro">
       </div>
     </div>
     <div class="form-row admin-only" id="cli-credito-row" style="display:none">
@@ -1775,7 +1791,7 @@ tbody td{padding:11px 16px;font-size:14px}
       </div>
       <div class="form-group">
         <label>CEP *</label>
-        <input type="text" id="cli-cep" placeholder="00000-000">
+        <input type="text" id="cli-cep" placeholder="00000-000" onblur="preencherEnderecoPorCep()">
       </div>
     </div>
     <div id="cnpj-loading" style="display:none" class="alerta alerta-info">🔍 Buscando dados na Receita Federal...</div>
@@ -15950,7 +15966,7 @@ async function gerarEImprimirEtiquetas(pedidoId){
 
 async function abrirModalCliente(dadosPre=null, codigoEdicao=null){
   if(!temPermissaoEditar('clientes')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
-  ['cli-cpf','cli-ie','cli-nome','cli-tel','cli-email','cli-cidade','cli-end','cli-cep','cli-alerta','cli-credito'].forEach(id=>document.getElementById(id).value='');
+  ['cli-cpf','cli-ie','cli-nome','cli-tel','cli-email','cli-cidade','cli-end','cli-numero','cli-complemento','cli-bairro','cli-cep','cli-alerta','cli-credito'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('cli-uf').value='';
   document.getElementById('cnpj-loading').style.display='none';
   document.getElementById('cli-codigo-edicao').value = codigoEdicao || '';
@@ -15979,7 +15995,7 @@ async function abrirModalCliente(dadosPre=null, codigoEdicao=null){
       document.getElementById('cli-email').value = c.email || '';
       document.getElementById('cli-cidade').value = c.cidade || '';
       document.getElementById('cli-uf').value = c.uf || '';
-      document.getElementById('cli-end').value = c.endereco || c.end || '';
+      preencherCamposEnderecoCliente(c);
       document.getElementById('cli-cep').value = c.cep || '';
       document.getElementById('cli-alerta').value = c.alerta || '';
       document.getElementById('cli-credito').value = c.credito || '';
@@ -15988,12 +16004,185 @@ async function abrirModalCliente(dadosPre=null, codigoEdicao=null){
   } else if(dadosPre){
     document.getElementById('cli-cpf').value=dadosPre.cpf||'';
     document.getElementById('cli-nome').value=dadosPre.nome||'';
-    document.getElementById('cli-end').value=dadosPre.end||'';
+    preencherCamposEnderecoCliente({ endereco: dadosPre.end||'' });
     document.getElementById('cli-cidade').value=dadosPre.cidade||'';
     document.getElementById('cli-uf').value=dadosPre.uf||'';
     document.getElementById('cli-cep').value=dadosPre.cep||'';
   }
   abrirModal('modal-cliente');
+}
+
+// ══ ENDEREÇO DO CLIENTE EM CAMPOS SEPARADOS (Rua, Nº, Complemento, Bairro) ══
+// Os campos novos ficam em logradouro/numero/complemento/bairro. O campo "endereco" continua
+// existindo com tudo junto, porque pedidos, impressão, filtro e Maps leem dele.
+function montarEnderecoCliente(log, num, comp, bai){
+  return [log, num, comp, bai].map(x => String(x||'').trim()).filter(Boolean).join(', ');
+}
+function ehNumeroEndereco(t){
+  t = String(t||'').trim();
+  return /^(n[º°o.]?\s*)?\d+\s*[a-z]?(\s*[-\/]\s*\d+\s*[a-z]?)?$/i.test(t)
+      || /^s\s*\/?\s*n[º°o]?\.?$/i.test(t)
+      || /^km\s*\d/i.test(t);
+}
+function limparNumeroEndereco(t){
+  t = String(t||'').trim().replace(/^n[º°o.]?\s*(?=\d)/i,'');
+  return /^s\s*\/?\s*n/i.test(t) ? 'S/N' : t;
+}
+// Separa o texto antigo ("Rua X, 123, Loja 2, Centro") em partes. Não grava nada.
+function separarEnderecoCliente(texto){
+  const r = { logradouro:'', numero:'', complemento:'', bairro:'' };
+  let partes = String(texto||'').split(',').map(x => x.trim()).filter(Boolean);
+  // descarta pedaço "CIDADE/UF - CEP" ou CEP solto que às vezes veio do W3
+  partes = partes.filter(x => !/\/\s*[A-Z]{2}\b/.test(x) && !/^\d{5}-?\d{3}$/.test(x) && !/^-?\s*cep\b/i.test(x));
+  if(!partes.length) return r;
+  r.logradouro = partes.shift();
+  const iNum = partes.findIndex(ehNumeroEndereco);
+  if(iNum >= 0){
+    r.numero = limparNumeroEndereco(partes[iNum]);
+    partes.splice(iNum, 1);
+  } else {
+    // número colado no fim da rua só quando vem marcado: "Rua X nº 123" (sem o "nº" não arrisca — ex.: "Rodovia MG 050")
+    const m = r.logradouro.match(/^(.*?)\s+n[º°o.]\s*(\d+[a-z]?)$/i);
+    if(m && m[1].trim().length > 3){ r.logradouro = m[1].trim(); r.numero = limparNumeroEndereco(m[2]); }
+  }
+  if(partes.length){
+    const ultimo = partes[partes.length-1];
+    const pareceComplemento = /^(loja|lj|sala|sl|apto?|ap\.?|apartamento|bloco|bl|casa|galp[aã]o|lote|lt|qd|quadra|andar|box|fundos|frente|km|conj|conjunto|pavimento|anexo)\b/i.test(ultimo);
+    if(!pareceComplemento) r.bairro = partes.pop();
+    r.complemento = partes.join(', ');
+  }
+  return r;
+}
+// Preenche os campos do formulário a partir do cadastro (novo formato) ou do texto antigo
+function preencherCamposEnderecoCliente(c){
+  const p = (c.logradouro || c.numero || c.bairro)
+    ? { logradouro:c.logradouro||'', numero:c.numero||'', complemento:c.complemento||'', bairro:c.bairro||'' }
+    : separarEnderecoCliente(c.endereco || c.end || '');
+  document.getElementById('cli-end').value = p.logradouro;
+  document.getElementById('cli-numero').value = p.numero;
+  document.getElementById('cli-complemento').value = p.complemento;
+  document.getElementById('cli-bairro').value = p.bairro;
+}
+async function consultarViaCep(cep){
+  const d = String(cep||'').replace(/\D/g,'');
+  if(d.length !== 8) return null;
+  try {
+    const r = await fetch(`https://viacep.com.br/ws/${d}/json/`);
+    if(!r.ok) return null;
+    const j = await r.json();
+    return j && !j.erro ? j : null;
+  } catch(e){ return null; }
+}
+// Ao sair do campo CEP: completa Rua, Bairro, Cidade e UF que estiverem vazios
+async function preencherEnderecoPorCep(){
+  const j = await consultarViaCep(document.getElementById('cli-cep').value);
+  if(!j) return;
+  const setSeVazio = (id, v) => { const el = document.getElementById(id); if(el && !el.value.trim() && v) el.value = v; };
+  setSeVazio('cli-end', j.logradouro);
+  setSeVazio('cli-bairro', j.bairro);
+  setSeVazio('cli-cidade', (j.localidade||'').toUpperCase());
+  setSeVazio('cli-uf', j.uf);
+}
+
+// ── Ferramenta (admin): separar Nº e Bairro dos cadastros já existentes ──
+// 1º passo só ANALISA e mostra o resultado — não grava nada.
+// 2º passo (botão "Gravar") grava só os campos novos de cada cliente; o "endereco" antigo fica intacto.
+let ENDERECOS_ANALISE = null;
+async function analisarEnderecosClientes(){
+  if(!usuarioLogado?.admin){ toast('Acesso restrito — só administradores','error'); return; }
+  const el = document.getElementById('clientes-duplicados-resultado');
+  el.innerHTML = '<div style="padding:12px;color:var(--muted)">⏳ Carregando clientes atualizados...</div>';
+  await carregarClientesFirebase(); // lista fresca, pra não gravar em cima de edição feita por outra pessoa
+
+  const alvo = CLIENTES_DB.filter(c => !(c.numero && c.bairro) && (c.endereco || c.end));
+  const linhas = alvo.map(c => ({ c, p: separarEnderecoCliente(c.endereco || c.end) }));
+
+  // Bairro que não veio no texto: tenta pelo CEP (ViaCEP — serviço externo, não gasta Firebase)
+  const semBairro = linhas.filter(l => !l.p.bairro && String(l.c.cep||'').replace(/\D/g,'').length === 8);
+  const cacheCep = {};
+  let feitos = 0;
+  const fila = semBairro.slice();
+  const trabalhador = async () => {
+    while(fila.length){
+      const l = fila.shift();
+      const d = String(l.c.cep).replace(/\D/g,'');
+      if(!(d in cacheCep)) cacheCep[d] = await consultarViaCep(d);
+      const j = cacheCep[d];
+      if(j && j.bairro){ l.p.bairro = j.bairro; l.p.bairroPorCep = true; }
+      feitos++;
+      if(feitos % 10 === 0) el.innerHTML = `<div style="padding:12px;color:var(--muted)">⏳ Buscando bairro pelo CEP... ${feitos}/${semBairro.length}</div>`;
+    }
+  };
+  if(semBairro.length) await Promise.all([1,2,3,4].map(trabalhador));
+
+  const completos = linhas.filter(l => l.p.logradouro && l.p.numero && l.p.bairro);
+  const incompletos = linhas.filter(l => !(l.p.logradouro && l.p.numero && l.p.bairro));
+  const semEndereco = CLIENTES_DB.filter(c => !(c.numero && c.bairro) && !(c.endereco || c.end));
+  ENDERECOS_ANALISE = linhas;
+
+  const linhaHtml = (l, mostrarEditar) => `
+    <tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:5px 8px"><strong>${esc(l.c.nome)}</strong><br><span style="color:var(--muted);font-size:11px">${esc(l.c.endereco||l.c.end||'')}</span></td>
+      <td style="padding:5px 8px">${esc(l.p.logradouro)||'<span style="color:#dc2626">—</span>'}</td>
+      <td style="padding:5px 8px">${esc(l.p.numero)||'<span style="color:#dc2626">falta</span>'}</td>
+      <td style="padding:5px 8px">${esc(l.p.complemento)}</td>
+      <td style="padding:5px 8px">${l.p.bairro ? esc(l.p.bairro) + (l.p.bairroPorCep?' <span style="color:var(--muted);font-size:10px">(CEP)</span>':'') : '<span style="color:#dc2626">falta</span>'}</td>
+      ${mostrarEditar?`<td style="padding:5px 8px"><button class="btn btn-outline btn-sm" onclick="abrirModalCliente(null,'${l.c.codigo}')">✏️</button></td>`:''}
+    </tr>`;
+  const tabela = (lista, editar) => `<div style="max-height:320px;overflow:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:12px">
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:var(--bg);text-align:left"><th style="padding:6px 8px">Cliente / texto atual</th><th style="padding:6px 8px">Rua</th><th style="padding:6px 8px">Nº</th><th style="padding:6px 8px">Compl.</th><th style="padding:6px 8px">Bairro</th>${editar?'<th></th>':''}</tr></thead>
+      <tbody>${lista.map(l => linhaHtml(l, editar)).join('')}</tbody></table></div>`;
+
+  el.innerHTML = `
+    <div style="text-align:right;margin:10px 0 6px"><button class="btn btn-outline btn-sm" onclick="document.getElementById('clientes-duplicados-resultado').innerHTML='';ENDERECOS_ANALISE=null">✕ Fechar</button></div>
+    <div style="padding:12px 14px;margin-bottom:12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:13px;color:#1e3a8a">
+      📍 <strong>${linhas.length}</strong> cliente(s) ainda sem Nº/Bairro separados.<br>
+      ✅ <strong>${completos.length}</strong> deram pra separar completo (Rua + Nº + Bairro).<br>
+      ⚠️ <strong>${incompletos.length}</strong> ficaram faltando Nº ou Bairro — a parte que deu pra separar é gravada, e o resto é completado ao editar o cliente (o cadastro não salva sem Nº e Bairro).
+      ${semEndereco.length?`<br>❌ <strong>${semEndereco.length}</strong> cliente(s) sem endereço nenhum no cadastro.`:''}
+      <br><span style="font-size:12px">Nada foi gravado ainda. O endereço antigo (texto completo) não é apagado.</span>
+    </div>
+    ${linhas.length?`<div style="margin-bottom:12px"><button class="btn btn-primary" id="btn-gravar-enderecos" onclick="gravarEnderecosClientes()">💾 Gravar Nº e Bairro separados (${linhas.length})</button></div>`:''}
+    ${incompletos.length?`<div style="font-weight:600;font-size:13px;margin:8px 0 6px">⚠️ Faltando Nº ou Bairro (${incompletos.length})</div>${tabela(incompletos, true)}`:''}
+    ${completos.length?`<div style="font-weight:600;font-size:13px;margin:8px 0 6px">✅ Separados (${completos.length}) — confira por amostragem</div>${tabela(completos, false)}`:''}
+  `;
+}
+
+async function gravarEnderecosClientes(){
+  if(!usuarioLogado?.admin){ toast('Acesso restrito — só administradores','error'); return; }
+  if(!ENDERECOS_ANALISE || !ENDERECOS_ANALISE.length){ toast('Rode a análise primeiro','error'); return; }
+  if(!confirm(`Gravar Rua / Nº / Complemento / Bairro separados em ${ENDERECOS_ANALISE.length} cliente(s)?\n\nO endereço antigo continua guardado.`)) return;
+  const btn = document.getElementById('btn-gravar-enderecos');
+  if(btn){ btn.disabled = true; btn.textContent = 'Gravando...'; }
+  // Grava só os campos novos de cada cliente (caminho por caminho — nunca o nó inteiro)
+  const updates = {};
+  ENDERECOS_ANALISE.forEach(({c, p}) => {
+    const key = c._key || ('c' + c.codigo);
+    updates[`clientes/${key}/logradouro`] = p.logradouro || '';
+    updates[`clientes/${key}/numero`] = p.numero || '';
+    updates[`clientes/${key}/complemento`] = p.complemento || '';
+    updates[`clientes/${key}/bairro`] = p.bairro || '';
+  });
+  try {
+    const chaves = Object.keys(updates);
+    for(let i = 0; i < chaves.length; i += 2000){
+      const lote = {};
+      chaves.slice(i, i + 2000).forEach(k => lote[k] = updates[k]);
+      await db.ref().update(lote);
+    }
+    ENDERECOS_ANALISE.forEach(({c, p}) => Object.assign(c, { logradouro:p.logradouro||'', numero:p.numero||'', complemento:p.complemento||'', bairro:p.bairro||'' }));
+    const n = ENDERECOS_ANALISE.length;
+    ENDERECOS_ANALISE = null;
+    toast(`✓ Endereço separado em ${n} cliente(s)`,'success');
+    document.getElementById('clientes-duplicados-resultado').innerHTML = `
+      <div style="text-align:right;margin:10px 0 6px"><button class="btn btn-outline btn-sm" onclick="document.getElementById('clientes-duplicados-resultado').innerHTML=''">✕ Fechar</button></div>
+      <div style="padding:12px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534;font-size:13px">✅ Gravado em ${n} cliente(s). Os que ficaram sem Nº ou Bairro pedem o preenchimento na próxima vez que forem editados.</div>`;
+    renderClientes();
+  } catch(e){
+    toast('Erro ao gravar: ' + e.message,'error');
+    if(btn){ btn.disabled = false; btn.textContent = '💾 Tentar de novo'; }
+  }
 }
 
 async function buscarCNPJ(){
@@ -16005,8 +16194,10 @@ async function buscarCNPJ(){
     if(!r.ok) throw new Error('CNPJ não encontrado');
     const d = await r.json();
     document.getElementById('cli-nome').value = d.razao_social||d.nome_fantasia||'';
-    const end = [d.logradouro,d.numero,d.bairro].filter(Boolean).join(', ');
-    document.getElementById('cli-end').value = end;
+    document.getElementById('cli-end').value = [d.descricao_tipo_de_logradouro, d.logradouro].filter(Boolean).join(' ');
+    document.getElementById('cli-numero').value = d.numero || '';
+    document.getElementById('cli-complemento').value = d.complemento || '';
+    document.getElementById('cli-bairro').value = d.bairro || '';
     document.getElementById('cli-cidade').value = d.municipio||'';
     document.getElementById('cli-uf').value = d.uf||'';
     document.getElementById('cli-cep').value = d.cep||'';
@@ -16067,6 +16258,9 @@ async function _salvarClienteInterno(){
   const telVal = document.getElementById('cli-tel').value.trim();
   const emailVal = document.getElementById('cli-email').value.trim();
   const endVal = document.getElementById('cli-end').value.trim();
+  const numeroVal = document.getElementById('cli-numero').value.trim();
+  const complementoVal = document.getElementById('cli-complemento').value.trim();
+  const bairroVal = document.getElementById('cli-bairro').value.trim();
   const cidadeVal = document.getElementById('cli-cidade').value.trim();
   const ufVal = document.getElementById('cli-uf').value;
   const cepVal = document.getElementById('cli-cep').value.trim();
@@ -16078,7 +16272,9 @@ async function _salvarClienteInterno(){
     { valor: ieVal, label: 'Inscrição Estadual (pode digitar "ISENTO" se for o caso)' },
     { valor: telVal, label: 'Telefone' },
     { valor: emailVal, label: 'E-mail' },
-    { valor: endVal, label: 'Endereço' },
+    { valor: endVal, label: 'Rua' },
+    { valor: numeroVal, label: 'Nº (use S/N se não tiver)' },
+    { valor: bairroVal, label: 'Bairro' },
     { valor: cidadeVal, label: 'Cidade' },
     { valor: ufVal, label: 'UF' },
     { valor: cepVal, label: 'CEP' },
@@ -16134,7 +16330,12 @@ async function _salvarClienteInterno(){
     email:document.getElementById('cli-email').value,
     cidade:document.getElementById('cli-cidade').value.toUpperCase(),
     uf:document.getElementById('cli-uf').value,
-    endereco:document.getElementById('cli-end').value,
+    // "endereco" continua com tudo junto: pedidos, impressão, filtro e Maps leem dele
+    endereco: montarEnderecoCliente(endVal, numeroVal, complementoVal, bairroVal),
+    logradouro: endVal,
+    numero: numeroVal,
+    complemento: complementoVal,
+    bairro: bairroVal,
     cep:document.getElementById('cli-cep').value,
     alerta:document.getElementById('cli-alerta').value.trim(),
     vendedor_id: vendedorId,
@@ -16481,7 +16682,7 @@ async function clonarCliente(codigo){
   document.getElementById('cli-email').value = c.email || '';
   document.getElementById('cli-cidade').value = c.cidade || '';
   document.getElementById('cli-uf').value = c.uf || '';
-  document.getElementById('cli-end').value = c.endereco || '';
+  preencherCamposEnderecoCliente(c);
   document.getElementById('cli-alerta').value = c.alerta || '';
   if(usuarioLogado.admin) document.getElementById('cli-vendedor-id').value = c.vendedor_id || '';
   // CNPJ/CPF e código NÃO são copiados — cada cliente precisa de CNPJ próprio (validado ao salvar)
