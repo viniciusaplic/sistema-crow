@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 22/10/2026 16:10\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 22/10/2026 16:10</span>
+            onclick="alert('Versão desta build: 22/10/2026 16:20\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 22/10/2026 16:20</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -1290,35 +1290,37 @@ tbody td{padding:11px 16px;font-size:14px}
       </div>
       <div id="fretes-import-painel" style="display:none"></div>
       <div class="dashboard-cards" id="fretes-cards"></div>
-      <div id="fretes-pendentes"></div>
-      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-        <button class="btn btn-sm btn-secondary" id="fretes-subaba-envios" onclick="trocarSubabaFretes('envios')">Envios</button>
+      <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+        <button class="btn btn-sm btn-outline" id="fretes-subaba-lancar" onclick="trocarSubabaFretes('lancar')">📦 A lançar</button>
+        <button class="btn btn-sm btn-outline" id="fretes-subaba-envios" onclick="trocarSubabaFretes('envios')">🚚 Envios</button>
         <button class="btn btn-sm btn-outline" id="fretes-subaba-reversos" onclick="trocarSubabaFretes('reversos')">↩️ Reversos Correios</button>
       </div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;align-items:flex-end">
-        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Mês</label>
-          <div style="display:flex;gap:4px;align-items:center">
-            <button class="btn btn-outline btn-sm" onclick="mudarMesFretes(-1)">‹</button>
-            <input type="month" class="search-input" id="fretes-mes" style="width:auto" onchange="aoMudarMesFretes()">
-            <button class="btn btn-outline btn-sm" onclick="mudarMesFretes(1)">›</button>
-          </div></div>
-        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Buscar</label>
-          <input class="search-input" id="fretes-busca" placeholder="NF, pedido, cliente, rastreio…" oninput="renderTabelaFretes()"></div>
-        <div class="filtro-group" id="fretes-f-transp-wrap"><label style="font-size:12px;color:var(--muted)">Transportadora</label>
-          <select class="search-input" id="fretes-f-transp" style="width:auto" onchange="renderTabelaFretes()"></select></div>
-        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Vendedor</label>
-          <select class="search-input" id="fretes-f-vend" style="width:auto" onchange="renderTabelaFretes()"></select></div>
-        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Situação</label>
-          <select class="search-input" id="fretes-f-situacao" style="width:auto" onchange="renderTabelaFretes()"></select></div>
+      <div id="fretes-pendentes"></div>
+      <div id="fretes-lista-wrap">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;align-items:flex-end">
+          <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Mês</label>
+            <div style="display:flex;gap:4px;align-items:center">
+              <button class="btn btn-outline btn-sm" onclick="mudarMesFretes(-1)" title="Mês anterior">‹</button>
+              <select class="search-input" id="fretes-mes" style="width:auto" onchange="aoMudarMesFretes()"></select>
+              <button class="btn btn-outline btn-sm" onclick="mudarMesFretes(1)" title="Próximo mês">›</button>
+            </div></div>
+          <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Cliente</label>
+            <input class="search-input" id="fretes-f-cliente" style="width:180px" placeholder="Todos" autocomplete="off" oninput="filtrarFretes()"></div>
+          <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Nº da NF ou do pedido</label>
+            <input class="search-input" id="fretes-f-numero" style="width:150px" placeholder="Todos" inputmode="numeric" autocomplete="off" oninput="filtrarFretes()"></div>
+          <div class="filtro-group" id="fretes-f-transp-wrap"><label style="font-size:12px;color:var(--muted)">Transportadora</label>
+            <select class="search-input" id="fretes-f-transp" style="width:auto" onchange="filtrarFretes()"></select></div>
+          <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Situação</label>
+            <select class="search-input" id="fretes-f-situacao" style="width:auto" onchange="filtrarFretes()"></select></div>
+          <button class="btn btn-outline btn-sm" onclick="limparFiltrosFretes()">Limpar</button>
+        </div>
+        <div class="table-wrap" style="overflow-x:auto"><div id="fretes-tabela"></div></div>
+        <div class="pagination" id="fretes-pag"></div>
       </div>
-      <div class="table-wrap" style="overflow-x:auto"><div id="fretes-tabela"></div></div>
     </div>
 
     <!-- FINANCEIRO — CONTAS A RECEBER -->
     <div id="tab-financeiro" style="display:none">
-      <button id="cr-btn-topo" type="button" title="Voltar ao topo" onclick="window.scrollTo({top:0,behavior:'smooth'})"
-        style="display:none;position:fixed;right:20px;bottom:24px;z-index:900;width:46px;height:46px;border-radius:50%;border:none;background:var(--accent);color:#fff;font-size:22px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.25)">↑</button>
-      <script>window.addEventListener('scroll',function(){var b=document.getElementById('cr-btn-topo');if(b)b.style.display=window.scrollY>400?'block':'none';},{passive:true});</script>
       <div class="section-header">
         <div class="section-title">💵 Contas a Receber</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -2202,7 +2204,7 @@ tbody td{padding:11px 16px;font-size:14px}
     <div class="form-row">
       <div class="form-group"><label>Forma de pagamento *</label><select id="cr-gerar-forma"></select></div>
       <div class="form-group"><label>Observação (opcional)</label>
-      <textarea id="cr-gerar-obs" maxlength="200" rows="2" style="resize:vertical;min-height:70px;width:100%;line-height:1.4" placeholder="Ex.: boleto enviado por e-mail"></textarea></div>
+      <input type="text" id="cr-gerar-obs" maxlength="200" placeholder="Ex.: boleto enviado por e-mail"></div>
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
       <button class="btn btn-outline" onclick="fecharModal('modal-cr-gerar')">Agora não</button>
@@ -2240,7 +2242,7 @@ tbody td{padding:11px 16px;font-size:14px}
     <div class="form-group" id="cr-receber-valor-wrap" style="margin-bottom:12px"><label>Valor recebido</label><input type="number" id="cr-receber-valor" min="0" step="0.01" oninput="atualizarSaldoReceberCR()"></div>
     <div class="form-group" style="margin-bottom:12px">
       <label>Observação / destino do pagamento</label>
-      <textarea id="cr-receber-obs" maxlength="300" rows="2" style="resize:vertical;min-height:70px;width:100%;line-height:1.4" placeholder="Ex.: depositado no Itaú, usado para pagar fornecedor X…"></textarea>
+      <input type="text" id="cr-receber-obs" maxlength="300" placeholder="Ex.: depositado no Itaú, usado para pagar fornecedor X…">
     </div>
     <label id="cr-receber-saldo-wrap" style="display:none;align-items:center;gap:8px;font-size:13px;margin-bottom:8px">
       <input type="checkbox" id="cr-receber-saldo" checked style="width:18px;height:18px;accent-color:var(--accent)">
@@ -2265,7 +2267,7 @@ tbody td{padding:11px 16px;font-size:14px}
     </div>
     <div class="form-row">
       <div class="form-group"><label>Forma de pagamento *</label><select id="cr-manual-forma"></select></div>
-      <div class="form-group"><label>Observação</label><textarea id="cr-manual-obs" maxlength="200" rows="2" style="resize:vertical;min-height:70px;width:100%;line-height:1.4" placeholder="Ex.: pedido W3 1234, saldo de acordo…"></textarea></div>
+      <div class="form-group"><label>Observação</label><input type="text" id="cr-manual-obs" maxlength="200" placeholder="Ex.: pedido W3 1234, saldo de acordo…"></div>
     </div>
     <div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:12px">
       <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Atalho: preencha o total e a condição e clique em Gerar parcelas</div>
@@ -2287,7 +2289,7 @@ tbody td{padding:11px 16px;font-size:14px}
     <div id="cr-manual-soma" style="font-size:13px;margin:12px 0"></div>
     <div class="form-group" id="cr-manual-obs-rec-wrap" style="display:none;margin-bottom:12px">
       <label>Observação / destino do pagamento (parcelas já recebidas)</label>
-      <textarea id="cr-manual-obs-rec" maxlength="300" rows="2" style="resize:vertical;min-height:70px;width:100%;line-height:1.4" placeholder="Ex.: depositado no Itaú"></textarea>
+      <input type="text" id="cr-manual-obs-rec" maxlength="300" placeholder="Ex.: depositado no Itaú">
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn btn-outline" onclick="fecharModal('modal-cr-manual')">Cancelar</button>
@@ -2306,7 +2308,7 @@ tbody td{padding:11px 16px;font-size:14px}
       <div class="form-group"><label>Valor</label><input type="number" id="cr-editar-valor" min="0" step="0.01"></div>
     </div>
     <div class="form-group" style="margin-bottom:12px"><label>Forma de pagamento</label><select id="cr-editar-forma"></select></div>
-    <div class="form-group"><label>Observação</label><textarea id="cr-editar-obs" maxlength="300" rows="3" style="resize:vertical;min-height:70px;width:100%;line-height:1.4"></textarea></div>
+    <div class="form-group"><label>Observação</label><input type="text" id="cr-editar-obs" maxlength="300"></div>
     <button class="btn btn-primary" style="margin-top:14px" onclick="salvarEditarCR()">💾 Salvar</button>
   </div>
 </div>
@@ -15270,7 +15272,10 @@ let FRETES_USUARIOS = null;     // nomes de usuários (vendedor principal)
 let FRETE_PEDIDOS_RECENTES = null;
 let FRETE_EDIT = null;          // { mes, id, original } quando editando
 let FRETE_PEDIDO_VINC = null;   // { id, numero } pedido vinculado no modal
-let FRETE_SUBABA = 'envios';
+let FRETE_SUBABA = '';           // 'lancar' | 'envios' | 'reversos' ('' = decide ao abrir)
+let FRETES_PAGINA = 1;
+const FRETES_MES_LISTA = '2025-10';     // primeiro mês mostrado no filtro
+const FRETES_MES_INICIAL = '2025-01';   // a planilha antiga começa em out/2025 (há NF com data digitada em 2025-01)
 let freteEmGravacao = false;
 let FRETES_PLANILHA_WB = null;
 let FRETE_EDIT_EXTRA = {};      // coleta_id/origem do registro aberto no modal
@@ -15291,15 +15296,48 @@ function todosFretesCarregados(){
 }
 
 // ══ TELA PRINCIPAL ══
+// Período escolhido no filtro Mês: um mês ('AAAA-MM'), '__3m' (últimos 3) ou '__todos'
+function mesesDoPeriodoFretes(){
+  if(FRETES_MES === '__3m') return mesesAbertosFretes();
+  if(FRETES_MES === '__todos'){
+    const out = []; let m = mesDeFrete(hojeISO());
+    while(m >= FRETES_MES_INICIAL){ out.push(m); m = somarMesesFrete(m, -1); }
+    return out;
+  }
+  return [FRETES_MES];
+}
+function fretesDoPeriodo(){
+  return mesesDoPeriodoFretes().flatMap(m => FRETES_CACHE[m] || []).filter(f => !f.dispensado);
+}
+function nomePeriodoFretes(){
+  if(FRETES_MES === '__3m') return 'nos últimos 3 meses';
+  if(FRETES_MES === '__todos') return 'em todos os meses';
+  return 'em ' + nomeMesFrete(FRETES_MES);
+}
+function montarSelectMesFretes(){
+  const sel = document.getElementById('fretes-mes'); if(!sel) return;
+  const atual = mesDeFrete(hojeISO());
+  const ops = ['<option value="__3m">Últimos 3 meses</option>'];
+  let m = atual;
+  while(m >= FRETES_MES_LISTA){
+    const nome = nomeMesFrete(m);
+    ops.push(`<option value="${m}">${nome.charAt(0).toUpperCase()+nome.slice(1)}</option>`);
+    m = somarMesesFrete(m, -1);
+  }
+  ops.push('<option value="__todos">Todos os meses</option>');
+  sel.innerHTML = ops.join('');
+  sel.value = FRETES_MES;
+}
+
 async function renderFretes(forcar){
   if(!podeVer('fretes')){ toast('Acesso restrito — sem permissão nesta área','error'); return; }
   if(!FRETES_MES) FRETES_MES = mesDeFrete(hojeISO());
-  const inp = document.getElementById('fretes-mes');
-  if(inp) inp.value = FRETES_MES;
+  montarSelectMesFretes();
   const el = document.getElementById('fretes-tabela');
-  if(el && (forcar || !FRETES_CACHE[FRETES_MES])) el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px">Carregando…</div>';
+  if(el && (forcar || mesesDoPeriodoFretes().some(m => !FRETES_CACHE[m]))) el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px">Carregando…</div>';
   try {
-    const meses = Array.from(new Set([FRETES_MES, ...mesesAbertosFretes()]));
+    // Lê só o período escolhido + os 3 últimos meses (cada mês 1x por sessão)
+    const meses = Array.from(new Set([...mesesDoPeriodoFretes(), ...mesesAbertosFretes()]));
     await Promise.all(meses.map(m => carregarMesFretes(m, forcar)));
     if(forcar || !FRETES_COLETAS){
       const snap = await db.ref('coletas').orderByKey().limitToLast(40).once('value');
@@ -15307,43 +15345,59 @@ async function renderFretes(forcar){
       FRETES_COLETAS = Object.keys(v).map(id => ({ id, ...v[id] }));
     }
     await carregarFaturadosParaFrete(forcar);
-    carregarTransportadoras().catch(()=>{});
+    await carregarTransportadoras().catch(()=>{});
   } catch(e){ toast('Erro ao carregar fretes: '+e.message,'error'); return; }
   renderFretesCards();
   renderFretesPendentes();
   montarFiltrosFretes();
-  trocarSubabaFretes(FRETE_SUBABA);
+  if(!FRETE_SUBABA) FRETE_SUBABA = FRETE_PEND_LISTA.length ? 'lancar' : 'envios';
+  trocarSubabaFretes(FRETE_SUBABA, true);
 }
 
 function aoMudarMesFretes(){
-  const v = document.getElementById('fretes-mes').value;
-  if(!/^\d{4}-\d{2}$/.test(v)) return;
-  FRETES_MES = v; renderFretes(false);
+  FRETES_MES = document.getElementById('fretes-mes').value || mesDeFrete(hojeISO());
+  FRETES_PAGINA = 1;
+  renderFretes(false);
 }
 function mudarMesFretes(n){
-  FRETES_MES = somarMesesFrete(FRETES_MES || mesDeFrete(hojeISO()), n);
+  const base = /^\d{4}-\d{2}$/.test(FRETES_MES) ? FRETES_MES : mesDeFrete(hojeISO());
+  const novo = somarMesesFrete(base, n);
+  if(novo > mesDeFrete(hojeISO()) || novo < FRETES_MES_LISTA) return;
+  FRETES_MES = novo; FRETES_PAGINA = 1;
   renderFretes(false);
 }
 
 function renderFretesCards(){
   const el = document.getElementById('fretes-cards'); if(!el) return;
-  const doMes = (FRETES_CACHE[FRETES_MES]||[]).filter(f => !f.dispensado && f.tipo !== 'reverso');
-  const totFrete = doMes.reduce((s,f) => s + (Number(f.valor_frete)||0), 0);
-  const totNF = doMes.reduce((s,f) => s + (Number(f.valor_nf)||0), 0);
-  const todos = todosFretesCarregados();
-  const atrasadas = todos.filter(freteAtrasado).length;
-  const docs = doMes.filter(f => Number(f.valor_frete) > 0 && (!f.cte_recebido || !f.boleto_recebido)).length;
-  const reversos = todos.filter(f => f.tipo === 'reverso' && f.status === 'aguardando').length;
+  const doPeriodo = fretesDoPeriodo().filter(f => f.tipo !== 'reverso');
+  const totFrete = doPeriodo.reduce((s,f) => s + (Number(f.valor_frete)||0), 0);
+  const totNF = doPeriodo.reduce((s,f) => s + (Number(f.valor_nf)||0), 0);
+  // Atrasadas e reversos abertos: sempre dos últimos 3 meses, independente do filtro
+  const recentes = mesesAbertosFretes().flatMap(m => FRETES_CACHE[m] || []).filter(f => !f.dispensado);
+  const atrasadas = recentes.filter(freteAtrasado).length;
+  const docs = doPeriodo.filter(f => Number(f.valor_frete) > 0 && (!f.cte_recebido || !f.boleto_recebido)).length;
+  const reversos = recentes.filter(f => f.tipo === 'reverso' && f.status === 'aguardando').length;
   el.innerHTML = `
-    <div class="dash-card"><div class="dash-card-label">Fretes em ${esc(nomeMesFrete(FRETES_MES))}</div><div class="dash-card-value">${fmtMoeda(totFrete)}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">${doMes.length} envio(s) · ${totNF ? (totFrete/totNF*100).toLocaleString('pt-BR',{maximumFractionDigits:2})+'% do valor dos pedidos' : '—'}</div></div>
+    <div class="dash-card"><div class="dash-card-label">Fretes ${esc(nomePeriodoFretes())}</div><div class="dash-card-value">${fmtMoeda(totFrete)}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">${doPeriodo.length} envio(s) · ${totNF ? (totFrete/totNF*100).toLocaleString('pt-BR',{maximumFractionDigits:2})+'% do valor dos pedidos' : '—'}</div></div>
     <div class="dash-card" style="cursor:pointer" onclick="filtrarFretesSituacao('envios','atrasado')"><div class="dash-card-label">Entregas atrasadas</div><div class="dash-card-value ${atrasadas?'accent':''}">${atrasadas}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">previsão vencida, últimos 3 meses</div></div>
-    <div class="dash-card" style="cursor:pointer" onclick="filtrarFretesSituacao('envios','docs')"><div class="dash-card-label">CT-e / boleto pendente</div><div class="dash-card-value" style="color:#b45309">${docs}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">no mês</div></div>
+    <div class="dash-card" style="cursor:pointer" onclick="filtrarFretesSituacao('envios','docs')"><div class="dash-card-label">CT-e / boleto pendente</div><div class="dash-card-value" style="color:#b45309">${docs}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">${esc(nomePeriodoFretes())}</div></div>
     <div class="dash-card" style="cursor:pointer" onclick="filtrarFretesSituacao('reversos','aberto')"><div class="dash-card-label">Reversos aguardando postagem</div><div class="dash-card-value">${reversos}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">últimos 3 meses</div></div>`;
 }
 function filtrarFretesSituacao(subaba, sit){
-  FRETE_SUBABA = subaba;
-  trocarSubabaFretes(subaba);
-  const s = document.getElementById('fretes-f-situacao'); if(s){ s.value = sit; renderTabelaFretes(); }
+  // Atrasadas/reversos abertos são contados nos últimos 3 meses: o filtro acompanha
+  if(sit === 'atrasado' || sit === 'aberto'){
+    if(FRETES_MES !== '__todos') FRETES_MES = '__3m';
+    montarSelectMesFretes(); renderFretesCards();
+  }
+  trocarSubabaFretes(subaba, true);
+  const s = document.getElementById('fretes-f-situacao'); if(s) s.value = sit;
+  filtrarFretes();
+}
+function filtrarFretes(){ FRETES_PAGINA = 1; renderTabelaFretes(); }
+function limparFiltrosFretes(){
+  ['fretes-f-cliente','fretes-f-numero','fretes-f-transp','fretes-f-situacao'].forEach(id => { const e = document.getElementById(id); if(e) e.value = ''; });
+  if(FRETES_MES !== mesDeFrete(hojeISO())){ FRETES_MES = mesDeFrete(hojeISO()); FRETES_PAGINA = 1; renderFretes(false); return; }
+  filtrarFretes();
 }
 
 // ── Pedidos a lançar frete ──
@@ -15404,6 +15458,8 @@ function fretesPendentesDeLancar(){
 function renderFretesPendentes(){
   const el = document.getElementById('fretes-pendentes'); if(!el) return;
   FRETE_PEND_LISTA = fretesPendentesDeLancar();
+  const btnSub = document.getElementById('fretes-subaba-lancar');
+  if(btnSub) btnSub.textContent = '📦 A lançar' + (FRETE_PEND_LISTA.length ? ` (${FRETE_PEND_LISTA.length})` : '');
   const pode = temPermissaoEditar('fretes');
   if(!FRETE_PEND_LISTA.length){
     el.innerHTML = '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:10px 14px;margin-bottom:16px;font-size:13px;color:#166534">✓ Nenhum pedido faturado sem frete lançado.</div>';
@@ -15564,68 +15620,73 @@ async function dispensarFretePendente(i){
 }
 
 function montarFiltrosFretes(){
-  const transp = new Set(), vend = new Set();
-  todosFretesCarregados().forEach(f => { if(f.transportadora) transp.add(f.transportadora); if(f.vendedor_nome) vend.add(f.vendedor_nome); });
-  const preencher = (id, valores, rotulo) => {
-    const sel = document.getElementById(id); if(!sel) return;
-    const atual = sel.value;
-    sel.innerHTML = `<option value="">${rotulo}</option>` + Array.from(valores).sort((a,b)=>a.localeCompare(b,'pt-BR')).map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
-    if(atual && valores.has(atual)) sel.value = atual;
-  };
-  preencher('fretes-f-transp', transp, 'Todas');
-  preencher('fretes-f-vend', vend, 'Todos');
+  const transp = new Set();
+  (TRANSPORTADORAS_DB||[]).forEach(t => { if(t.nome) transp.add(String(t.nome).toUpperCase()); });
+  todosFretesCarregados().forEach(f => { if(f.transportadora) transp.add(f.transportadora); });
+  const sel = document.getElementById('fretes-f-transp'); if(!sel) return;
+  const atual = sel.value;
+  sel.innerHTML = '<option value="">Todas</option>' + Array.from(transp).sort((a,b)=>a.localeCompare(b,'pt-BR')).map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+  if(atual && transp.has(atual)) sel.value = atual;
 }
 
-function trocarSubabaFretes(sub){
+function trocarSubabaFretes(sub, manterPagina){
   FRETE_SUBABA = sub;
+  if(!manterPagina) FRETES_PAGINA = 1;
+  ['lancar','envios','reversos'].forEach(k => {
+    const b = document.getElementById('fretes-subaba-'+k);
+    if(b) b.className = 'btn btn-sm ' + (k === sub ? 'btn-secondary' : 'btn-outline');
+  });
+  const pend = document.getElementById('fretes-pendentes'); if(pend) pend.style.display = sub === 'lancar' ? '' : 'none';
+  const lista = document.getElementById('fretes-lista-wrap'); if(lista) lista.style.display = sub === 'lancar' ? 'none' : '';
+  if(sub === 'lancar') return;
   const env = sub === 'envios';
-  const b1 = document.getElementById('fretes-subaba-envios'), b2 = document.getElementById('fretes-subaba-reversos');
-  if(b1) b1.className = 'btn btn-sm ' + (env ? 'btn-secondary' : 'btn-outline');
-  if(b2) b2.className = 'btn btn-sm ' + (env ? 'btn-outline' : 'btn-secondary');
   const tw = document.getElementById('fretes-f-transp-wrap'); if(tw) tw.style.display = env ? '' : 'none';
   const sit = document.getElementById('fretes-f-situacao');
   if(sit){
     const atual = sit.value;
     sit.innerHTML = env
-      ? '<option value="">Todas</option><option value="aberto">Em aberto (últimos 3 meses)</option><option value="atrasado">Atrasadas (últimos 3 meses)</option><option value="docs">CT-e ou boleto pendente</option><option value="final">Finalizadas</option>'
-      : '<option value="">Todas</option><option value="aberto">Aguardando postagem (últimos 3 meses)</option><option value="postado">Postados / a caminho</option><option value="final">Finalizados</option>';
+      ? '<option value="">Todas</option><option value="aberto">Em aberto</option><option value="atrasado">Atrasadas</option><option value="docs">CT-e ou boleto pendente</option><option value="final">Finalizadas</option>'
+      : '<option value="">Todas</option><option value="aberto">Aguardando postagem</option><option value="postado">Postados / a caminho</option><option value="final">Finalizados</option>';
     if([...sit.options].some(o => o.value === atual)) sit.value = atual;
   }
   renderTabelaFretes();
 }
 
 function listaFiltradaFretes(){
-  const env = FRETE_SUBABA === 'envios';
+  const env = FRETE_SUBABA !== 'reversos';
   const sit = document.getElementById('fretes-f-situacao')?.value || '';
-  const busca = normTxtFrete(document.getElementById('fretes-busca')?.value || '');
-  const fT = document.getElementById('fretes-f-transp')?.value || '';
-  const fV = document.getElementById('fretes-f-vend')?.value || '';
-  // "Em aberto" e "Atrasadas" olham os últimos 3 meses, não só o mês escolhido
-  const base = (sit === 'aberto' || sit === 'atrasado') ? todosFretesCarregados() : (FRETES_CACHE[FRETES_MES]||[]).filter(f => !f.dispensado);
-  return base.filter(f => {
+  const fCli = normTxtFrete(document.getElementById('fretes-f-cliente')?.value || '');
+  const fNum = String(document.getElementById('fretes-f-numero')?.value || '').trim().toLowerCase().replace(/[^0-9a-z]/g,'');
+  const fT = env ? (document.getElementById('fretes-f-transp')?.value || '') : '';
+  return fretesDoPeriodo().filter(f => {
     if(env !== (f.tipo !== 'reverso')) return false;
-    if(env && fT && f.transportadora !== fT) return false;
-    if(fV && f.vendedor_nome !== fV) return false;
+    if(fT && f.transportadora !== fT) return false;
+    if(fCli && !normTxtFrete(f.cliente_nome).includes(fCli)) return false;
+    if(fNum){
+      const nums = [f.nf_numero, f.pedido_numero, f.codigo_autorizacao, f.rastreio].map(x => String(x||'').toLowerCase().replace(/[^0-9a-z]/g,''));
+      if(!nums.some(x => x && x.includes(fNum))) return false;
+    }
     if(sit === 'aberto' && FRETE_STATUS_FINAIS.includes(f.status)) return false;
     if(sit === 'atrasado' && !freteAtrasado(f)) return false;
     if(sit === 'docs' && !(Number(f.valor_frete) > 0 && (!f.cte_recebido || !f.boleto_recebido))) return false;
     if(sit === 'final' && !FRETE_STATUS_FINAIS.includes(f.status)) return false;
     if(sit === 'postado' && f.status !== 'postado') return false;
-    if(busca){
-      const alvo = normTxtFrete([f.nf_numero, f.pedido_numero, f.cliente_nome, f.cliente_cidade, f.rastreio, f.codigo_autorizacao, f.transportadora, f.vendedor_nome, f.obs].join(' '));
-      if(!alvo.includes(busca)) return false;
-    }
     return true;
-  }).sort((a,b) => String(a.data).localeCompare(String(b.data)) || String(a.nf_numero).localeCompare(String(b.nf_numero), 'pt-BR', {numeric:true}));
+  }).sort((a,b) => String(b.data).localeCompare(String(a.data)) || String(b.nf_numero).localeCompare(String(a.nf_numero), 'pt-BR', {numeric:true}));
 }
 
 function renderTabelaFretes(){
   const el = document.getElementById('fretes-tabela'); if(!el) return;
-  const lista = listaFiltradaFretes();
+  if(FRETE_SUBABA === 'lancar') return;
+  const todos = listaFiltradaFretes();
+  const totPags = Math.max(1, Math.ceil(todos.length / POR_PAGINA));
+  if(FRETES_PAGINA > totPags) FRETES_PAGINA = totPags;
+  const lista = todos.slice((FRETES_PAGINA-1)*POR_PAGINA, FRETES_PAGINA*POR_PAGINA);
+  renderPaginacao('fretes-pag', todos.length, FRETES_PAGINA, n=>{ FRETES_PAGINA=n; renderTabelaFretes(); });
   const pode = temPermissaoEditar('fretes');
   const hoje = hojeISO();
   if(!lista.length){
-    el.innerHTML = `<div style="text-align:center;color:var(--muted);padding:28px">Nenhum ${FRETE_SUBABA==='envios'?'frete':'reverso'} encontrado.</div>`;
+    el.innerHTML = `<div style="text-align:center;color:var(--muted);padding:28px">Nenhum ${FRETE_SUBABA==='envios'?'frete':'reverso'} encontrado ${esc(nomePeriodoFretes())} com esses filtros.</div>`;
     return;
   }
   const chk = (f, campo) => {
@@ -15634,8 +15695,8 @@ function renderTabelaFretes(){
   };
   const btnEd = f => pode ? `<div style="display:flex;gap:4px">${f.tipo!=='reverso' && !FRETE_STATUS_FINAIS.includes(f.status) ? `<button class="btn btn-success btn-sm" title="Marcar como entregue hoje" onclick="marcarEntregueFrete('${f.mes}','${f.id}')">✓</button>` : ''}<button class="btn btn-outline btn-sm" onclick="abrirModalFrete('${f.mes}/${f.id}')">✏️</button></div>` : '';
   if(FRETE_SUBABA === 'envios'){
-    const totNF = lista.reduce((s,f) => s + (Number(f.valor_nf)||0), 0);
-    const totFr = lista.reduce((s,f) => s + (Number(f.valor_frete)||0), 0);
+    const totNF = todos.reduce((s,f) => s + (Number(f.valor_nf)||0), 0);
+    const totFr = todos.reduce((s,f) => s + (Number(f.valor_frete)||0), 0);
     el.innerHTML = `<table>
       <thead><tr><th>Data NF</th><th>NF</th><th>Cliente</th><th>Vendedor</th><th>Transportadora</th><th style="text-align:right">Valor pedido/NF</th><th style="text-align:right">Frete</th><th style="text-align:right">% do pedido</th><th>Previsão</th><th>Status</th><th>Entregue em</th><th style="text-align:center">CT-e</th><th style="text-align:center">Boleto</th><th></th></tr></thead>
       <tbody>${lista.map(f => {
@@ -15657,7 +15718,7 @@ function renderTabelaFretes(){
           <td style="text-align:center">${Number(f.valor_frete)>0 ? chk(f,'boleto_recebido') : ''}</td>
           <td>${btnEd(f)}</td></tr>`;
       }).join('')}</tbody>
-      <tfoot><tr style="font-weight:700;border-top:2px solid var(--border)"><td colspan="5">${lista.length} envio(s)</td><td style="text-align:right;white-space:nowrap">${fmtMoeda(totNF)}</td><td style="text-align:right;white-space:nowrap">${fmtMoeda(totFr)}</td><td style="text-align:right">${totNF ? (totFr/totNF*100).toLocaleString('pt-BR',{maximumFractionDigits:2})+'%' : '—'}</td><td colspan="6"></td></tr></tfoot>
+      <tfoot><tr style="font-weight:700;border-top:2px solid var(--border)"><td colspan="5">Total do filtro: ${todos.length} envio(s)</td><td style="text-align:right;white-space:nowrap">${fmtMoeda(totNF)}</td><td style="text-align:right;white-space:nowrap">${fmtMoeda(totFr)}</td><td style="text-align:right">${totNF ? (totFr/totNF*100).toLocaleString('pt-BR',{maximumFractionDigits:2})+'%' : '—'}</td><td colspan="6"></td></tr></tfoot>
     </table>`;
   } else {
     el.innerHTML = `<table>
