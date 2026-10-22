@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 22/10/2026 16:38\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 22/10/2026 16:38</span>
+            onclick="alert('Versão desta build: 22/10/2026 16:47\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 22/10/2026 16:47</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -1310,6 +1310,15 @@ tbody td{padding:11px 16px;font-size:14px}
         #tab-fretes .fr-pct-box{flex:0 0 90px;display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted);padding-bottom:6px}
         #tab-fretes .fr-pct-box strong{font-size:16px}
         #tab-fretes .fr-pend-btns{display:flex;gap:6px;flex:0 0 auto}
+        /* Computador: colunas de largura fixa, tudo alinhado de uma linha para outra */
+        @media (min-width:701px){
+          #tab-fretes #fretes-tabela .fr-topo{display:grid;grid-template-columns:86px 130px minmax(0,1fr) 125px 150px 200px 14px;gap:0 14px}
+          #tab-fretes #fretes-tabela .fr-c-st{justify-content:flex-start}
+          #tab-fretes #fretes-tabela .fr-seta{margin-left:0}
+          #tab-fretes #fretes-tabela .fr-topo.rev{grid-template-columns:86px 150px minmax(0,1fr) 170px 200px 14px}
+          #tab-fretes .fr-c-cli strong{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+          #tab-fretes .fr-pend .fr-topo{display:grid;grid-template-columns:150px minmax(0,1fr) 140px;gap:0 14px}
+        }
         @media (max-width:700px){
           #tab-fretes .fr-c-data{flex-basis:auto}
           #tab-fretes .fr-c-cli{flex-basis:100%;order:-1}
@@ -15801,7 +15810,7 @@ function linhaReversoFrete(f){
   const k = f.mes+'/'+f.id;
   const vencido = f.status === 'aguardando' && f.prazo_postagem && f.prazo_postagem < hojeISO();
   return `<div class="fr-linha${FRETE_ABERTAS.has(k)?' aberta':''}" data-k="${k}">
-    <div class="fr-topo" onclick="alternarLinhaFrete('${k}')">
+    <div class="fr-topo rev" onclick="alternarLinhaFrete('${k}')">
       <div class="fr-c-data">${fmtData(f.data)}</div>
       <div class="fr-c-nf"><strong style="font-family:monospace">${esc(f.codigo_autorizacao||'—')}</strong><span>${esc(f.motivo||'')}</span></div>
       <div class="fr-c-cli"><strong>${esc(f.cliente_nome)}</strong><span>${esc(f.vendedor_nome||'')}</span></div>
