@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 22/10/2026 16:20\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 22/10/2026 16:20</span>
+            onclick="alert('Versão desta build: 22/10/2026 16:38\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 22/10/2026 16:38</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -1278,6 +1278,45 @@ tbody td{padding:11px 16px;font-size:14px}
     <!-- FRETES E ENTREGAS — substitui a planilha de controle de transportadoras.
          Só admin e quem tem "Controla fretes e entregas" no cadastro vê esta tela. -->
     <div id="tab-fretes" style="display:none">
+      <style>
+        #tab-fretes .fr-linha{background:var(--card);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden}
+        #tab-fretes .fr-topo{display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;padding:10px 14px;cursor:pointer}
+        #tab-fretes .fr-topo:hover{background:var(--bg)}
+        #tab-fretes .fr-topo > div{min-width:0}
+        #tab-fretes .fr-topo span{display:block;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis}
+        #tab-fretes .fr-c-data{flex:0 0 82px;font-size:13px;color:var(--muted)}
+        #tab-fretes .fr-c-nf{flex:0 0 120px}
+        #tab-fretes .fr-c-cli{flex:1 1 200px}
+        #tab-fretes .fr-c-fr{flex:0 0 120px;text-align:right}
+        #tab-fretes .fr-c-prev{flex:0 0 135px;font-size:13px}
+        #tab-fretes .fr-c-st{flex:0 0 auto;display:flex;gap:4px;flex-wrap:wrap}
+        #tab-fretes .fr-seta{flex:0 0 auto;margin-left:auto;color:var(--muted);transition:transform .15s}
+        #tab-fretes .fr-linha.aberta .fr-seta{transform:rotate(180deg)}
+        #tab-fretes .fr-det{display:none;border-top:1px solid var(--border);padding:12px 14px;background:var(--bg)}
+        #tab-fretes .fr-linha.aberta .fr-det{display:block}
+        #tab-fretes .fr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px 18px}
+        #tab-fretes .fr-rot{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+        #tab-fretes .fr-val{font-size:14px;margin-top:2px;word-break:break-word}
+        #tab-fretes .fr-obs{margin-top:10px;padding:6px 10px;background:#fffbeb;border-left:3px solid #fde68a;border-radius:0 4px 4px 0;font-size:13px}
+        #tab-fretes .fr-acoes{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+        #tab-fretes .fr-resumo{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-bottom:10px}
+        #tab-fretes .fr-resumo strong{color:var(--text)}
+        #tab-fretes .fr-vazio{text-align:center;color:var(--muted);padding:28px;background:var(--card);border:1px solid var(--border);border-radius:10px}
+        #tab-fretes .fr-pend{border-left:3px solid #f59e0b}
+        #tab-fretes .fr-pend-campos{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;padding:10px 14px 12px;border-top:1px solid var(--border);background:var(--bg)}
+        #tab-fretes .fr-pend-campos label{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted);flex:1 1 110px;min-width:0}
+        #tab-fretes .fr-pend-campos input{width:100%;box-sizing:border-box;padding:7px 9px;font-size:14px}
+        #tab-fretes .fr-sug{font-size:11px;color:#166534;cursor:pointer;text-decoration:underline}
+        #tab-fretes .fr-pct-box{flex:0 0 90px;display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted);padding-bottom:6px}
+        #tab-fretes .fr-pct-box strong{font-size:16px}
+        #tab-fretes .fr-pend-btns{display:flex;gap:6px;flex:0 0 auto}
+        @media (max-width:700px){
+          #tab-fretes .fr-c-data{flex-basis:auto}
+          #tab-fretes .fr-c-cli{flex-basis:100%;order:-1}
+          #tab-fretes .fr-c-fr{text-align:left}
+          #tab-fretes .fr-grid{grid-template-columns:1fr 1fr}
+        }
+      </style>
       <div class="section-header">
         <div class="section-title">🚚 Fretes e Entregas</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -1314,7 +1353,7 @@ tbody td{padding:11px 16px;font-size:14px}
             <select class="search-input" id="fretes-f-situacao" style="width:auto" onchange="filtrarFretes()"></select></div>
           <button class="btn btn-outline btn-sm" onclick="limparFiltrosFretes()">Limpar</button>
         </div>
-        <div class="table-wrap" style="overflow-x:auto"><div id="fretes-tabela"></div></div>
+        <div id="fretes-tabela"></div>
         <div class="pagination" id="fretes-pag"></div>
       </div>
     </div>
@@ -15378,7 +15417,7 @@ function renderFretesCards(){
   const docs = doPeriodo.filter(f => Number(f.valor_frete) > 0 && (!f.cte_recebido || !f.boleto_recebido)).length;
   const reversos = recentes.filter(f => f.tipo === 'reverso' && f.status === 'aguardando').length;
   el.innerHTML = `
-    <div class="dash-card"><div class="dash-card-label">Fretes ${esc(nomePeriodoFretes())}</div><div class="dash-card-value">${fmtMoeda(totFrete)}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">${doPeriodo.length} envio(s) · ${totNF ? (totFrete/totNF*100).toLocaleString('pt-BR',{maximumFractionDigits:2})+'% do valor dos pedidos' : '—'}</div></div>
+    <div class="dash-card"><div class="dash-card-label">Fretes ${esc(nomePeriodoFretes())}</div><div class="dash-card-value">${fmtMoeda(totFrete)}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">${doPeriodo.length} envio(s)${usuarioLogado?.admin && totNF ? ' · '+(totFrete/totNF*100).toLocaleString('pt-BR',{maximumFractionDigits:2})+'% do valor dos pedidos' : ''}</div></div>
     <div class="dash-card" style="cursor:pointer" onclick="filtrarFretesSituacao('envios','atrasado')"><div class="dash-card-label">Entregas atrasadas</div><div class="dash-card-value ${atrasadas?'accent':''}">${atrasadas}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">previsão vencida, últimos 3 meses</div></div>
     <div class="dash-card" style="cursor:pointer" onclick="filtrarFretesSituacao('envios','docs')"><div class="dash-card-label">CT-e / boleto pendente</div><div class="dash-card-value" style="color:#b45309">${docs}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">${esc(nomePeriodoFretes())}</div></div>
     <div class="dash-card" style="cursor:pointer" onclick="filtrarFretesSituacao('reversos','aberto')"><div class="dash-card-label">Reversos aguardando postagem</div><div class="dash-card-value">${reversos}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">últimos 3 meses</div></div>`;
@@ -15465,31 +15504,28 @@ function renderFretesPendentes(){
     el.innerHTML = '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:10px 14px;margin-bottom:16px;font-size:13px;color:#166534">✓ Nenhum pedido faturado sem frete lançado.</div>';
     return;
   }
-  const inp = 'class="search-input" style="width:100%;box-sizing:border-box;padding:6px 8px"';
+  const dis = pode ? '' : 'disabled';
   el.innerHTML = `
-    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 14px;margin-bottom:16px">
-      <div style="font-weight:600;margin-bottom:4px">📦 Pedidos faturados sem frete lançado (${FRETE_PEND_LISTA.length})</div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Digite a NF, a transportadora e o valor do frete direto na linha e clique em 💾. Para mais detalhes (CT-e, rastreio, peso), use ✏️.</div>
-      <div class="table-wrap" style="overflow-x:auto"><table>
-        <thead><tr><th>Pedido</th><th>Cliente</th><th style="text-align:right">Valor do pedido</th>
-          <th style="min-width:90px">Nº NF</th><th style="min-width:115px">Transportadora</th><th style="min-width:85px">Frete (R$)</th><th style="text-align:right">%</th><th style="min-width:120px">Previsão</th><th></th></tr></thead>
-        <tbody>${FRETE_PEND_LISTA.map((n,i) => `<tr>
-          <td style="white-space:nowrap"><strong>#${esc(n.pedido_numero)}</strong><div style="font-size:11px;color:var(--muted)">fat. ${fmtData(n.data)}</div></td>
-          <td>${esc(n.cliente_nome)}<div style="font-size:11px;color:var(--muted)">${esc(n.cliente_cidade)}${n.cliente_uf?'/'+esc(n.cliente_uf):''}${n.vendedor_nome?' · '+esc(n.vendedor_nome):''}</div></td>
-          <td style="text-align:right;white-space:nowrap" id="fp-tot-${i}">${n.total ? fmtMoeda(n.total) : '—'}</td>
-          <td><input ${inp} id="fp-nf-${i}" value="${esc(n.nf_numero)}" inputmode="numeric" ${pode?'':'disabled'}></td>
-          <td><input class="search-input" id="fp-tr-${i}" value="${esc(n.transportadora)}" list="frete-transportadoras-lista" style="width:100%;box-sizing:border-box;padding:6px 8px;text-transform:uppercase" oninput="atualizarPctPendente(${i})" ${pode?'':'disabled'}></td>
-          <td><input ${inp} id="fp-fr-${i}" inputmode="decimal" oninput="atualizarPctPendente(${i})" onkeydown="if(event.key==='Enter'){event.preventDefault();salvarFretePendente(${i})}" ${pode?'':'disabled'}>
-            <div id="fp-sug-${i}" style="display:none;font-size:11px;color:#166534;cursor:pointer;text-decoration:underline;margin-top:2px;white-space:nowrap" title="Usar o valor da tabela Ágile" onclick="usarSugestaoPendente(${i})"></div></td>
-          <td style="text-align:right;white-space:nowrap;font-weight:600" id="fp-pct-${i}">—</td>
-          <td><input type="date" ${inp} id="fp-pv-${i}" ${pode?'':'disabled'}></td>
-          <td>${pode ? `<div style="display:flex;gap:3px">
-            <button class="btn btn-primary btn-sm" style="padding:4px 7px" title="Salvar frete" onclick="salvarFretePendente(${i})">💾</button>
-            <button class="btn btn-outline btn-sm" style="padding:4px 7px" title="Abrir formulário completo" onclick="lancarFretePendenteCompleto(${i})">✏️</button>
-            <button class="btn btn-outline btn-sm" style="padding:4px 7px" title="Sem frete a controlar (ex.: cliente retira ou paga direto à transportadora)" onclick="dispensarFretePendente(${i})">✕</button></div>` : ''}</td>
-        </tr>`).join('')}</tbody>
-      </table></div>
-    </div>`;
+    <div style="font-size:13px;color:var(--muted);margin-bottom:10px"><strong style="color:var(--text)">${FRETE_PEND_LISTA.length} pedido(s) faturado(s) sem frete lançado.</strong> Digite a NF, a transportadora e o valor do frete e clique em 💾 Salvar (ou Enter). Para CT-e, rastreio e peso, use ✏️.</div>
+    ${FRETE_PEND_LISTA.map((n,i) => `<div class="fr-linha aberta fr-pend">
+      <div class="fr-topo" style="cursor:default">
+        <div class="fr-c-nf"><strong>Pedido #${esc(n.pedido_numero)}</strong><span>faturado ${fmtData(n.data)}</span></div>
+        <div class="fr-c-cli"><strong>${esc(n.cliente_nome)}</strong><span>${esc(n.cliente_cidade)}${n.cliente_uf?'/'+esc(n.cliente_uf):''}${n.vendedor_nome?' · '+esc(n.vendedor_nome):''}</span></div>
+        <div class="fr-c-fr"><strong id="fp-tot-${i}">${n.total ? fmtMoeda(n.total) : '—'}</strong><span>valor do pedido</span></div>
+      </div>
+      <div class="fr-pend-campos">
+        <label>Nº da NF<input class="search-input" id="fp-nf-${i}" value="${esc(n.nf_numero)}" inputmode="numeric" ${dis}></label>
+        <label style="flex:2 1 160px">Transportadora<input class="search-input" id="fp-tr-${i}" value="${esc(n.transportadora)}" list="frete-transportadoras-lista" style="text-transform:uppercase" oninput="atualizarPctPendente(${i})" ${dis}></label>
+        <label>Frete (R$)<input class="search-input" id="fp-fr-${i}" inputmode="decimal" oninput="atualizarPctPendente(${i})" onkeydown="if(event.key==='Enter'){event.preventDefault();salvarFretePendente(${i})}" ${dis}>
+          <span id="fp-sug-${i}" class="fr-sug" style="display:none" title="Usar o valor da tabela Ágile" onclick="usarSugestaoPendente(${i})"></span></label>
+        <div class="fr-pct-box"><span>% do pedido</span><strong id="fp-pct-${i}">—</strong></div>
+        <label>Previsão de entrega<input type="date" class="search-input" id="fp-pv-${i}" ${dis}></label>
+        ${pode ? `<div class="fr-pend-btns">
+          <button class="btn btn-primary btn-sm" onclick="salvarFretePendente(${i})">💾 Salvar</button>
+          <button class="btn btn-outline btn-sm" title="Abrir formulário completo" onclick="lancarFretePendenteCompleto(${i})">✏️</button>
+          <button class="btn btn-outline btn-sm" title="Sem frete a controlar (ex.: cliente retira ou paga direto à transportadora)" onclick="dispensarFretePendente(${i})">Sem frete</button></div>` : ''}
+      </div>
+    </div>`).join('')}`;
   preencherListaTransportadorasFrete();
   // Pedidos que vieram só da coleta não têm vendedor/valor no resumo: busca 2 campos de cada
   FRETE_PEND_LISTA.forEach((n,i) => { if(n.ler_pedido) completarPendenteDoPedido(n, i); });
@@ -15683,63 +15719,118 @@ function renderTabelaFretes(){
   if(FRETES_PAGINA > totPags) FRETES_PAGINA = totPags;
   const lista = todos.slice((FRETES_PAGINA-1)*POR_PAGINA, FRETES_PAGINA*POR_PAGINA);
   renderPaginacao('fretes-pag', todos.length, FRETES_PAGINA, n=>{ FRETES_PAGINA=n; renderTabelaFretes(); });
-  const pode = temPermissaoEditar('fretes');
-  const hoje = hojeISO();
+  const env = FRETE_SUBABA === 'envios';
   if(!lista.length){
-    el.innerHTML = `<div style="text-align:center;color:var(--muted);padding:28px">Nenhum ${FRETE_SUBABA==='envios'?'frete':'reverso'} encontrado ${esc(nomePeriodoFretes())} com esses filtros.</div>`;
+    el.innerHTML = `<div class="fr-vazio">Nenhum ${env?'frete':'reverso'} encontrado ${esc(nomePeriodoFretes())} com esses filtros.</div>`;
     return;
   }
-  const chk = (f, campo) => {
-    const ok = !!f[campo];
-    return `<span ${pode?`style="cursor:pointer" onclick="alternarDocFrete('${f.mes}','${f.id}','${campo}')" title="Clique para ${ok?'desmarcar':'marcar como recebido'}"`:''}>${ok ? '✅' : '<span style="color:#d97706">⏳</span>'}</span>`;
-  };
-  const btnEd = f => pode ? `<div style="display:flex;gap:4px">${f.tipo!=='reverso' && !FRETE_STATUS_FINAIS.includes(f.status) ? `<button class="btn btn-success btn-sm" title="Marcar como entregue hoje" onclick="marcarEntregueFrete('${f.mes}','${f.id}')">✓</button>` : ''}<button class="btn btn-outline btn-sm" onclick="abrirModalFrete('${f.mes}/${f.id}')">✏️</button></div>` : '';
-  if(FRETE_SUBABA === 'envios'){
+  let resumo = '';
+  if(env){
+    // Soma do valor dos pedidos (e o % médio, que permitiria deduzir essa soma) só para admin
     const totNF = todos.reduce((s,f) => s + (Number(f.valor_nf)||0), 0);
     const totFr = todos.reduce((s,f) => s + (Number(f.valor_frete)||0), 0);
-    el.innerHTML = `<table>
-      <thead><tr><th>Data NF</th><th>NF</th><th>Cliente</th><th>Vendedor</th><th>Transportadora</th><th style="text-align:right">Valor pedido/NF</th><th style="text-align:right">Frete</th><th style="text-align:right">% do pedido</th><th>Previsão</th><th>Status</th><th>Entregue em</th><th style="text-align:center">CT-e</th><th style="text-align:center">Boleto</th><th></th></tr></thead>
-      <tbody>${lista.map(f => {
-        const pct = Number(f.valor_nf) > 0 ? (Number(f.valor_frete)||0)/Number(f.valor_nf)*100 : 0;
-        const atras = freteAtrasado(f);
-        return `<tr>
-          <td style="white-space:nowrap">${fmtData(f.data)}</td>
-          <td><strong>${esc(f.nf_numero||'—')}</strong>${f.pedido_numero?`<div style="font-size:11px;color:var(--muted)">ped. #${esc(f.pedido_numero)}</div>`:''}</td>
-          <td>${esc(f.cliente_nome)}${f.cliente_cidade?`<div style="font-size:11px;color:var(--muted)">${esc(f.cliente_cidade)}${f.cliente_uf?'/'+esc(f.cliente_uf):''}</div>`:''}</td>
-          <td>${esc(f.vendedor_nome)}</td>
-          <td>${esc(f.transportadora)}${f.rastreio?`<div style="font-size:11px;color:var(--muted)">📍 ${esc(f.rastreio)}</div>`:''}</td>
-          <td style="text-align:right;white-space:nowrap">${fmtMoeda(f.valor_nf)}</td>
-          <td style="text-align:right;white-space:nowrap"><strong>${fmtMoeda(f.valor_frete)}</strong></td>
-          <td style="text-align:right">${pct ? pct.toLocaleString('pt-BR',{maximumFractionDigits:2})+'%' : '—'}</td>
-          <td style="white-space:nowrap;${atras?'color:#b91c1c;font-weight:700':''}">${f.previsao ? fmtData(f.previsao) : '—'}${atras?' ⚠️':''}</td>
-          <td>${badgeStatusFrete('envio', f.status)}${f.obs?`<div style="font-size:11px;color:var(--muted);max-width:180px">${esc(f.obs)}</div>`:''}</td>
-          <td style="white-space:nowrap">${f.data_entrega ? fmtData(f.data_entrega) : ''}</td>
-          <td style="text-align:center">${Number(f.valor_frete)>0 ? chk(f,'cte_recebido') : ''}</td>
-          <td style="text-align:center">${Number(f.valor_frete)>0 ? chk(f,'boleto_recebido') : ''}</td>
-          <td>${btnEd(f)}</td></tr>`;
-      }).join('')}</tbody>
-      <tfoot><tr style="font-weight:700;border-top:2px solid var(--border)"><td colspan="5">Total do filtro: ${todos.length} envio(s)</td><td style="text-align:right;white-space:nowrap">${fmtMoeda(totNF)}</td><td style="text-align:right;white-space:nowrap">${fmtMoeda(totFr)}</td><td style="text-align:right">${totNF ? (totFr/totNF*100).toLocaleString('pt-BR',{maximumFractionDigits:2})+'%' : '—'}</td><td colspan="6"></td></tr></tfoot>
-    </table>`;
+    resumo = `<div class="fr-resumo"><span><strong>${todos.length}</strong> envio(s)</span><span>Frete: <strong>${fmtMoeda(totFr)}</strong></span>
+      ${usuarioLogado?.admin ? `<span>Pedidos: <strong>${fmtMoeda(totNF)}</strong></span>${totNF ? `<span>Média: <strong>${(totFr/totNF*100).toLocaleString('pt-BR',{maximumFractionDigits:2})}%</strong></span>` : ''}` : ''}</div>`;
   } else {
-    el.innerHTML = `<table>
-      <thead><tr><th>Emitido em</th><th>Código de autorização</th><th>Cliente</th><th>Vendedor</th><th>Motivo</th><th>Postar até</th><th>Rastreio</th><th>Status</th><th>Recebido em</th><th></th></tr></thead>
-      <tbody>${lista.map(f => {
-        const vencido = f.status === 'aguardando' && f.prazo_postagem && f.prazo_postagem < hoje;
-        return `<tr>
-          <td style="white-space:nowrap">${fmtData(f.data)}</td>
-          <td><strong style="font-family:monospace;font-size:14px">${esc(f.codigo_autorizacao||'—')}</strong>
-            ${f.codigo_autorizacao?`<button class="btn btn-outline btn-sm" style="padding:1px 6px;margin-left:4px" title="Copiar código" onclick="copiarTextoFrete('${esc(f.codigo_autorizacao)}')">📋</button>`:''}</td>
-          <td>${esc(f.cliente_nome)}${f.cliente_cidade?`<div style="font-size:11px;color:var(--muted)">${esc(f.cliente_cidade)}${f.cliente_uf?'/'+esc(f.cliente_uf):''}</div>`:''}</td>
-          <td>${esc(f.vendedor_nome)}</td>
-          <td>${esc(f.motivo)}${f.nf_numero?`<div style="font-size:11px;color:var(--muted)">NF ${esc(f.nf_numero)}</div>`:''}</td>
-          <td style="white-space:nowrap;${vencido?'color:#b91c1c;font-weight:700':''}">${f.prazo_postagem ? fmtData(f.prazo_postagem) : '—'}${vencido?' ⚠️ vencido':''}</td>
-          <td>${esc(f.rastreio)}</td>
-          <td>${badgeStatusFrete('reverso', f.status)}${f.obs?`<div style="font-size:11px;color:var(--muted);max-width:200px">${esc(f.obs)}</div>`:''}</td>
-          <td style="white-space:nowrap">${f.data_entrega ? fmtData(f.data_entrega) : ''}</td>
-          <td>${btnEd(f)}</td></tr>`;
-      }).join('')}</tbody>
-    </table>`;
+    resumo = `<div class="fr-resumo"><span><strong>${todos.length}</strong> reverso(s)</span></div>`;
   }
+  el.innerHTML = resumo + lista.map(f => env ? linhaEnvioFrete(f) : linhaReversoFrete(f)).join('');
+}
+
+const FRETE_ABERTAS = new Set();   // linhas abertas continuam abertas depois de salvar algo
+function alternarLinhaFrete(chave){
+  const el = document.querySelector(`.fr-linha[data-k="${chave}"]`); if(!el) return;
+  el.classList.toggle('aberta');
+  if(el.classList.contains('aberta')) FRETE_ABERTAS.add(chave); else FRETE_ABERTAS.delete(chave);
+}
+function campoFrete(rotulo, valor){
+  return `<div class="fr-campo"><div class="fr-rot">${rotulo}</div><div class="fr-val">${valor === '' || valor == null ? '—' : valor}</div></div>`;
+}
+function linhaEnvioFrete(f){
+  const pode = temPermissaoEditar('fretes');
+  const k = f.mes+'/'+f.id;
+  const pct = Number(f.valor_nf) > 0 ? (Number(f.valor_frete)||0)/Number(f.valor_nf)*100 : 0;
+  const pctTxt = pct ? pct.toLocaleString('pt-BR',{maximumFractionDigits:2})+'%' : '—';
+  const atras = freteAtrasado(f);
+  const temFrete = Number(f.valor_frete) > 0;
+  const docPend = temFrete && (!f.cte_recebido || !f.boleto_recebido);
+  const docBtn = (campo, rot) => {
+    const ok = !!f[campo];
+    return `<button class="btn btn-sm ${ok?'btn-success':'btn-outline'}" ${pode?'':'disabled'} onclick="event.stopPropagation();alternarDocFrete('${f.mes}','${f.id}','${campo}')">${ok?'✅':'⏳'} ${rot} ${ok?'recebido':'pendente'}</button>`;
+  };
+  return `<div class="fr-linha${FRETE_ABERTAS.has(k)?' aberta':''}" data-k="${k}">
+    <div class="fr-topo" onclick="alternarLinhaFrete('${k}')">
+      <div class="fr-c-data">${fmtData(f.data)}</div>
+      <div class="fr-c-nf"><strong>NF ${esc(f.nf_numero||'—')}</strong>${f.pedido_numero?`<span>ped. #${esc(f.pedido_numero)}</span>`:''}</div>
+      <div class="fr-c-cli"><strong>${esc(f.cliente_nome)}</strong><span>${esc(f.transportadora)}${f.cliente_cidade?' · '+esc(f.cliente_cidade)+(f.cliente_uf?'/'+esc(f.cliente_uf):''):''}</span></div>
+      <div class="fr-c-fr"><strong>${fmtMoeda(f.valor_frete)}</strong><span>${pctTxt} do pedido</span></div>
+      <div class="fr-c-prev" style="${atras?'color:#b91c1c;font-weight:700':''}">${f.previsao ? 'Prev. '+fmtData(f.previsao) : 'Sem previsão'}${atras?' ⚠️':''}</div>
+      <div class="fr-c-st">${badgeStatusFrete('envio', f.status)}${docPend?'<span class="badge" style="background:#fef3c7;color:#92400e;font-size:10px">CT-e/boleto</span>':''}</div>
+      <div class="fr-seta">▾</div>
+    </div>
+    <div class="fr-det">
+      <div class="fr-grid">
+        ${campoFrete('Data da NF', fmtData(f.data))}
+        ${campoFrete('Nº da NF', esc(f.nf_numero))}
+        ${campoFrete('Pedido', f.pedido_numero ? '#'+esc(f.pedido_numero) : '')}
+        ${campoFrete('Cliente', esc(f.cliente_nome))}
+        ${campoFrete('Cidade', f.cliente_cidade ? esc(f.cliente_cidade)+(f.cliente_uf?'/'+esc(f.cliente_uf):'') : '')}
+        ${campoFrete('Vendedor', esc(f.vendedor_nome))}
+        ${campoFrete('Transportadora', esc(f.transportadora))}
+        ${campoFrete('Valor do pedido / NF', fmtMoeda(f.valor_nf))}
+        ${campoFrete('Valor do frete', '<strong>'+fmtMoeda(f.valor_frete)+'</strong>')}
+        ${campoFrete('% do pedido', pctTxt)}
+        ${campoFrete('Peso', f.peso_kg ? String(f.peso_kg).replace('.',',')+' kg' : '')}
+        ${campoFrete('Previsão de entrega', f.previsao ? fmtData(f.previsao)+(atras?' <span style="color:#b91c1c">(atrasada)</span>':'') : '')}
+        ${campoFrete('Status', badgeStatusFrete('envio', f.status))}
+        ${campoFrete('Entregue em', f.data_entrega ? fmtData(f.data_entrega) : '')}
+        ${campoFrete('Rastreio', esc(f.rastreio))}
+        ${campoFrete('Lançado por', esc(f.criado_por)+(f.criado_em?' · '+fmtData(f.criado_em):''))}
+      </div>
+      ${f.obs ? `<div class="fr-obs">📝 ${esc(f.obs)}</div>` : ''}
+      <div class="fr-acoes">
+        ${temFrete ? docBtn('cte_recebido','CT-e') + docBtn('boleto_recebido','Boleto') : ''}
+        ${pode && !FRETE_STATUS_FINAIS.includes(f.status) ? `<button class="btn btn-success btn-sm" onclick="marcarEntregueFrete('${f.mes}','${f.id}')">✓ Entregue hoje</button>` : ''}
+        ${pode ? `<button class="btn btn-primary btn-sm" onclick="abrirModalFrete('${k}')">✏️ Editar</button>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+function linhaReversoFrete(f){
+  const pode = temPermissaoEditar('fretes');
+  const k = f.mes+'/'+f.id;
+  const vencido = f.status === 'aguardando' && f.prazo_postagem && f.prazo_postagem < hojeISO();
+  return `<div class="fr-linha${FRETE_ABERTAS.has(k)?' aberta':''}" data-k="${k}">
+    <div class="fr-topo" onclick="alternarLinhaFrete('${k}')">
+      <div class="fr-c-data">${fmtData(f.data)}</div>
+      <div class="fr-c-nf"><strong style="font-family:monospace">${esc(f.codigo_autorizacao||'—')}</strong><span>${esc(f.motivo||'')}</span></div>
+      <div class="fr-c-cli"><strong>${esc(f.cliente_nome)}</strong><span>${esc(f.vendedor_nome||'')}</span></div>
+      <div class="fr-c-prev" style="${vencido?'color:#b91c1c;font-weight:700':''}">${f.prazo_postagem ? 'Postar até '+fmtData(f.prazo_postagem) : ''}${vencido?' ⚠️':''}</div>
+      <div class="fr-c-st">${badgeStatusFrete('reverso', f.status)}</div>
+      <div class="fr-seta">▾</div>
+    </div>
+    <div class="fr-det">
+      <div class="fr-grid">
+        ${campoFrete('Emitido em', fmtData(f.data))}
+        ${campoFrete('Código de autorização', '<strong style="font-family:monospace;font-size:15px">'+esc(f.codigo_autorizacao)+'</strong>')}
+        ${campoFrete('Cliente', esc(f.cliente_nome))}
+        ${campoFrete('Cidade', f.cliente_cidade ? esc(f.cliente_cidade)+(f.cliente_uf?'/'+esc(f.cliente_uf):'') : '')}
+        ${campoFrete('Vendedor', esc(f.vendedor_nome))}
+        ${campoFrete('Motivo', esc(f.motivo))}
+        ${campoFrete('NF de origem', esc(f.nf_numero))}
+        ${campoFrete('Postar até', f.prazo_postagem ? fmtData(f.prazo_postagem)+(vencido?' <span style="color:#b91c1c">(vencido)</span>':'') : '')}
+        ${campoFrete('Rastreio', esc(f.rastreio))}
+        ${campoFrete('Status', badgeStatusFrete('reverso', f.status))}
+        ${campoFrete('Recebido em', f.data_entrega ? fmtData(f.data_entrega) : '')}
+        ${campoFrete('Lançado por', esc(f.criado_por)+(f.criado_em?' · '+fmtData(f.criado_em):''))}
+      </div>
+      ${f.obs ? `<div class="fr-obs">📝 ${esc(f.obs)}</div>` : ''}
+      <div class="fr-acoes">
+        ${f.codigo_autorizacao ? `<button class="btn btn-outline btn-sm" onclick="copiarTextoFrete('${esc(f.codigo_autorizacao)}')">📋 Copiar código</button>` : ''}
+        ${pode ? `<button class="btn btn-primary btn-sm" onclick="abrirModalFrete('${k}')">✏️ Editar</button>` : ''}
+      </div>
+    </div>
+  </div>`;
 }
 
 function copiarTextoFrete(txt){
