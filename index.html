@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 22/10/2026 15:33\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 22/10/2026 15:33</span>
+            onclick="alert('Versão desta build: 22/10/2026 15:54\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 22/10/2026 15:54</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -2758,7 +2758,7 @@ tbody td{padding:11px 16px;font-size:14px}
     </div>
 
     <div class="form-row triple frete-so-envio">
-      <div class="form-group"><label>Valor da NF (R$)</label><input type="text" id="frete-valor-nf" inputmode="decimal" oninput="atualizarCalculoFrete()"></div>
+      <div class="form-group"><label>Valor do pedido / NF (R$)</label><input type="text" id="frete-valor-nf" inputmode="decimal" oninput="atualizarCalculoFrete()"></div>
       <div class="form-group"><label>Peso (kg)</label><input type="text" id="frete-peso" inputmode="decimal" placeholder="opcional" oninput="atualizarCalculoFrete()"></div>
       <div class="form-group"><label>Valor do frete (R$)</label><input type="text" id="frete-valor-frete" inputmode="decimal" oninput="atualizarCalculoFrete()"><div id="frete-pct" style="font-size:12px;color:var(--muted);margin-top:3px"></div></div>
     </div>
@@ -15303,6 +15303,7 @@ async function renderFretes(forcar){
       const v = snap.val() || {};
       FRETES_COLETAS = Object.keys(v).map(id => ({ id, ...v[id] }));
     }
+    await carregarFaturadosParaFrete(forcar);
     carregarTransportadoras().catch(()=>{});
   } catch(e){ toast('Erro ao carregar fretes: '+e.message,'error'); return; }
   renderFretesCards();
@@ -15331,7 +15332,7 @@ function renderFretesCards(){
   const docs = doMes.filter(f => Number(f.valor_frete) > 0 && (!f.cte_recebido || !f.boleto_recebido)).length;
   const reversos = todos.filter(f => f.tipo === 'reverso' && f.status === 'aguardando').length;
   el.innerHTML = `
-    <div class="dash-card"><div class="dash-card-label">Fretes em ${esc(nomeMesFrete(FRETES_MES))}</div><div class="dash-card-value">${fmtMoeda(totFrete)}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">${doMes.length} envio(s) · ${totNF ? (totFrete/totNF*100).toLocaleString('pt-BR',{maximumFractionDigits:2})+'% sobre as NFs' : '—'}</div></div>
+    <div class="dash-card"><div class="dash-card-label">Fretes em ${esc(nomeMesFrete(FRETES_MES))}</div><div class="dash-card-value">${fmtMoeda(totFrete)}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">${doMes.length} envio(s) · ${totNF ? (totFrete/totNF*100).toLocaleString('pt-BR',{maximumFractionDigits:2})+'% do valor dos pedidos' : '—'}</div></div>
     <div class="dash-card" style="cursor:pointer" onclick="filtrarFretesSituacao('envios','atrasado')"><div class="dash-card-label">Entregas atrasadas</div><div class="dash-card-value ${atrasadas?'accent':''}">${atrasadas}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">previsão vencida, últimos 3 meses</div></div>
     <div class="dash-card" style="cursor:pointer" onclick="filtrarFretesSituacao('envios','docs')"><div class="dash-card-label">CT-e / boleto pendente</div><div class="dash-card-value" style="color:#b45309">${docs}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">no mês</div></div>
     <div class="dash-card" style="cursor:pointer" onclick="filtrarFretesSituacao('reversos','aberto')"><div class="dash-card-label">Reversos aguardando postagem</div><div class="dash-card-value">${reversos}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">últimos 3 meses</div></div>`;
@@ -15342,76 +15343,214 @@ function filtrarFretesSituacao(subaba, sit){
   const s = document.getElementById('fretes-f-situacao'); if(s){ s.value = sit; renderTabelaFretes(); }
 }
 
-// Pedidos que saíram em romaneio (transportadora) e ainda não têm frete lançado
-function fretesPendentesDeColeta(){
-  const lim = somarMesesFrete(mesDeFrete(hojeISO()), -1) + '-01';
+// ── Pedidos a lançar frete ──
+// Fonte 1: pedidos FATURADOS desde o início do mês anterior (índice data_faturamento — só
+//          esse período é baixado, 1x por sessão; 🔄 Atualizar busca de novo).
+// Fonte 2: pedidos que saíram em romaneio de transportadora (últimas 40 coletas) — trazem
+//          NF e transportadora já preenchidas.
+// Sai da lista o pedido que já tem frete lançado (por pedido ou pela NF) nos meses carregados.
+let FRETES_FATURADOS = null;    // [{id, numero, cliente_nome, ..., total, data_faturamento, nf_numero}]
+let FRETE_PEND_LISTA = [];      // o que está na tela agora (índice = linha)
+
+async function carregarFaturadosParaFrete(forcar){
+  if(FRETES_FATURADOS && !forcar) return FRETES_FATURADOS;
+  const ini = somarMesesFrete(mesDeFrete(hojeISO()), -1) + '-01';
+  const snap = await db.ref('pedidos').orderByChild('data_faturamento').startAt(ini).once('value');
+  const v = snap.val() || {};
+  // Guarda só os campos que esta tela usa (os itens do pedido ficam de fora da memória)
+  FRETES_FATURADOS = Object.keys(v).map(id => {
+    const p = v[id] || {};
+    return { id, numero: String(p.numero||''), status: p.status, faturado: !!p.faturado,
+      cliente_nome: p.cliente_nome || '', cliente_cidade: p.cliente_cidade || '', cliente_uf: p.cliente_uf || '',
+      vendedor_nome: p.vendedor_nome || '', total: Number(p.total)||0,
+      data_faturamento: String(p.data_faturamento||'').slice(0,10), nf_numero: p.nf_numero || '',
+      tem_entrega: !!p.entrega };
+  }).filter(p => p.faturado && p.status !== 'Cancelado' && p.data_faturamento);
+  return FRETES_FATURADOS;
+}
+
+function fretesPendentesDeLancar(){
   const pids = new Set(), nfs = new Set();
   Object.values(FRETES_CACHE).flat().forEach(f => {
     if(f.pedido_id) pids.add(f.pedido_id);
     if(f.nf_numero) nfs.add(String(f.nf_numero));
   });
-  const out = [];
+  const porPedido = {};
+  (FRETES_FATURADOS||[]).forEach(p => {
+    if(p.tem_entrega || pids.has(p.id) || (p.nf_numero && nfs.has(String(p.nf_numero)))) return;
+    porPedido[p.id] = { pedido_id: p.id, pedido_numero: p.numero, cliente_nome: p.cliente_nome, cliente_cidade: p.cliente_cidade,
+      cliente_uf: p.cliente_uf, vendedor_nome: p.vendedor_nome, total: p.total, data: p.data_faturamento,
+      nf_numero: p.nf_numero, transportadora: '', coleta_id: '', origem: 'faturado' };
+  });
+  const lim = somarMesesFrete(mesDeFrete(hojeISO()), -1) + '-01';
   (FRETES_COLETAS||[]).forEach(c => {
-    if(c.tipo === 'cliente') return;
-    if(String(c.data||'') < lim) return;
+    if(c.tipo === 'cliente' || String(c.data||'') < lim) return;
     (c.notas||[]).forEach(n => {
       if(!n || pids.has(n.pedido_id) || nfs.has(String(n.nf_numero))) return;
-      out.push({ ...n, coleta_id: c.id, coleta_numero: c.numero || '', coletado_em: c.data, transportadora_nome: c.transportadora_nome || '' });
+      const ja = porPedido[n.pedido_id];
+      if(ja){ ja.nf_numero = ja.nf_numero || n.nf_numero; ja.transportadora = c.transportadora_nome || ''; ja.coleta_id = c.id; ja.origem = 'coleta'; return; }
+      porPedido[n.pedido_id] = { pedido_id: n.pedido_id, pedido_numero: n.pedido_numero, cliente_nome: n.cliente_nome,
+        cliente_cidade: n.cliente_cidade, cliente_uf: n.cliente_uf, vendedor_nome: '', total: 0,
+        data: c.data ? ymdLocal(new Date(c.data)) : hojeISO(), nf_numero: n.nf_numero,
+        transportadora: c.transportadora_nome || '', coleta_id: c.id, origem: 'coleta', ler_pedido: true };
     });
   });
-  return out.sort((a,b) => String(a.coletado_em).localeCompare(String(b.coletado_em)));
-}
-function renderFretesPendentes(){
-  const el = document.getElementById('fretes-pendentes'); if(!el) return;
-  const lista = fretesPendentesDeColeta();
-  if(!lista.length){ el.innerHTML = ''; return; }
-  el.innerHTML = `
-    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 14px;margin-bottom:16px">
-      <div style="font-weight:600;margin-bottom:8px">📦 Saíram na coleta e ainda não têm frete lançado (${lista.length})</div>
-      <div class="table-wrap" style="overflow-x:auto"><table>
-        <thead><tr><th>Coletado em</th><th>NF</th><th>Pedido</th><th>Cliente</th><th>Transportadora</th><th></th></tr></thead>
-        <tbody>${lista.map((n,i) => `<tr>
-          <td style="font-size:12px">${fmtDataHoraColeta(n.coletado_em)}</td>
-          <td><strong>${esc(n.nf_numero)}</strong></td>
-          <td>#${esc(n.pedido_numero)}</td>
-          <td>${esc(n.cliente_nome)}<div style="font-size:11px;color:var(--muted)">${esc(n.cliente_cidade)}${n.cliente_uf?'/'+esc(n.cliente_uf):''}</div></td>
-          <td>${esc(n.transportadora_nome)}</td>
-          <td style="text-align:right;white-space:nowrap">
-            <button class="btn btn-primary btn-sm" onclick="lancarFreteDaColeta(${i})">Lançar frete</button>
-            <button class="btn btn-outline btn-sm" title="Sem frete a controlar (ex.: cliente paga direto à transportadora)" onclick="dispensarFreteDaColeta(${i})">Sem frete</button>
-          </td></tr>`).join('')}</tbody>
-      </table></div>
-    </div>`;
+  return Object.values(porPedido).sort((a,b) => String(a.data).localeCompare(String(b.data)) || (Number(a.pedido_numero)||0) - (Number(b.pedido_numero)||0));
 }
 
-async function lancarFreteDaColeta(i){
-  if(!temPermissaoEditar('fretes')) return;
-  const n = fretesPendentesDeColeta()[i]; if(!n) return;
-  let ped = {};
+function renderFretesPendentes(){
+  const el = document.getElementById('fretes-pendentes'); if(!el) return;
+  FRETE_PEND_LISTA = fretesPendentesDeLancar();
+  const pode = temPermissaoEditar('fretes');
+  if(!FRETE_PEND_LISTA.length){
+    el.innerHTML = '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:10px 14px;margin-bottom:16px;font-size:13px;color:#166534">✓ Nenhum pedido faturado sem frete lançado.</div>';
+    return;
+  }
+  const inp = 'class="search-input" style="width:100%;box-sizing:border-box;padding:6px 8px"';
+  el.innerHTML = `
+    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 14px;margin-bottom:16px">
+      <div style="font-weight:600;margin-bottom:4px">📦 Pedidos faturados sem frete lançado (${FRETE_PEND_LISTA.length})</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Digite a NF, a transportadora e o valor do frete direto na linha e clique em 💾. Para mais detalhes (CT-e, rastreio, peso), use ✏️.</div>
+      <div class="table-wrap" style="overflow-x:auto"><table>
+        <thead><tr><th>Pedido</th><th>Cliente</th><th style="text-align:right">Valor do pedido</th>
+          <th style="min-width:90px">Nº NF</th><th style="min-width:115px">Transportadora</th><th style="min-width:85px">Frete (R$)</th><th style="text-align:right">%</th><th style="min-width:120px">Previsão</th><th></th></tr></thead>
+        <tbody>${FRETE_PEND_LISTA.map((n,i) => `<tr>
+          <td style="white-space:nowrap"><strong>#${esc(n.pedido_numero)}</strong><div style="font-size:11px;color:var(--muted)">fat. ${fmtData(n.data)}</div></td>
+          <td>${esc(n.cliente_nome)}<div style="font-size:11px;color:var(--muted)">${esc(n.cliente_cidade)}${n.cliente_uf?'/'+esc(n.cliente_uf):''}${n.vendedor_nome?' · '+esc(n.vendedor_nome):''}</div></td>
+          <td style="text-align:right;white-space:nowrap" id="fp-tot-${i}">${n.total ? fmtMoeda(n.total) : '—'}</td>
+          <td><input ${inp} id="fp-nf-${i}" value="${esc(n.nf_numero)}" inputmode="numeric" ${pode?'':'disabled'}></td>
+          <td><input class="search-input" id="fp-tr-${i}" value="${esc(n.transportadora)}" list="frete-transportadoras-lista" style="width:100%;box-sizing:border-box;padding:6px 8px;text-transform:uppercase" oninput="atualizarPctPendente(${i})" ${pode?'':'disabled'}></td>
+          <td><input ${inp} id="fp-fr-${i}" inputmode="decimal" oninput="atualizarPctPendente(${i})" onkeydown="if(event.key==='Enter'){event.preventDefault();salvarFretePendente(${i})}" ${pode?'':'disabled'}>
+            <div id="fp-sug-${i}" style="display:none;font-size:11px;color:#166534;cursor:pointer;text-decoration:underline;margin-top:2px;white-space:nowrap" title="Usar o valor da tabela Ágile" onclick="usarSugestaoPendente(${i})"></div></td>
+          <td style="text-align:right;white-space:nowrap;font-weight:600" id="fp-pct-${i}">—</td>
+          <td><input type="date" ${inp} id="fp-pv-${i}" ${pode?'':'disabled'}></td>
+          <td>${pode ? `<div style="display:flex;gap:3px">
+            <button class="btn btn-primary btn-sm" style="padding:4px 7px" title="Salvar frete" onclick="salvarFretePendente(${i})">💾</button>
+            <button class="btn btn-outline btn-sm" style="padding:4px 7px" title="Abrir formulário completo" onclick="lancarFretePendenteCompleto(${i})">✏️</button>
+            <button class="btn btn-outline btn-sm" style="padding:4px 7px" title="Sem frete a controlar (ex.: cliente retira ou paga direto à transportadora)" onclick="dispensarFretePendente(${i})">✕</button></div>` : ''}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+    </div>`;
+  preencherListaTransportadorasFrete();
+  // Pedidos que vieram só da coleta não têm vendedor/valor no resumo: busca 2 campos de cada
+  FRETE_PEND_LISTA.forEach((n,i) => { if(n.ler_pedido) completarPendenteDoPedido(n, i); });
+  FRETE_PEND_LISTA.forEach((n,i) => atualizarPctPendente(i));
+}
+
+async function completarPendenteDoPedido(n, i){
   try {
-    const campos = ['vendedor_nome','total','data_faturamento','status'];
-    const snaps = await Promise.all(campos.map(c => db.ref('pedidos/'+n.pedido_id+'/'+c).once('value')));
-    campos.forEach((c,k) => { ped[c] = snaps[k].val(); });
-  } catch(e){ toast('Não consegui ler o pedido: '+e.message,'error'); }
-  const dataColeta = n.coletado_em ? ymdLocal(new Date(n.coletado_em)) : hojeISO();
-  const dataNF = ped.data_faturamento ? ymdLocal(parseDataLocal(String(ped.data_faturamento).slice(0,10))) : dataColeta;
+    const [vend, tot] = await Promise.all([
+      db.ref('pedidos/'+n.pedido_id+'/vendedor_nome').once('value'),
+      db.ref('pedidos/'+n.pedido_id+'/total').once('value')
+    ]);
+    n.vendedor_nome = vend.val() || ''; n.total = Number(tot.val()) || 0; n.ler_pedido = false;
+    const el = document.getElementById('fp-tot-'+i);
+    if(el && FRETE_PEND_LISTA[i] === n){ el.textContent = n.total ? fmtMoeda(n.total) : '—'; atualizarPctPendente(i); }
+  } catch(e){}
+}
+
+function preencherListaTransportadorasFrete(){
+  const dl = document.getElementById('frete-transportadoras-lista'); if(!dl) return;
+  const nomes = new Set((TRANSPORTADORAS_DB||[]).map(t => String(t.nome).toUpperCase()));
+  todosFretesCarregados().forEach(x => { if(x.transportadora) nomes.add(x.transportadora); });
+  dl.innerHTML = Array.from(nomes).sort((a,b)=>a.localeCompare(b,'pt-BR')).map(n => `<option value="${esc(n)}"></option>`).join('');
+}
+
+// % do frete sobre o valor do pedido + sugestão da tabela Ágile no campo vazio
+function atualizarPctPendente(i){
+  const n = FRETE_PEND_LISTA[i]; if(!n) return;
+  const frEl = document.getElementById('fp-fr-'+i), pctEl = document.getElementById('fp-pct-'+i);
+  if(!frEl || !pctEl) return;
+  const fr = parseBR(frEl.value);
+  const tr = document.getElementById('fp-tr-'+i)?.value || '';
+  const sugEl = document.getElementById('fp-sug-'+i);
+  if(ehAgile(tr) && n.total){
+    const regiao = AGILE_CIDADES[normTxtFrete(n.cliente_cidade)] ? 'interior' : 'bh';
+    const sug = calcFreteAgile(regiao, n.total, 0).valor;
+    if(sugEl){ sugEl.textContent = 'Ágile: ' + fmtMoeda(sug); sugEl.style.display = parseBR(frEl.value) === sug ? 'none' : ''; sugEl.dataset.valor = sug; }
+    const pv = document.getElementById('fp-pv-'+i);
+    if(pv && !pv.value){
+      const cid = AGILE_CIDADES[normTxtFrete(n.cliente_cidade)];
+      const dias = cid ? (/48/.test(cid.prazo) ? 2 : (/24/.test(cid.prazo) ? 1 : 0)) : 1;
+      if(dias) pv.value = somarDiasUteisFrete(n.data || hojeISO(), dias);
+    }
+  } else if(sugEl) sugEl.style.display = 'none';
+  if(fr > 0 && n.total > 0){
+    const pct = fr / n.total * 100;
+    pctEl.textContent = pct.toLocaleString('pt-BR',{maximumFractionDigits:2}) + '%';
+    pctEl.style.color = pct > 5 ? '#b91c1c' : (pct > 3 ? '#b45309' : '#166534');
+  } else { pctEl.textContent = '—'; pctEl.style.color = ''; }
+}
+
+function usarSugestaoPendente(i){
+  const sugEl = document.getElementById('fp-sug-'+i), frEl = document.getElementById('fp-fr-'+i);
+  if(!sugEl || !frEl) return;
+  frEl.value = Number(sugEl.dataset.valor).toFixed(2).replace('.',',');
+  atualizarPctPendente(i); frEl.focus();
+}
+
+async function salvarFretePendente(i){
+  if(freteEmGravacao || !temPermissaoEditar('fretes')) return;
+  const n = FRETE_PEND_LISTA[i]; if(!n) return;
+  const nf = String(document.getElementById('fp-nf-'+i).value||'').trim();
+  const transp = String(document.getElementById('fp-tr-'+i).value||'').trim().replace(/\s+/g,' ').toUpperCase();
+  const frTxt = String(document.getElementById('fp-fr-'+i).value||'').trim();
+  const previsao = document.getElementById('fp-pv-'+i).value || '';
+  if(!nf){ toast('Digite o número da NF','error'); document.getElementById('fp-nf-'+i).focus(); return; }
+  if(!transp){ toast('Digite a transportadora','error'); document.getElementById('fp-tr-'+i).focus(); return; }
+  if(!frTxt){ toast('Digite o valor do frete (0 se não houver)','error'); document.getElementById('fp-fr-'+i).focus(); return; }
+  const dup = Object.values(FRETES_CACHE).flat().find(x => !x.dispensado && x.tipo !== 'reverso' && String(x.nf_numero) === nf);
+  if(dup && !await confirmCustom(`A NF ${esc(nf)} já tem frete lançado (${esc(dup.transportadora)}, ${fmtData(dup.data)}).\n\nLançar outro mesmo assim?`, 'Lançar mesmo assim')) return;
+  const agoraIso = agora().toISOString();
+  const rec = {
+    tipo:'envio', data: n.data || hojeISO(), status:'coletado', transportadora: transp, nf_numero: nf,
+    cliente_nome: n.cliente_nome || '', cliente_cidade: n.cliente_cidade || '', cliente_uf: n.cliente_uf || '',
+    vendedor_nome: n.vendedor_nome || '', previsao, data_entrega:'', rastreio:'', obs:'',
+    pedido_id: n.pedido_id || '', pedido_numero: String(n.pedido_numero||''), coleta_id: n.coleta_id || '', origem: n.origem || 'faturado',
+    valor_nf: Math.round((Number(n.total)||0)*100)/100, valor_frete: Math.round(parseBR(frTxt)*100)/100, peso_kg: null,
+    cte_recebido:false, boleto_recebido:false,
+    criado_por: usuarioLogado?.nome || '', criado_em: agoraIso, atualizado_por: usuarioLogado?.nome || '', atualizado_em: agoraIso
+  };
+  freteEmGravacao = true;
+  try {
+    const mes = mesDeFrete(rec.data);
+    const id = db.ref('fretes/'+mes).push().key;
+    const updates = { ['fretes/'+mes+'/'+id]: rec };
+    if(rec.pedido_id && await pedidoExisteFrete(rec.pedido_id)) updates['pedidos/'+rec.pedido_id+'/entrega'] = resumoEntregaPedido(rec, mes, id);
+    else rec.pedido_id = '';
+    await db.ref().update(updates);
+    if(FRETES_CACHE[mes]) FRETES_CACHE[mes].push({ id, mes, ...rec }); else await carregarMesFretes(mes, true);
+    toast(`✓ Frete da NF ${nf} lançado`,'success');
+    renderFretesCards(); renderFretesPendentes(); montarFiltrosFretes(); renderTabelaFretes();
+    // Já deixa o cursor no frete da próxima linha
+    setTimeout(() => { const prox = document.getElementById('fp-nf-'+i) || document.getElementById('fp-nf-0'); if(prox && !prox.value) prox.focus(); else document.getElementById('fp-fr-'+i)?.focus(); }, 50);
+  } catch(e){ toast('Erro ao salvar: '+e.message,'error'); }
+  finally { freteEmGravacao = false; }
+}
+
+function lancarFretePendenteCompleto(i){
+  const n = FRETE_PEND_LISTA[i]; if(!n) return;
   abrirModalFrete(null, 'envio', {
-    pedido_id: ped.status != null ? n.pedido_id : '', pedido_numero: n.pedido_numero,
-    nf_numero: n.nf_numero, data: dataNF, cliente_nome: n.cliente_nome,
-    cliente_cidade: n.cliente_cidade, cliente_uf: n.cliente_uf,
-    transportadora: n.transportadora_nome, vendedor_nome: ped.vendedor_nome || '',
-    valor_nf: Number(ped.total) || '', status: 'coletado', coleta_id: n.coleta_id, origem: 'coleta'
+    pedido_id: n.pedido_id, pedido_numero: n.pedido_numero,
+    nf_numero: document.getElementById('fp-nf-'+i)?.value || n.nf_numero, data: n.data,
+    cliente_nome: n.cliente_nome, cliente_cidade: n.cliente_cidade, cliente_uf: n.cliente_uf,
+    transportadora: (document.getElementById('fp-tr-'+i)?.value || n.transportadora || '').toUpperCase(), vendedor_nome: n.vendedor_nome,
+    valor_nf: Number(n.total) || '', valor_frete: document.getElementById('fp-fr-'+i)?.value ? parseBR(document.getElementById('fp-fr-'+i).value) : '',
+    previsao: document.getElementById('fp-pv-'+i)?.value || '',
+    status: 'coletado', coleta_id: n.coleta_id, origem: n.origem
   });
 }
-async function dispensarFreteDaColeta(i){
+
+async function dispensarFretePendente(i){
   if(!temPermissaoEditar('fretes')) return;
-  const n = fretesPendentesDeColeta()[i]; if(!n) return;
-  if(!await confirmCustom(`Marcar a NF ${esc(n.nf_numero)} (pedido #${esc(n.pedido_numero)}) como "sem frete a controlar"?\n\nEla sai desta lista e não aparece no controle.`, 'Marcar sem frete')) return;
-  const data = n.coletado_em ? ymdLocal(new Date(n.coletado_em)) : hojeISO();
+  const n = FRETE_PEND_LISTA[i]; if(!n) return;
+  if(!await confirmCustom(`Pedido #${esc(n.pedido_numero)} (${esc(n.cliente_nome)}) não tem frete a controlar?\n\nEle sai desta lista (ex.: cliente retirou ou paga direto à transportadora).`, 'Sem frete')) return;
+  const data = n.data || hojeISO();
   const mes = mesDeFrete(data);
   const id = db.ref('fretes/'+mes).push().key;
-  const rec = { dispensado: true, tipo: 'envio', data, nf_numero: String(n.nf_numero||''), pedido_id: n.pedido_id || '', pedido_numero: String(n.pedido_numero||''),
-    cliente_nome: n.cliente_nome || '', transportadora: n.transportadora_nome || '', coleta_id: n.coleta_id || '',
+  const rec = { dispensado: true, tipo: 'envio', data, nf_numero: String(document.getElementById('fp-nf-'+i)?.value || n.nf_numero || ''),
+    pedido_id: n.pedido_id || '', pedido_numero: String(n.pedido_numero||''), cliente_nome: n.cliente_nome || '',
+    transportadora: n.transportadora || '', coleta_id: n.coleta_id || '',
     criado_por: usuarioLogado?.nome || '', criado_em: agora().toISOString() };
   try {
     await db.ref('fretes/'+mes+'/'+id).set(rec);
@@ -15495,7 +15634,7 @@ function renderTabelaFretes(){
     const totNF = lista.reduce((s,f) => s + (Number(f.valor_nf)||0), 0);
     const totFr = lista.reduce((s,f) => s + (Number(f.valor_frete)||0), 0);
     el.innerHTML = `<table>
-      <thead><tr><th>Data NF</th><th>NF</th><th>Cliente</th><th>Vendedor</th><th>Transportadora</th><th style="text-align:right">Valor NF</th><th style="text-align:right">Frete</th><th style="text-align:right">%</th><th>Previsão</th><th>Status</th><th>Entregue em</th><th style="text-align:center">CT-e</th><th style="text-align:center">Boleto</th><th></th></tr></thead>
+      <thead><tr><th>Data NF</th><th>NF</th><th>Cliente</th><th>Vendedor</th><th>Transportadora</th><th style="text-align:right">Valor pedido/NF</th><th style="text-align:right">Frete</th><th style="text-align:right">% do pedido</th><th>Previsão</th><th>Status</th><th>Entregue em</th><th style="text-align:center">CT-e</th><th style="text-align:center">Boleto</th><th></th></tr></thead>
       <tbody>${lista.map(f => {
         const pct = Number(f.valor_nf) > 0 ? (Number(f.valor_frete)||0)/Number(f.valor_nf)*100 : 0;
         const atras = freteAtrasado(f);
@@ -15706,7 +15845,7 @@ function atualizarCalculoFrete(){
   const vNF = parseBR(valFrete('frete-valor-nf'));
   const vFr = parseBR(valFrete('frete-valor-frete'));
   const pctEl = document.getElementById('frete-pct');
-  if(pctEl) pctEl.textContent = vNF > 0 && vFr > 0 ? (vFr/vNF*100).toLocaleString('pt-BR',{maximumFractionDigits:2})+'% sobre a NF' : '';
+  if(pctEl) pctEl.textContent = vNF > 0 && vFr > 0 ? (vFr/vNF*100).toLocaleString('pt-BR',{maximumFractionDigits:2})+'% do valor do pedido' : '';
   const box = document.getElementById('frete-agile-box');
   if(!box) return;
   const mostrar = tipoFreteModal() === 'envio' && ehAgile(valFrete('frete-transportadora'));
