@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 22/10/2026 10:06\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 22/10/2026 10:06</span>
+            onclick="alert('Versão desta build: 22/10/2026 14:55\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 22/10/2026 14:55</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -391,6 +391,7 @@ tbody td{padding:11px 16px;font-size:14px}
       <div class="nav-group-menu">
         <div class="nav-tab" data-tab="separacao" onclick="showTab('separacao',this)">📦 Separação</div>
         <div class="nav-tab" data-tab="coleta" onclick="showTab('coleta',this)">📝 Coleta</div>
+        <div class="nav-tab" data-tab="fretes" onclick="showTab('fretes',this)">🚚 Fretes e Entregas</div>
         <div class="nav-tab" data-tab="producao" onclick="showTab('producao',this)">🏭 Ordens de Produção</div>
         <div class="nav-tab" data-tab="garantias" onclick="showTab('garantias',this)">🛡️ Garantias</div>
         <div class="nav-tab" data-tab="manutencao" onclick="showTab('manutencao',this)">🔧 Manutenção</div>
@@ -1274,6 +1275,45 @@ tbody td{padding:11px 16px;font-size:14px}
     </div>
 
 
+    <!-- FRETES E ENTREGAS — substitui a planilha de controle de transportadoras.
+         Só admin e quem tem "Controla fretes e entregas" no cadastro vê esta tela. -->
+    <div id="tab-fretes" style="display:none">
+      <div class="section-header">
+        <div class="section-title">🚚 Fretes e Entregas</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="renderFretes(true)">🔄 Atualizar</button>
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('fretes-import-input').click()" title="Traz as linhas da planilha antiga de controle de fretes">📥 Importar planilha</button>
+          <input type="file" id="fretes-import-input" accept=".xlsx,.xls" style="display:none" onchange="lerPlanilhaFretes(this)">
+          <button class="btn btn-outline btn-sm" onclick="abrirModalFrete(null,'reverso')">↩️ Novo reverso Correios</button>
+          <button class="btn btn-primary btn-sm" onclick="abrirModalFrete(null,'envio')">+ Lançar frete</button>
+        </div>
+      </div>
+      <div id="fretes-import-painel" style="display:none"></div>
+      <div class="dashboard-cards" id="fretes-cards"></div>
+      <div id="fretes-pendentes"></div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <button class="btn btn-sm btn-secondary" id="fretes-subaba-envios" onclick="trocarSubabaFretes('envios')">Envios</button>
+        <button class="btn btn-sm btn-outline" id="fretes-subaba-reversos" onclick="trocarSubabaFretes('reversos')">↩️ Reversos Correios</button>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;align-items:flex-end">
+        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Mês</label>
+          <div style="display:flex;gap:4px;align-items:center">
+            <button class="btn btn-outline btn-sm" onclick="mudarMesFretes(-1)">‹</button>
+            <input type="month" class="search-input" id="fretes-mes" style="width:auto" onchange="aoMudarMesFretes()">
+            <button class="btn btn-outline btn-sm" onclick="mudarMesFretes(1)">›</button>
+          </div></div>
+        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Buscar</label>
+          <input class="search-input" id="fretes-busca" placeholder="NF, pedido, cliente, rastreio…" oninput="renderTabelaFretes()"></div>
+        <div class="filtro-group" id="fretes-f-transp-wrap"><label style="font-size:12px;color:var(--muted)">Transportadora</label>
+          <select class="search-input" id="fretes-f-transp" style="width:auto" onchange="renderTabelaFretes()"></select></div>
+        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Vendedor</label>
+          <select class="search-input" id="fretes-f-vend" style="width:auto" onchange="renderTabelaFretes()"></select></div>
+        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Situação</label>
+          <select class="search-input" id="fretes-f-situacao" style="width:auto" onchange="renderTabelaFretes()"></select></div>
+      </div>
+      <div class="table-wrap" style="overflow-x:auto"><div id="fretes-tabela"></div></div>
+    </div>
+
     <!-- FINANCEIRO — CONTAS A RECEBER -->
     <div id="tab-financeiro" style="display:none">
       <div class="section-header">
@@ -1838,6 +1878,12 @@ tbody td{padding:11px 16px;font-size:14px}
       <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer">
         <input type="checkbox" id="vend-sem-trava-preco" style="margin-top:3px">
         <span><strong>Editar pedidos sem restrição de preço</strong><br><span style="color:var(--muted);font-size:12px">Ignora preço mínimo, desconto máximo e o limite de 1h para editar. Admin já tem isso.</span></span>
+      </label>
+    </div>
+    <div class="form-row single" id="vend-fretes-row">
+      <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="vend-acesso-fretes" style="margin-top:3px">
+        <span><strong>Controla fretes e entregas</strong><br><span style="color:var(--muted);font-size:12px">Vê e edita a tela 🚚 Fretes e Entregas (valores de frete, CT-e, boletos, reversos). Admin já tem isso.</span></span>
       </label>
     </div>
     <div class="form-row" id="vend-comissao-row" style="display:none">
@@ -2665,6 +2711,89 @@ tbody td{padding:11px 16px;font-size:14px}
   </div>
 </div>
 
+<div class="modal-overlay" id="modal-frete">
+  <div class="modal" style="max-width:760px">
+    <button class="modal-close" onclick="fecharModal('modal-frete')">×</button>
+    <div class="modal-title" id="frete-modal-titulo">🚚 Lançar frete</div>
+    <datalist id="frete-vendedores-lista"></datalist>
+    <datalist id="frete-transportadoras-lista"></datalist>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px">
+      <label class="coleta-radio"><input type="radio" name="frete-tipo" value="envio" onchange="aoMudarTipoFrete()"> Envio para cliente</label>
+      <label class="coleta-radio"><input type="radio" name="frete-tipo" value="reverso" onchange="aoMudarTipoFrete()"> ↩️ Reverso dos Correios</label>
+    </div>
+
+    <div class="frete-so-envio" style="background:var(--bg);border-radius:10px;padding:10px 12px;margin-bottom:12px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:6px">Pedido do sistema</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input class="search-input" id="frete-pedido-busca" style="width:140px" placeholder="Nº do pedido" inputmode="numeric" onkeydown="if(event.key==='Enter'){event.preventDefault();buscarPedidoParaFrete()}">
+        <button type="button" class="btn btn-outline btn-sm" onclick="buscarPedidoParaFrete()">Vincular</button>
+        <div id="frete-pedido-vinculo" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"></div>
+      </div>
+    </div>
+
+    <div class="form-row triple frete-so-reverso">
+      <div class="form-group"><label>Código de autorização de postagem *</label><input type="text" id="frete-codigo" autocomplete="off" placeholder="ex.: 475.359.6805" style="font-family:monospace;font-size:15px"></div>
+      <div class="form-group"><label>Postar até</label><input type="date" id="frete-prazo-postagem"></div>
+      <div class="form-group"><label>Motivo</label><select id="frete-motivo"></select></div>
+    </div>
+
+    <div class="form-row triple">
+      <div class="form-group"><label>Transportadora *</label><input type="text" id="frete-transportadora" list="frete-transportadoras-lista" autocomplete="off" style="text-transform:uppercase" oninput="atualizarCalculoFrete()"></div>
+      <div class="form-group"><label id="frete-lbl-data">Data da NF *</label><input type="date" id="frete-data"></div>
+      <div class="form-group"><label>Nº da NF</label><input type="text" id="frete-nf" autocomplete="off" inputmode="numeric"></div>
+    </div>
+    <div class="form-row triple">
+      <div class="form-group"><label>Cliente *</label><input type="text" id="frete-cliente" autocomplete="off"></div>
+      <div class="form-group"><label>Cidade</label><input type="text" id="frete-cidade" autocomplete="off" oninput="document.getElementById('frete-agile-regiao').value=AGILE_CIDADES[normTxtFrete(this.value)]?'interior':document.getElementById('frete-agile-regiao').value;atualizarCalculoFrete()"></div>
+      <div class="form-group"><label>UF</label><input type="text" id="frete-uf" maxlength="2" style="text-transform:uppercase"></div>
+    </div>
+    <div class="form-row single">
+      <div class="form-group"><label>Vendedor principal</label><input type="text" id="frete-vendedor" list="frete-vendedores-lista" autocomplete="off"></div>
+    </div>
+
+    <div class="form-row triple frete-so-envio">
+      <div class="form-group"><label>Valor da NF (R$)</label><input type="text" id="frete-valor-nf" inputmode="decimal" oninput="atualizarCalculoFrete()"></div>
+      <div class="form-group"><label>Peso (kg)</label><input type="text" id="frete-peso" inputmode="decimal" placeholder="opcional" oninput="atualizarCalculoFrete()"></div>
+      <div class="form-group"><label>Valor do frete (R$)</label><input type="text" id="frete-valor-frete" inputmode="decimal" oninput="atualizarCalculoFrete()"><div id="frete-pct" style="font-size:12px;color:var(--muted);margin-top:3px"></div></div>
+    </div>
+    <div id="frete-agile-box" class="frete-so-envio" style="display:none;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+        <strong>Tabela Ágile</strong>
+        <select class="search-input" id="frete-agile-regiao" style="width:auto" onchange="atualizarCalculoFrete()">
+          <option value="bh">BH / Grande BH</option>
+          <option value="interior">Interior</option>
+        </select>
+        <button type="button" class="btn btn-success btn-sm" id="frete-agile-usar" onclick="usarSugestaoAgile()">Usar este valor</button>
+      </div>
+      <div id="frete-agile-info"></div>
+    </div>
+
+    <div class="form-row triple">
+      <div class="form-group frete-so-envio"><label>Previsão de entrega</label><input type="date" id="frete-previsao"></div>
+      <div class="form-group"><label>Status</label><select id="frete-status" onchange="aoMudarStatusFrete()"></select></div>
+      <div class="form-group"><label id="frete-lbl-data-entrega">Data da entrega</label><input type="date" id="frete-data-entrega"></div>
+    </div>
+    <div class="form-row single">
+      <div class="form-group"><label>Código de rastreio</label><input type="text" id="frete-rastreio" autocomplete="off" style="text-transform:uppercase" placeholder="opcional"></div>
+    </div>
+    <div class="form-row frete-so-envio">
+      <label class="coleta-radio" style="font-size:14px"><input type="checkbox" id="frete-cte" style="width:18px;height:18px"> CT-e recebido</label>
+      <label class="coleta-radio" style="font-size:14px"><input type="checkbox" id="frete-boleto" style="width:18px;height:18px"> Boleto recebido</label>
+    </div>
+    <div class="form-row single">
+      <div class="form-group"><label>Observação</label><input type="text" id="frete-obs" autocomplete="off" placeholder="ex.: reentrega, cobrou a mais, frete isento…"></div>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">O vendedor vê no pedido só a transportadora, a previsão, o status e o rastreio — nunca o valor do frete.</div>
+    <div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap">
+      <button class="btn btn-danger btn-sm" id="frete-btn-excluir" onclick="excluirFrete()">Excluir</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline" onclick="fecharModal('modal-frete')">Cancelar</button>
+        <button class="btn btn-primary" id="frete-btn-salvar" onclick="salvarFrete()">Salvar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL NOVA OP -->
 <div class="modal-overlay" id="modal-op">
   <div class="modal" style="max-width:640px">
@@ -2878,6 +3007,9 @@ function ehProducao(){
 function podeVer(modulo){
   if(!usuarioLogado) return false;
   if(usuarioLogado.admin) return true;
+  // Fretes e Entregas: só admin e quem tem "Controla fretes e entregas" no cadastro,
+  // qualquer que seja o tipo do usuário. Vendedor vê só a previsão dentro do pedido.
+  if(modulo==='fretes') return usuarioLogado.acesso_fretes === true;
   if(ehExpedicao()) return MODULOS_EXPEDICAO_VER.includes(modulo);
   if(usuarioLogado.tipo==='personalizado'){
     // Manutenção Preventiva anda junto com Produção: quem já vê o módulo de Produção
@@ -2904,6 +3036,7 @@ function podeImprimirEtiquetaLogo(){
 function temPermissaoEditar(modulo){
   if(!usuarioLogado) return false;
   if(usuarioLogado.admin) return true;
+  if(modulo==='fretes') return usuarioLogado.acesso_fretes === true;
   if(ehExpedicao()) return MODULOS_EXPEDICAO_EDITAR.includes(modulo);
   if(usuarioLogado.tipo==='personalizado') return !!usuarioLogado.permissoes?.[modulo]?.editar;
   // Vendedor comum (sem tipo especial): pode cadastrar clientes novos — a restrição de só
@@ -3602,6 +3735,7 @@ function showTab(tab, el){
   }
   if(tab==='separacao') renderSeparacao();
   if(tab==='coleta') renderColeta();
+  if(tab==='fretes') renderFretes(false);
   if(tab==='financeiro') renderFinanceiro();
   if(tab==='estoque'){
     const btnLancar = document.getElementById('btn-lancar-movimento');
@@ -4669,7 +4803,7 @@ async function renderPedidos(usarCache){
           <div style="display:flex;align-items:flex-start;gap:8px">
             <input type="checkbox" class="check-imprimir-pedido" data-id="${p.id}" ${pedidosSelecionadosImprimir.has(p.id)?'checked':''} onchange="toggleSelecaoPedido('${p.id}',this.checked)" style="margin-top:4px;width:16px;height:16px;cursor:pointer;flex-shrink:0">
             <div>
-              <div class="pedido-card-num">#${p.numero} ${statusBadge(p.status)} ${badgeImpressao(p)} ${p.faturado?'<span class="badge" style="background:#dcfce7;color:#16a34a;font-size:10px">💰 Faturado</span>':''}</div>
+              <div class="pedido-card-num">#${p.numero} ${statusBadge(p.status)} ${badgeImpressao(p)} ${p.faturado?'<span class="badge" style="background:#dcfce7;color:#16a34a;font-size:10px">💰 Faturado</span>':''} ${badgeEntregaPedido(p)}</div>
               <div style="font-size:12px;color:var(--muted);margin-top:2px">${fmtData(p.data)}</div>
             </div>
           </div>
@@ -4697,7 +4831,7 @@ async function renderPedidos(usarCache){
         <input type="checkbox" class="check-imprimir-pedido" data-id="${p.id}" ${pedidosSelecionadosImprimir.has(p.id)?'checked':''} onchange="toggleSelecaoPedido('${p.id}',this.checked)" style="flex-shrink:0;width:16px;height:16px;cursor:pointer">
         <div style="flex-shrink:0;min-width:90px">
           <div style="font-family:'DM Sans',sans-serif;font-weight:700;font-size:14px">#${p.numero}</div>
-          <div style="margin-top:2px;display:flex;gap:4px;flex-wrap:wrap">${statusBadge(p.status)} ${badgeImpressao(p)} ${p.faturado?'<span class="badge" style="background:#dcfce7;color:#16a34a;font-size:10px">💰 Faturado</span>':''}</div>
+          <div style="margin-top:2px;display:flex;gap:4px;flex-wrap:wrap">${statusBadge(p.status)} ${badgeImpressao(p)} ${p.faturado?'<span class="badge" style="background:#dcfce7;color:#16a34a;font-size:10px">💰 Faturado</span>':''} ${badgeEntregaPedido(p)}</div>
         </div>
         <div style="flex-shrink:0;font-size:12px;color:var(--muted);min-width:70px">${fmtData(p.data)}</div>
         <div style="flex:1;min-width:0;overflow:hidden">
@@ -5092,6 +5226,7 @@ async function verPedido(id){
         📝 Coletado em ${fmtDataHoraColeta(p.coletado_em)}${p.nf_numero ? ' · NF '+esc(p.nf_numero) : ''}
         <button style="background:none;border:none;color:#1e40af;text-decoration:underline;cursor:pointer;font-size:12px;padding:0" onclick="verComprovanteColeta('${p.coleta_id}')">ver comprovante</button>
       </div>` : ''}
+      ${blocoEntregaPedido(p)}
       ${p.veio_de_orcamento ? `<div style="font-size:12px;color:#7c3aed;background:#ede9fe;display:inline-block;padding:3px 10px;border-radius:6px;margin-bottom:10px">📋 Convertido do Orçamento #${p.numero_orcamento_origem||'—'}${p.data_orcamento_origem?', feito em '+fmtData(p.data_orcamento_origem):''}</div>` : ''}
       <div class="edit-lock ${bloqueado?'locked':'can-edit'}" style="margin-bottom:16px">
         ${bloqueado?'🔒 Bloqueado para edição':(tempoRestante>0?'✏️ Editável por mais '+tempoRestante+' min':'✏️ Editável (prazo normal de 1h já passou — liberado para Admin/Expedição)')}
@@ -15027,6 +15162,849 @@ async function buscarBipadosRecentes(){
   } catch(e){ toast('Erro ao buscar pedidos: '+e.message,'error'); }
 }
 
+// ══════════════════════════════════════════════
+// ══ FRETES E ENTREGAS ══
+// Substitui a planilha "CONTROLE DE TRANSPORTADORAS - FRETES E ENTREGAS".
+// Quem vê e edita: admin e quem tiver "Controla fretes e entregas" marcado no cadastro
+// do usuário (usuarios/{id}/acesso_fretes). Para os demais a tela não existe.
+// Vendedor enxerga SÓ a previsão/status da entrega dentro do próprio pedido: ao salvar
+// um frete vinculado a pedido, um resumo (sem valores) vai para pedidos/{id}/entrega.
+//
+// Economia de leitura no Firebase:
+// - Registros guardados por mês: fretes/{AAAA-MM}/{id}. A tela lê o mês escolhido e os
+//   2 anteriores ao mês atual (para entregas ainda em aberto) — sem varrer histórico e
+//   sem precisar de índice. Cada mês é lido 1x por sessão (🔄 Atualizar força de novo).
+// - "Saíram na coleta e ainda não têm frete" usa as 40 últimas coletas (nó pequeno,
+//   a assinatura fica em outro nó e não vem junto).
+// - Ao lançar a partir da coleta, do pedido lemos só 4 campos soltos, não o pedido inteiro.
+// - Vincular pedido digitado à mão: lê os pedidos dos últimos 45 dias pelo índice 'data',
+//   1x por sessão e só quando a pessoa clica em Buscar.
+// ══════════════════════════════════════════════
+const FRETE_STATUS_ENVIO = {
+  coletado:    { label:'Coleta realizada',       cor:'#1e40af', bg:'#dbeafe' },
+  em_transito: { label:'Em processo de entrega', cor:'#92400e', bg:'#fef3c7' },
+  pendente:    { label:'Entrega pendente',       cor:'#b91c1c', bg:'#fee2e2' },
+  entregue:    { label:'Entrega realizada',      cor:'#166534', bg:'#dcfce7' },
+  extraviado:  { label:'Extraviado',             cor:'#7f1d1d', bg:'#fecaca' }
+};
+const FRETE_STATUS_REVERSO = {
+  aguardando: { label:'Aguardando postagem',  cor:'#92400e', bg:'#fef3c7' },
+  postado:    { label:'Postado / a caminho',  cor:'#1e40af', bg:'#dbeafe' },
+  recebido:   { label:'Recebido na Crow',     cor:'#166534', bg:'#dcfce7' },
+  cancelado:  { label:'Cancelado / vencido',  cor:'#475569', bg:'#e2e8f0' }
+};
+const FRETE_STATUS_FINAIS = ['entregue','extraviado','recebido','cancelado'];
+const FRETE_MOTIVOS_REVERSO = ['Garantia','Troca','Devolução','Outro'];
+
+function infoStatusFrete(tipo, st){
+  const m = tipo === 'reverso' ? FRETE_STATUS_REVERSO : FRETE_STATUS_ENVIO;
+  return m[st] || { label: st || '—', cor:'#475569', bg:'#f1f5f9' };
+}
+function badgeStatusFrete(tipo, st){
+  const i = infoStatusFrete(tipo, st);
+  return `<span class="badge" style="background:${i.bg};color:${i.cor};font-size:11px;white-space:nowrap">${esc(i.label)}</span>`;
+}
+
+// ── Tabela Ágile (aba "FRETE AGILE" da planilha) ──
+const AGILE_REGRAS = { bh_ate:2500, bh_min:25, bh_pct:0.01, int_ate:1750, int_min:35, int_pct:0.02, peso_lim:200, por_kg:0.30 };
+const AGILE_CIDADES_LISTA = [["Abre Campo","24 horas"],["Acaiaca","24 horas"],["Alfredo Vasconcelos","24 horas"],["Antonio Carlos","24 horas"],["Antunes","24 horas"],["Araújos","24 horas"],["Astolfo Dutra","somente quarta-feira"],["Barbacena","24 horas"],["Barroso","24 horas"],["Belo Vale","24 horas"],["Bom Despacho","24 horas"],["Brumadinho","24 horas"],["Buarque de Macedo","48 horas"],["Cachoeira do Campo","24 horas"],["Canaã","Retira Viçosa"],["Capela Nova","24 horas"],["Capim Branco","24 horas"],["Carandaí","24 horas"],["Carmo da Mata","24 horas"],["Carmo do Cajuru","24 horas"],["Casa Grande","24 horas"],["Cataguases","24 horas"],["Catas Altas da Noruega","48 horas"],["Cipotânea","24 horas"],["Cláudio","24 horas"],["Cofins","24 horas"],["Coimbra","24 horas"],["Conceição do Pará","24 horas"],["Congonhas","24 horas"],["Conselheiro Lafaiete","24 horas"],["Coronel Xavier Chaves","24 horas"],["Cristiano Otoni","48 horas"],["Desterro de Entre Rios","24 horas"],["Divinópolis","24 horas"],["Dores do Campo","24 horas"],["Elbany da Camera","24 horas"],["Entre Rios de Minas","48 horas"],["Ervália","Terça e Quinta-feira"],["Esmeralda","24 horas"],["Guaraciaba","Somente sexta-feira"],["Guiricema","3ª, 5ª, 6ª e Sábado"],["Igarapé","24 horas"],["Igaratinga","24 horas"],["Itabirito","24 horas"],["Itapecerica","24 horas"],["Itatiaiuçu","48 horas"],["Itaúna","24 horas"],["Itaverava","24 horas"],["Jeceaba","24 horas"],["Juatuba","24 horas"],["Juiz de Fora","24 horas"],["Lagoa da Prata","24 horas"],["Lagoa Dourada","24 horas"],["Lamim","48 horas"],["Laranjal","48 horas"],["Leopoldina","24 horas"],["Mariana","24 horas"],["Marilândia","24 horas"],["Mário Campos","24 horas"],["Mateus Leme","24 horas"],["Matias Barbosa","48 horas"],["Matipó","24 horas"],["Matozinhos","24 horas"],["Miraí","48 horas"],["Moema","24 horas"],["Muriaé","24 horas"],["Nova Serrana","24 horas"],["Oliveira","24 horas"],["Ouro Branco","24 horas"],["Ouro Preto","24 horas"],["Pará de Minas","24 horas"],["Paula Cândido","Retira Viçosa"],["Pedra do Indaiá","24 horas"],["Perdigão","24 horas"],["Pereirinha","48 horas"],["Piranga","24 horas"],["Piraúba","somente quarta-feira"],["Pitangui","24 horas"],["Ponte Nova","24 horas"],["Prados","24 horas"],["Prudente de Morais","24 horas"],["Queluzito","48 horas"],["Raposos","24 horas"],["Raul Soares","24 horas"],["Resende Costa","24 horas"],["Ressaquinha","24 horas"],["Rio Casca","24 horas"],["Rio Espera","48 horas"],["Santo Antônio do Monte","24 horas"],["Santos Dumont","24 horas"],["São Brás do Suaçuí","24 horas"],["São Geraldo","24 horas"],["São Gonçalo do Pará","24 horas"],["São João del Rei","24 horas"],["São Joaquim de Bicas","24 horas"],["São José da Lapa","24 horas"],["São José do Goiabal","24 horas"],["São Pedro dos Ferros","24 horas"],["São Sebastião do Oeste","24 horas"],["Senador Oliveira","24 horas"],["Senhora dos Remédios","24 horas"],["Sete Lagoas","24 horas"],["Teixeiras","24 horas"],["Tiradentes","à combinar"],["Tocantins","48 horas"],["Ubá","24 horas"],["Urucânia","24 horas"],["Viçosa","24 horas"],["Visconde do Rio Branco","24 horas"]];
+function normTxtFrete(s){
+  return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]/gi,'').toLowerCase();
+}
+const AGILE_CIDADES = {};
+AGILE_CIDADES_LISTA.forEach(([c,p]) => { AGILE_CIDADES[normTxtFrete(c)] = { cidade:c, prazo:p }; });
+function ehAgile(nome){ return /agil/.test(normTxtFrete(nome)); }
+function calcFreteAgile(regiao, valorNF, pesoKg){
+  const R = AGILE_REGRAS, v = Number(valorNF)||0, kg = Number(pesoKg)||0;
+  if(kg > R.peso_lim) return { valor: Math.round(kg*R.por_kg*100)/100, regra:`acima de ${R.peso_lim} kg: R$ ${String(R.por_kg).replace('.',',')} por kg` };
+  if(regiao === 'bh'){
+    if(v <= R.bh_ate) return { valor: R.bh_min, regra:`BH/Grande BH, NF até ${fmtMoeda(R.bh_ate)}: mínimo` };
+    return { valor: Math.round(v*R.bh_pct*100)/100, regra:`BH/Grande BH, NF acima de ${fmtMoeda(R.bh_ate)}: 1% da NF` };
+  }
+  if(v <= R.int_ate) return { valor: R.int_min, regra:`Interior, NF até ${fmtMoeda(R.int_ate)}: mínimo` };
+  return { valor: Math.round(v*R.int_pct*100)/100, regra:`Interior, NF acima de ${fmtMoeda(R.int_ate)}: 2% da NF` };
+}
+// Soma dias úteis (pula sábado e domingo) a uma data AAAA-MM-DD
+function somarDiasUteisFrete(iso, n){
+  const d = parseDataLocal(iso); if(!d || isNaN(d)) return '';
+  let falta = n;
+  while(falta > 0){ d.setDate(d.getDate()+1); const w = d.getDay(); if(w !== 0 && w !== 6) falta--; }
+  return ymdLocal(d);
+}
+function mesDeFrete(iso){ return String(iso||'').slice(0,7); }
+function somarMesesFrete(mes, n){
+  const [a,m] = mes.split('-').map(Number);
+  const d = new Date(a, m-1+n, 1);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+}
+function nomeMesFrete(mes){
+  const [a,m] = mes.split('-').map(Number);
+  return new Date(a, m-1, 1).toLocaleDateString('pt-BR',{month:'long', year:'numeric'});
+}
+function freteAtrasado(f){
+  return f.tipo !== 'reverso' && !FRETE_STATUS_FINAIS.includes(f.status) && f.previsao && f.previsao < hojeISO();
+}
+
+// ── Estado ──
+let FRETES_MES = '';            // 'AAAA-MM' em exibição
+let FRETES_CACHE = {};          // 'AAAA-MM' -> [{id, mes, ...registro}]
+let FRETES_COLETAS = null;      // últimas coletas, para a lista de pendentes
+let FRETES_USUARIOS = null;     // nomes de usuários (vendedor principal)
+let FRETE_PEDIDOS_RECENTES = null;
+let FRETE_EDIT = null;          // { mes, id, original } quando editando
+let FRETE_PEDIDO_VINC = null;   // { id, numero } pedido vinculado no modal
+let FRETE_SUBABA = 'envios';
+let freteEmGravacao = false;
+let FRETES_PLANILHA_WB = null;
+let FRETE_EDIT_EXTRA = {};      // coleta_id/origem do registro aberto no modal
+
+async function carregarMesFretes(mes, forcar){
+  if(FRETES_CACHE[mes] && !forcar) return FRETES_CACHE[mes];
+  const snap = await db.ref('fretes/'+mes).once('value');
+  const v = snap.val() || {};
+  FRETES_CACHE[mes] = Object.keys(v).map(id => ({ id, mes, ...v[id] }));
+  return FRETES_CACHE[mes];
+}
+function mesesAbertosFretes(){
+  const atual = mesDeFrete(hojeISO());
+  return [atual, somarMesesFrete(atual,-1), somarMesesFrete(atual,-2)];
+}
+function todosFretesCarregados(){
+  return Object.values(FRETES_CACHE).flat().filter(f => !f.dispensado);
+}
+
+// ══ TELA PRINCIPAL ══
+async function renderFretes(forcar){
+  if(!podeVer('fretes')){ toast('Acesso restrito — sem permissão nesta área','error'); return; }
+  if(!FRETES_MES) FRETES_MES = mesDeFrete(hojeISO());
+  const inp = document.getElementById('fretes-mes');
+  if(inp) inp.value = FRETES_MES;
+  const el = document.getElementById('fretes-tabela');
+  if(el && (forcar || !FRETES_CACHE[FRETES_MES])) el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px">Carregando…</div>';
+  try {
+    const meses = Array.from(new Set([FRETES_MES, ...mesesAbertosFretes()]));
+    await Promise.all(meses.map(m => carregarMesFretes(m, forcar)));
+    if(forcar || !FRETES_COLETAS){
+      const snap = await db.ref('coletas').orderByKey().limitToLast(40).once('value');
+      const v = snap.val() || {};
+      FRETES_COLETAS = Object.keys(v).map(id => ({ id, ...v[id] }));
+    }
+    carregarTransportadoras().catch(()=>{});
+  } catch(e){ toast('Erro ao carregar fretes: '+e.message,'error'); return; }
+  renderFretesCards();
+  renderFretesPendentes();
+  montarFiltrosFretes();
+  trocarSubabaFretes(FRETE_SUBABA);
+}
+
+function aoMudarMesFretes(){
+  const v = document.getElementById('fretes-mes').value;
+  if(!/^\d{4}-\d{2}$/.test(v)) return;
+  FRETES_MES = v; renderFretes(false);
+}
+function mudarMesFretes(n){
+  FRETES_MES = somarMesesFrete(FRETES_MES || mesDeFrete(hojeISO()), n);
+  renderFretes(false);
+}
+
+function renderFretesCards(){
+  const el = document.getElementById('fretes-cards'); if(!el) return;
+  const doMes = (FRETES_CACHE[FRETES_MES]||[]).filter(f => !f.dispensado && f.tipo !== 'reverso');
+  const totFrete = doMes.reduce((s,f) => s + (Number(f.valor_frete)||0), 0);
+  const totNF = doMes.reduce((s,f) => s + (Number(f.valor_nf)||0), 0);
+  const todos = todosFretesCarregados();
+  const atrasadas = todos.filter(freteAtrasado).length;
+  const docs = doMes.filter(f => Number(f.valor_frete) > 0 && (!f.cte_recebido || !f.boleto_recebido)).length;
+  const reversos = todos.filter(f => f.tipo === 'reverso' && f.status === 'aguardando').length;
+  el.innerHTML = `
+    <div class="dash-card"><div class="dash-card-label">Fretes em ${esc(nomeMesFrete(FRETES_MES))}</div><div class="dash-card-value">${fmtMoeda(totFrete)}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">${doMes.length} envio(s) · ${totNF ? (totFrete/totNF*100).toLocaleString('pt-BR',{maximumFractionDigits:2})+'% sobre as NFs' : '—'}</div></div>
+    <div class="dash-card" style="cursor:pointer" onclick="filtrarFretesSituacao('envios','atrasado')"><div class="dash-card-label">Entregas atrasadas</div><div class="dash-card-value ${atrasadas?'accent':''}">${atrasadas}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">previsão vencida, últimos 3 meses</div></div>
+    <div class="dash-card" style="cursor:pointer" onclick="filtrarFretesSituacao('envios','docs')"><div class="dash-card-label">CT-e / boleto pendente</div><div class="dash-card-value" style="color:#b45309">${docs}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">no mês</div></div>
+    <div class="dash-card" style="cursor:pointer" onclick="filtrarFretesSituacao('reversos','aberto')"><div class="dash-card-label">Reversos aguardando postagem</div><div class="dash-card-value">${reversos}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">últimos 3 meses</div></div>`;
+}
+function filtrarFretesSituacao(subaba, sit){
+  FRETE_SUBABA = subaba;
+  trocarSubabaFretes(subaba);
+  const s = document.getElementById('fretes-f-situacao'); if(s){ s.value = sit; renderTabelaFretes(); }
+}
+
+// Pedidos que saíram em romaneio (transportadora) e ainda não têm frete lançado
+function fretesPendentesDeColeta(){
+  const lim = somarMesesFrete(mesDeFrete(hojeISO()), -1) + '-01';
+  const pids = new Set(), nfs = new Set();
+  Object.values(FRETES_CACHE).flat().forEach(f => {
+    if(f.pedido_id) pids.add(f.pedido_id);
+    if(f.nf_numero) nfs.add(String(f.nf_numero));
+  });
+  const out = [];
+  (FRETES_COLETAS||[]).forEach(c => {
+    if(c.tipo === 'cliente') return;
+    if(String(c.data||'') < lim) return;
+    (c.notas||[]).forEach(n => {
+      if(!n || pids.has(n.pedido_id) || nfs.has(String(n.nf_numero))) return;
+      out.push({ ...n, coleta_id: c.id, coleta_numero: c.numero || '', coletado_em: c.data, transportadora_nome: c.transportadora_nome || '' });
+    });
+  });
+  return out.sort((a,b) => String(a.coletado_em).localeCompare(String(b.coletado_em)));
+}
+function renderFretesPendentes(){
+  const el = document.getElementById('fretes-pendentes'); if(!el) return;
+  const lista = fretesPendentesDeColeta();
+  if(!lista.length){ el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 14px;margin-bottom:16px">
+      <div style="font-weight:600;margin-bottom:8px">📦 Saíram na coleta e ainda não têm frete lançado (${lista.length})</div>
+      <div class="table-wrap" style="overflow-x:auto"><table>
+        <thead><tr><th>Coletado em</th><th>NF</th><th>Pedido</th><th>Cliente</th><th>Transportadora</th><th></th></tr></thead>
+        <tbody>${lista.map((n,i) => `<tr>
+          <td style="font-size:12px">${fmtDataHoraColeta(n.coletado_em)}</td>
+          <td><strong>${esc(n.nf_numero)}</strong></td>
+          <td>#${esc(n.pedido_numero)}</td>
+          <td>${esc(n.cliente_nome)}<div style="font-size:11px;color:var(--muted)">${esc(n.cliente_cidade)}${n.cliente_uf?'/'+esc(n.cliente_uf):''}</div></td>
+          <td>${esc(n.transportadora_nome)}</td>
+          <td style="text-align:right;white-space:nowrap">
+            <button class="btn btn-primary btn-sm" onclick="lancarFreteDaColeta(${i})">Lançar frete</button>
+            <button class="btn btn-outline btn-sm" title="Sem frete a controlar (ex.: cliente paga direto à transportadora)" onclick="dispensarFreteDaColeta(${i})">Sem frete</button>
+          </td></tr>`).join('')}</tbody>
+      </table></div>
+    </div>`;
+}
+
+async function lancarFreteDaColeta(i){
+  if(!temPermissaoEditar('fretes')) return;
+  const n = fretesPendentesDeColeta()[i]; if(!n) return;
+  let ped = {};
+  try {
+    const campos = ['vendedor_nome','total','data_faturamento','status'];
+    const snaps = await Promise.all(campos.map(c => db.ref('pedidos/'+n.pedido_id+'/'+c).once('value')));
+    campos.forEach((c,k) => { ped[c] = snaps[k].val(); });
+  } catch(e){ toast('Não consegui ler o pedido: '+e.message,'error'); }
+  const dataColeta = n.coletado_em ? ymdLocal(new Date(n.coletado_em)) : hojeISO();
+  const dataNF = ped.data_faturamento ? ymdLocal(parseDataLocal(String(ped.data_faturamento).slice(0,10))) : dataColeta;
+  abrirModalFrete(null, 'envio', {
+    pedido_id: ped.status != null ? n.pedido_id : '', pedido_numero: n.pedido_numero,
+    nf_numero: n.nf_numero, data: dataNF, cliente_nome: n.cliente_nome,
+    cliente_cidade: n.cliente_cidade, cliente_uf: n.cliente_uf,
+    transportadora: n.transportadora_nome, vendedor_nome: ped.vendedor_nome || '',
+    valor_nf: Number(ped.total) || '', status: 'coletado', coleta_id: n.coleta_id, origem: 'coleta'
+  });
+}
+async function dispensarFreteDaColeta(i){
+  if(!temPermissaoEditar('fretes')) return;
+  const n = fretesPendentesDeColeta()[i]; if(!n) return;
+  if(!await confirmCustom(`Marcar a NF ${esc(n.nf_numero)} (pedido #${esc(n.pedido_numero)}) como "sem frete a controlar"?\n\nEla sai desta lista e não aparece no controle.`, 'Marcar sem frete')) return;
+  const data = n.coletado_em ? ymdLocal(new Date(n.coletado_em)) : hojeISO();
+  const mes = mesDeFrete(data);
+  const id = db.ref('fretes/'+mes).push().key;
+  const rec = { dispensado: true, tipo: 'envio', data, nf_numero: String(n.nf_numero||''), pedido_id: n.pedido_id || '', pedido_numero: String(n.pedido_numero||''),
+    cliente_nome: n.cliente_nome || '', transportadora: n.transportadora_nome || '', coleta_id: n.coleta_id || '',
+    criado_por: usuarioLogado?.nome || '', criado_em: agora().toISOString() };
+  try {
+    await db.ref('fretes/'+mes+'/'+id).set(rec);
+    (FRETES_CACHE[mes] = FRETES_CACHE[mes] || []).push({ id, mes, ...rec });
+    renderFretesPendentes();
+    toast('✓ Marcado como sem frete','success');
+  } catch(e){ toast('Erro: '+e.message,'error'); }
+}
+
+function montarFiltrosFretes(){
+  const transp = new Set(), vend = new Set();
+  todosFretesCarregados().forEach(f => { if(f.transportadora) transp.add(f.transportadora); if(f.vendedor_nome) vend.add(f.vendedor_nome); });
+  const preencher = (id, valores, rotulo) => {
+    const sel = document.getElementById(id); if(!sel) return;
+    const atual = sel.value;
+    sel.innerHTML = `<option value="">${rotulo}</option>` + Array.from(valores).sort((a,b)=>a.localeCompare(b,'pt-BR')).map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+    if(atual && valores.has(atual)) sel.value = atual;
+  };
+  preencher('fretes-f-transp', transp, 'Todas');
+  preencher('fretes-f-vend', vend, 'Todos');
+}
+
+function trocarSubabaFretes(sub){
+  FRETE_SUBABA = sub;
+  const env = sub === 'envios';
+  const b1 = document.getElementById('fretes-subaba-envios'), b2 = document.getElementById('fretes-subaba-reversos');
+  if(b1) b1.className = 'btn btn-sm ' + (env ? 'btn-secondary' : 'btn-outline');
+  if(b2) b2.className = 'btn btn-sm ' + (env ? 'btn-outline' : 'btn-secondary');
+  const tw = document.getElementById('fretes-f-transp-wrap'); if(tw) tw.style.display = env ? '' : 'none';
+  const sit = document.getElementById('fretes-f-situacao');
+  if(sit){
+    const atual = sit.value;
+    sit.innerHTML = env
+      ? '<option value="">Todas</option><option value="aberto">Em aberto (últimos 3 meses)</option><option value="atrasado">Atrasadas (últimos 3 meses)</option><option value="docs">CT-e ou boleto pendente</option><option value="final">Finalizadas</option>'
+      : '<option value="">Todas</option><option value="aberto">Aguardando postagem (últimos 3 meses)</option><option value="postado">Postados / a caminho</option><option value="final">Finalizados</option>';
+    if([...sit.options].some(o => o.value === atual)) sit.value = atual;
+  }
+  renderTabelaFretes();
+}
+
+function listaFiltradaFretes(){
+  const env = FRETE_SUBABA === 'envios';
+  const sit = document.getElementById('fretes-f-situacao')?.value || '';
+  const busca = normTxtFrete(document.getElementById('fretes-busca')?.value || '');
+  const fT = document.getElementById('fretes-f-transp')?.value || '';
+  const fV = document.getElementById('fretes-f-vend')?.value || '';
+  // "Em aberto" e "Atrasadas" olham os últimos 3 meses, não só o mês escolhido
+  const base = (sit === 'aberto' || sit === 'atrasado') ? todosFretesCarregados() : (FRETES_CACHE[FRETES_MES]||[]).filter(f => !f.dispensado);
+  return base.filter(f => {
+    if(env !== (f.tipo !== 'reverso')) return false;
+    if(env && fT && f.transportadora !== fT) return false;
+    if(fV && f.vendedor_nome !== fV) return false;
+    if(sit === 'aberto' && FRETE_STATUS_FINAIS.includes(f.status)) return false;
+    if(sit === 'atrasado' && !freteAtrasado(f)) return false;
+    if(sit === 'docs' && !(Number(f.valor_frete) > 0 && (!f.cte_recebido || !f.boleto_recebido))) return false;
+    if(sit === 'final' && !FRETE_STATUS_FINAIS.includes(f.status)) return false;
+    if(sit === 'postado' && f.status !== 'postado') return false;
+    if(busca){
+      const alvo = normTxtFrete([f.nf_numero, f.pedido_numero, f.cliente_nome, f.cliente_cidade, f.rastreio, f.codigo_autorizacao, f.transportadora, f.vendedor_nome, f.obs].join(' '));
+      if(!alvo.includes(busca)) return false;
+    }
+    return true;
+  }).sort((a,b) => String(a.data).localeCompare(String(b.data)) || String(a.nf_numero).localeCompare(String(b.nf_numero), 'pt-BR', {numeric:true}));
+}
+
+function renderTabelaFretes(){
+  const el = document.getElementById('fretes-tabela'); if(!el) return;
+  const lista = listaFiltradaFretes();
+  const pode = temPermissaoEditar('fretes');
+  const hoje = hojeISO();
+  if(!lista.length){
+    el.innerHTML = `<div style="text-align:center;color:var(--muted);padding:28px">Nenhum ${FRETE_SUBABA==='envios'?'frete':'reverso'} encontrado.</div>`;
+    return;
+  }
+  const chk = (f, campo) => {
+    const ok = !!f[campo];
+    return `<span ${pode?`style="cursor:pointer" onclick="alternarDocFrete('${f.mes}','${f.id}','${campo}')" title="Clique para ${ok?'desmarcar':'marcar como recebido'}"`:''}>${ok ? '✅' : '<span style="color:#d97706">⏳</span>'}</span>`;
+  };
+  const btnEd = f => pode ? `<div style="display:flex;gap:4px">${f.tipo!=='reverso' && !FRETE_STATUS_FINAIS.includes(f.status) ? `<button class="btn btn-success btn-sm" title="Marcar como entregue hoje" onclick="marcarEntregueFrete('${f.mes}','${f.id}')">✓</button>` : ''}<button class="btn btn-outline btn-sm" onclick="abrirModalFrete('${f.mes}/${f.id}')">✏️</button></div>` : '';
+  if(FRETE_SUBABA === 'envios'){
+    const totNF = lista.reduce((s,f) => s + (Number(f.valor_nf)||0), 0);
+    const totFr = lista.reduce((s,f) => s + (Number(f.valor_frete)||0), 0);
+    el.innerHTML = `<table>
+      <thead><tr><th>Data NF</th><th>NF</th><th>Cliente</th><th>Vendedor</th><th>Transportadora</th><th style="text-align:right">Valor NF</th><th style="text-align:right">Frete</th><th style="text-align:right">%</th><th>Previsão</th><th>Status</th><th>Entregue em</th><th style="text-align:center">CT-e</th><th style="text-align:center">Boleto</th><th></th></tr></thead>
+      <tbody>${lista.map(f => {
+        const pct = Number(f.valor_nf) > 0 ? (Number(f.valor_frete)||0)/Number(f.valor_nf)*100 : 0;
+        const atras = freteAtrasado(f);
+        return `<tr>
+          <td style="white-space:nowrap">${fmtData(f.data)}</td>
+          <td><strong>${esc(f.nf_numero||'—')}</strong>${f.pedido_numero?`<div style="font-size:11px;color:var(--muted)">ped. #${esc(f.pedido_numero)}</div>`:''}</td>
+          <td>${esc(f.cliente_nome)}${f.cliente_cidade?`<div style="font-size:11px;color:var(--muted)">${esc(f.cliente_cidade)}${f.cliente_uf?'/'+esc(f.cliente_uf):''}</div>`:''}</td>
+          <td>${esc(f.vendedor_nome)}</td>
+          <td>${esc(f.transportadora)}${f.rastreio?`<div style="font-size:11px;color:var(--muted)">📍 ${esc(f.rastreio)}</div>`:''}</td>
+          <td style="text-align:right;white-space:nowrap">${fmtMoeda(f.valor_nf)}</td>
+          <td style="text-align:right;white-space:nowrap"><strong>${fmtMoeda(f.valor_frete)}</strong></td>
+          <td style="text-align:right">${pct ? pct.toLocaleString('pt-BR',{maximumFractionDigits:2})+'%' : '—'}</td>
+          <td style="white-space:nowrap;${atras?'color:#b91c1c;font-weight:700':''}">${f.previsao ? fmtData(f.previsao) : '—'}${atras?' ⚠️':''}</td>
+          <td>${badgeStatusFrete('envio', f.status)}${f.obs?`<div style="font-size:11px;color:var(--muted);max-width:180px">${esc(f.obs)}</div>`:''}</td>
+          <td style="white-space:nowrap">${f.data_entrega ? fmtData(f.data_entrega) : ''}</td>
+          <td style="text-align:center">${Number(f.valor_frete)>0 ? chk(f,'cte_recebido') : ''}</td>
+          <td style="text-align:center">${Number(f.valor_frete)>0 ? chk(f,'boleto_recebido') : ''}</td>
+          <td>${btnEd(f)}</td></tr>`;
+      }).join('')}</tbody>
+      <tfoot><tr style="font-weight:700;border-top:2px solid var(--border)"><td colspan="5">${lista.length} envio(s)</td><td style="text-align:right;white-space:nowrap">${fmtMoeda(totNF)}</td><td style="text-align:right;white-space:nowrap">${fmtMoeda(totFr)}</td><td style="text-align:right">${totNF ? (totFr/totNF*100).toLocaleString('pt-BR',{maximumFractionDigits:2})+'%' : '—'}</td><td colspan="6"></td></tr></tfoot>
+    </table>`;
+  } else {
+    el.innerHTML = `<table>
+      <thead><tr><th>Emitido em</th><th>Código de autorização</th><th>Cliente</th><th>Vendedor</th><th>Motivo</th><th>Postar até</th><th>Rastreio</th><th>Status</th><th>Recebido em</th><th></th></tr></thead>
+      <tbody>${lista.map(f => {
+        const vencido = f.status === 'aguardando' && f.prazo_postagem && f.prazo_postagem < hoje;
+        return `<tr>
+          <td style="white-space:nowrap">${fmtData(f.data)}</td>
+          <td><strong style="font-family:monospace;font-size:14px">${esc(f.codigo_autorizacao||'—')}</strong>
+            ${f.codigo_autorizacao?`<button class="btn btn-outline btn-sm" style="padding:1px 6px;margin-left:4px" title="Copiar código" onclick="copiarTextoFrete('${esc(f.codigo_autorizacao)}')">📋</button>`:''}</td>
+          <td>${esc(f.cliente_nome)}${f.cliente_cidade?`<div style="font-size:11px;color:var(--muted)">${esc(f.cliente_cidade)}${f.cliente_uf?'/'+esc(f.cliente_uf):''}</div>`:''}</td>
+          <td>${esc(f.vendedor_nome)}</td>
+          <td>${esc(f.motivo)}${f.nf_numero?`<div style="font-size:11px;color:var(--muted)">NF ${esc(f.nf_numero)}</div>`:''}</td>
+          <td style="white-space:nowrap;${vencido?'color:#b91c1c;font-weight:700':''}">${f.prazo_postagem ? fmtData(f.prazo_postagem) : '—'}${vencido?' ⚠️ vencido':''}</td>
+          <td>${esc(f.rastreio)}</td>
+          <td>${badgeStatusFrete('reverso', f.status)}${f.obs?`<div style="font-size:11px;color:var(--muted);max-width:200px">${esc(f.obs)}</div>`:''}</td>
+          <td style="white-space:nowrap">${f.data_entrega ? fmtData(f.data_entrega) : ''}</td>
+          <td>${btnEd(f)}</td></tr>`;
+      }).join('')}</tbody>
+    </table>`;
+  }
+}
+
+function copiarTextoFrete(txt){
+  const ok = () => toast('✓ Código copiado','success');
+  if(navigator.clipboard?.writeText) navigator.clipboard.writeText(txt).then(ok).catch(() => toast(txt));
+  else toast(txt);
+}
+
+async function alternarDocFrete(mes, id, campo){
+  if(!temPermissaoEditar('fretes')) return;
+  const f = (FRETES_CACHE[mes]||[]).find(x => x.id === id); if(!f) return;
+  const novo = !f[campo];
+  try {
+    const ex = await db.ref('fretes/'+mes+'/'+id+'/data').once('value');
+    if(!ex.exists()){ toast('Esse frete não existe mais. Clique em Atualizar.','error'); return; }
+    await db.ref('fretes/'+mes+'/'+id).update({ [campo]: novo, atualizado_por: usuarioLogado?.nome || '', atualizado_em: agora().toISOString() });
+    f[campo] = novo;
+    renderTabelaFretes(); renderFretesCards();
+  } catch(e){ toast('Erro: '+e.message,'error'); }
+}
+
+// Atalho da linha: entrega realizada hoje (atualiza também o que o vendedor vê no pedido)
+async function marcarEntregueFrete(mes, id){
+  if(!temPermissaoEditar('fretes')) return;
+  const f = (FRETES_CACHE[mes]||[]).find(x => x.id === id); if(!f) return;
+  try {
+    const ex = await db.ref('fretes/'+mes+'/'+id+'/data').once('value');
+    if(!ex.exists()){ toast('Esse frete não existe mais. Clique em Atualizar.','error'); return; }
+    const mud = { status:'entregue', data_entrega: hojeISO(), atualizado_por: usuarioLogado?.nome || '', atualizado_em: agora().toISOString() };
+    const updates = {};
+    Object.keys(mud).forEach(k => { updates['fretes/'+mes+'/'+id+'/'+k] = mud[k]; });
+    if(f.pedido_id && await pedidoExisteFrete(f.pedido_id)) updates['pedidos/'+f.pedido_id+'/entrega'] = resumoEntregaPedido({ ...f, ...mud }, mes, id);
+    await db.ref().update(updates);
+    Object.assign(f, mud);
+    toast('✓ Entrega realizada','success');
+    renderFretesCards(); renderTabelaFretes();
+  } catch(e){ toast('Erro: '+e.message,'error'); }
+}
+
+// ══ MODAL LANÇAR / EDITAR ══
+async function carregarUsuariosFretes(){
+  if(FRETES_USUARIOS) return FRETES_USUARIOS;
+  try {
+    const snap = await db.ref('usuarios').once('value');
+    const v = snap.val() || {};
+    FRETES_USUARIOS = Object.values(v).filter(u => u && u.nome && u.ativo !== false).map(u => u.nome).sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  } catch(e){ FRETES_USUARIOS = []; }
+  return FRETES_USUARIOS;
+}
+
+function valFrete(id){ return document.getElementById(id)?.value ?? ''; }
+function setFrete(id, v){ const el = document.getElementById(id); if(el) el.value = (v === null || v === undefined) ? '' : v; }
+
+async function abrirModalFrete(ref, tipo, prefill){
+  if(!temPermissaoEditar('fretes')){ toast('Sem permissão para lançar fretes','error'); return; }
+  let f = null;
+  FRETE_EDIT = null;
+  if(ref){
+    const [mes, id] = ref.split('/');
+    f = (FRETES_CACHE[mes]||[]).find(x => x.id === id);
+    if(!f){ toast('Frete não encontrado. Clique em Atualizar.','error'); return; }
+    FRETE_EDIT = { mes, id, original: { ...f } };
+    tipo = f.tipo === 'reverso' ? 'reverso' : 'envio';
+  } else {
+    f = { tipo, data: hojeISO(), status: tipo === 'reverso' ? 'aguardando' : 'coletado', transportadora: tipo === 'reverso' ? 'CORREIOS' : '', origem: 'manual', ...(prefill||{}) };
+  }
+  const [usuarios] = await Promise.all([carregarUsuariosFretes(), carregarTransportadoras().catch(()=>[])]);
+  document.getElementById('frete-vendedores-lista').innerHTML = usuarios.map(n => `<option value="${esc(n)}"></option>`).join('');
+  const nomesT = new Set((TRANSPORTADORAS_DB||[]).map(t => t.nome));
+  todosFretesCarregados().forEach(x => { if(x.transportadora) nomesT.add(x.transportadora); });
+  document.getElementById('frete-transportadoras-lista').innerHTML = Array.from(nomesT).sort((a,b)=>a.localeCompare(b,'pt-BR')).map(n => `<option value="${esc(n)}"></option>`).join('');
+
+  document.getElementById('frete-modal-titulo').textContent = (FRETE_EDIT ? 'Editar ' : 'Lançar ') + (tipo === 'reverso' ? 'reverso dos Correios' : 'frete');
+  document.querySelectorAll('input[name="frete-tipo"]').forEach(r => { r.checked = r.value === tipo; r.disabled = !!FRETE_EDIT; });
+  setFrete('frete-transportadora', f.transportadora);
+  setFrete('frete-data', f.data);
+  setFrete('frete-nf', f.nf_numero);
+  setFrete('frete-cliente', f.cliente_nome);
+  setFrete('frete-cidade', f.cliente_cidade);
+  setFrete('frete-uf', f.cliente_uf);
+  setFrete('frete-vendedor', f.vendedor_nome);
+  setFrete('frete-valor-nf', f.valor_nf !== '' && f.valor_nf != null ? Number(f.valor_nf).toFixed(2) : '');
+  setFrete('frete-valor-frete', f.valor_frete !== '' && f.valor_frete != null ? Number(f.valor_frete).toFixed(2) : '');
+  setFrete('frete-peso', f.peso_kg);
+  setFrete('frete-previsao', f.previsao);
+  setFrete('frete-data-entrega', f.data_entrega);
+  setFrete('frete-rastreio', f.rastreio);
+  setFrete('frete-obs', f.obs);
+  setFrete('frete-codigo', f.codigo_autorizacao);
+  setFrete('frete-prazo-postagem', f.prazo_postagem);
+  setFrete('frete-pedido-busca', '');
+  document.getElementById('frete-motivo').innerHTML = FRETE_MOTIVOS_REVERSO.map(m => `<option value="${m}">${m}</option>`).join('');
+  setFrete('frete-motivo', f.motivo || 'Garantia');
+  document.getElementById('frete-cte').checked = !!f.cte_recebido;
+  document.getElementById('frete-boleto').checked = !!f.boleto_recebido;
+  document.getElementById('frete-agile-regiao').value = AGILE_CIDADES[normTxtFrete(f.cliente_cidade)] ? 'interior' : 'bh';
+  FRETE_PEDIDO_VINC = f.pedido_id ? { id: f.pedido_id, numero: f.pedido_numero || '' } : null;
+  FRETE_EDIT_EXTRA = { coleta_id: f.coleta_id || '', origem: f.origem || 'manual', status: f.status };
+  aoMudarTipoFrete(f.status);
+  renderVinculoPedidoFrete();
+  atualizarCalculoFrete();
+  document.getElementById('frete-btn-excluir').style.display = FRETE_EDIT ? '' : 'none';
+  abrirModal('modal-frete');
+}
+
+function tipoFreteModal(){ return document.querySelector('input[name="frete-tipo"]:checked')?.value || 'envio'; }
+function aoMudarTipoFrete(statusAtual){
+  const tipo = tipoFreteModal();
+  const rev = tipo === 'reverso';
+  document.querySelectorAll('.frete-so-envio').forEach(e => e.style.display = rev ? 'none' : '');
+  document.querySelectorAll('.frete-so-reverso').forEach(e => e.style.display = rev ? '' : 'none');
+  const mapa = rev ? FRETE_STATUS_REVERSO : FRETE_STATUS_ENVIO;
+  const sel = document.getElementById('frete-status');
+  const atual = typeof statusAtual === 'string' ? statusAtual : sel.value;
+  sel.innerHTML = Object.keys(mapa).map(k => `<option value="${k}">${mapa[k].label}</option>`).join('');
+  sel.value = mapa[atual] ? atual : Object.keys(mapa)[0];
+  document.getElementById('frete-lbl-data').textContent = rev ? 'Data de emissão do código *' : 'Data da NF *';
+  document.getElementById('frete-lbl-data-entrega').textContent = rev ? 'Recebido na Crow em' : 'Data da entrega';
+  if(rev && !valFrete('frete-transportadora')) setFrete('frete-transportadora','CORREIOS');
+  if(!FRETE_EDIT) document.getElementById('frete-modal-titulo').textContent = 'Lançar ' + (rev ? 'reverso dos Correios' : 'frete');
+  atualizarCalculoFrete();
+}
+
+function renderVinculoPedidoFrete(){
+  const el = document.getElementById('frete-pedido-vinculo');
+  if(!el) return;
+  el.innerHTML = FRETE_PEDIDO_VINC
+    ? `<span style="font-size:13px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;padding:4px 10px;border-radius:6px">🔗 Pedido #${esc(FRETE_PEDIDO_VINC.numero)} — o vendedor verá a previsão de entrega</span>
+       <button type="button" class="btn btn-outline btn-sm" onclick="FRETE_PEDIDO_VINC=null;renderVinculoPedidoFrete()">Desvincular</button>`
+    : `<span style="font-size:12px;color:var(--muted)">Sem pedido vinculado — o vendedor não verá a previsão.</span>`;
+}
+
+async function buscarPedidoParaFrete(){
+  const num = String(valFrete('frete-pedido-busca')).replace(/\D/g,'');
+  if(!num){ toast('Digite o número do pedido','error'); return; }
+  try {
+    if(!FRETE_PEDIDOS_RECENTES){
+      toast('Buscando pedidos dos últimos 45 dias…');
+      const ini = new Date(agoraTs() - 45*86400000).toISOString();
+      const snap = await db.ref('pedidos').orderByChild('data').startAt(ini).once('value');
+      const v = snap.val() || {};
+      FRETE_PEDIDOS_RECENTES = Object.keys(v).map(id => {
+        const p = v[id] || {};
+        return { id, numero: String(p.numero||''), cliente_nome: p.cliente_nome || '', cliente_cidade: p.cliente_cidade || '', cliente_uf: p.cliente_uf || '',
+          vendedor_nome: p.vendedor_nome || '', total: Number(p.total)||0, data_faturamento: p.data_faturamento || '', nf_numero: p.nf_numero || '', status: p.status };
+      });
+    }
+    const p = FRETE_PEDIDOS_RECENTES.find(x => x.numero === num);
+    if(!p){ toast('Pedido não encontrado nos últimos 45 dias','error'); return; }
+    if(p.status === 'Cancelado' || p.status === 'Orçamento'){ toast(`O pedido #${num} está ${p.status}`,'error'); return; }
+    FRETE_PEDIDO_VINC = { id: p.id, numero: p.numero };
+    if(!valFrete('frete-cliente')) setFrete('frete-cliente', p.cliente_nome);
+    if(!valFrete('frete-cidade')) setFrete('frete-cidade', p.cliente_cidade);
+    if(!valFrete('frete-uf')) setFrete('frete-uf', p.cliente_uf);
+    if(!valFrete('frete-vendedor')) setFrete('frete-vendedor', p.vendedor_nome);
+    if(!valFrete('frete-nf') && p.nf_numero) setFrete('frete-nf', p.nf_numero);
+    if(!valFrete('frete-valor-nf') && p.total) setFrete('frete-valor-nf', p.total.toFixed(2));
+    if(p.data_faturamento && !FRETE_EDIT) setFrete('frete-data', ymdLocal(parseDataLocal(String(p.data_faturamento).slice(0,10))));
+    setFrete('frete-pedido-busca','');
+    renderVinculoPedidoFrete();
+    atualizarCalculoFrete();
+  } catch(e){ toast('Erro ao buscar pedido: '+e.message,'error'); }
+}
+
+// Recalcula %, mostra a sugestão da tabela Ágile e o prazo da cidade
+function atualizarCalculoFrete(){
+  const vNF = parseBR(valFrete('frete-valor-nf'));
+  const vFr = parseBR(valFrete('frete-valor-frete'));
+  const pctEl = document.getElementById('frete-pct');
+  if(pctEl) pctEl.textContent = vNF > 0 && vFr > 0 ? (vFr/vNF*100).toLocaleString('pt-BR',{maximumFractionDigits:2})+'% sobre a NF' : '';
+  const box = document.getElementById('frete-agile-box');
+  if(!box) return;
+  const mostrar = tipoFreteModal() === 'envio' && ehAgile(valFrete('frete-transportadora'));
+  box.style.display = mostrar ? '' : 'none';
+  if(!mostrar) return;
+  const cid = AGILE_CIDADES[normTxtFrete(valFrete('frete-cidade'))];
+  const regiao = document.getElementById('frete-agile-regiao').value;
+  const r = calcFreteAgile(regiao, vNF, parseBR(valFrete('frete-peso')));
+  document.getElementById('frete-agile-info').innerHTML =
+    (vNF > 0 ? `Sugestão: <strong>${fmtMoeda(r.valor)}</strong> <span style="color:var(--muted)">(${esc(r.regra)})</span>` : 'Informe o valor da NF para calcular.') +
+    (cid ? `<br>Prazo para ${esc(cid.cidade)}: <strong>${esc(cid.prazo)}</strong>` : (valFrete('frete-cidade') && regiao === 'interior' ? '<br><span style="color:#b45309">Cidade fora da lista de prazos da Ágile.</span>' : ''));
+  document.getElementById('frete-agile-usar').style.display = vNF > 0 ? '' : 'none';
+}
+function usarSugestaoAgile(){
+  const vNF = parseBR(valFrete('frete-valor-nf'));
+  const r = calcFreteAgile(document.getElementById('frete-agile-regiao').value, vNF, parseBR(valFrete('frete-peso')));
+  setFrete('frete-valor-frete', r.valor.toFixed(2));
+  // Previsão pelo prazo da cidade (24h = 1 dia útil, 48h = 2) — só se ainda estiver vazia
+  if(!valFrete('frete-previsao') && valFrete('frete-data')){
+    const cid = AGILE_CIDADES[normTxtFrete(valFrete('frete-cidade'))];
+    const regiao = document.getElementById('frete-agile-regiao').value;
+    const dias = cid ? (/48/.test(cid.prazo) ? 2 : (/24/.test(cid.prazo) ? 1 : 0)) : (regiao === 'bh' ? 1 : 0);
+    if(dias) setFrete('frete-previsao', somarDiasUteisFrete(valFrete('frete-data'), dias));
+  }
+  atualizarCalculoFrete();
+}
+function aoMudarStatusFrete(){
+  const st = valFrete('frete-status');
+  if((st === 'entregue' || st === 'recebido') && !valFrete('frete-data-entrega')) setFrete('frete-data-entrega', hojeISO());
+}
+
+function resumoEntregaPedido(rec, mes, id){
+  return {
+    transportadora: rec.transportadora || '', previsao: rec.previsao || '',
+    status: rec.status || '', status_label: infoStatusFrete('envio', rec.status).label,
+    data_entrega: rec.data_entrega || '', rastreio: rec.rastreio || '',
+    ref: mes+'/'+id, atualizado_em: rec.atualizado_em
+  };
+}
+// Gravar em pedidos/{id}/... de um pedido apagado recriaria um "pedido fantasma"
+async function pedidoExisteFrete(pid){
+  if(!pid) return false;
+  try { return (await db.ref('pedidos/'+pid+'/status').once('value')).exists(); } catch(e){ return false; }
+}
+
+async function salvarFrete(){
+  if(freteEmGravacao) return;
+  if(!temPermissaoEditar('fretes')){ toast('Sem permissão','error'); return; }
+  const tipo = tipoFreteModal();
+  const rev = tipo === 'reverso';
+  const data = valFrete('frete-data');
+  const cliente = String(valFrete('frete-cliente')).trim();
+  const transp = String(valFrete('frete-transportadora')).trim().replace(/\s+/g,' ').toUpperCase();
+  const codigo = String(valFrete('frete-codigo')).trim();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(data)){ toast(rev ? 'Informe a data de emissão do código' : 'Informe a data da NF','error'); document.getElementById('frete-data').focus(); return; }
+  if(cliente.length < 2){ toast('Informe o cliente','error'); document.getElementById('frete-cliente').focus(); return; }
+  if(!rev && !transp){ toast('Informe a transportadora','error'); document.getElementById('frete-transportadora').focus(); return; }
+  if(rev && !codigo){ toast('Informe o código de autorização de postagem','error'); document.getElementById('frete-codigo').focus(); return; }
+  const status = valFrete('frete-status');
+  const dataEntrega = valFrete('frete-data-entrega');
+  if((status === 'entregue' || status === 'recebido') && !dataEntrega){ toast('Informe a data da entrega','error'); return; }
+
+  const agoraIso = agora().toISOString();
+  const rec = {
+    tipo, data, status,
+    transportadora: transp || (rev ? 'CORREIOS' : ''),
+    nf_numero: String(valFrete('frete-nf')).trim(),
+    cliente_nome: cliente,
+    cliente_cidade: String(valFrete('frete-cidade')).trim(),
+    cliente_uf: String(valFrete('frete-uf')).trim().toUpperCase(),
+    vendedor_nome: String(valFrete('frete-vendedor')).trim(),
+    previsao: rev ? '' : valFrete('frete-previsao'),
+    data_entrega: dataEntrega,
+    rastreio: String(valFrete('frete-rastreio')).trim().toUpperCase(),
+    obs: String(valFrete('frete-obs')).trim(),
+    pedido_id: (!rev && FRETE_PEDIDO_VINC) ? FRETE_PEDIDO_VINC.id : '',
+    pedido_numero: (!rev && FRETE_PEDIDO_VINC) ? String(FRETE_PEDIDO_VINC.numero||'') : '',
+    coleta_id: FRETE_EDIT_EXTRA.coleta_id || '',
+    origem: FRETE_EDIT_EXTRA.origem || 'manual',
+    atualizado_por: usuarioLogado?.nome || '', atualizado_em: agoraIso
+  };
+  if(rev){
+    rec.codigo_autorizacao = codigo;
+    rec.prazo_postagem = valFrete('frete-prazo-postagem');
+    rec.motivo = valFrete('frete-motivo');
+    rec.valor_nf = 0; rec.valor_frete = 0;
+  } else {
+    rec.valor_nf = Math.round(parseBR(valFrete('frete-valor-nf'))*100)/100;
+    rec.valor_frete = Math.round(parseBR(valFrete('frete-valor-frete'))*100)/100;
+    const peso = parseBR(valFrete('frete-peso'));
+    rec.peso_kg = peso > 0 ? peso : null;
+    rec.cte_recebido = document.getElementById('frete-cte').checked;
+    rec.boleto_recebido = document.getElementById('frete-boleto').checked;
+  }
+  rec.criado_por = FRETE_EDIT?.original?.criado_por || usuarioLogado?.nome || '';
+  rec.criado_em = FRETE_EDIT?.original?.criado_em || agoraIso;
+
+  // Mesma NF já lançada (aviso, não trava: pode haver reentrega / segundo frete)
+  if(!rev && rec.nf_numero){
+    const dup = Object.values(FRETES_CACHE).flat().find(x => !x.dispensado && x.tipo !== 'reverso' && String(x.nf_numero) === rec.nf_numero && !(FRETE_EDIT && x.id === FRETE_EDIT.id));
+    if(dup && !await confirmCustom(`A NF ${esc(rec.nf_numero)} já tem um frete lançado (${esc(dup.transportadora)}, ${fmtData(dup.data)}).\n\nLançar outro mesmo assim? (ex.: reentrega)`, 'Lançar mesmo assim')) return;
+  }
+
+  freteEmGravacao = true;
+  const btn = document.getElementById('frete-btn-salvar'); if(btn) btn.disabled = true;
+  try {
+    const mes = mesDeFrete(data);
+    const id = FRETE_EDIT ? FRETE_EDIT.id : db.ref('fretes/'+mes).push().key;
+    const updates = {};
+    if(FRETE_EDIT){
+      const ex = await db.ref('fretes/'+FRETE_EDIT.mes+'/'+FRETE_EDIT.id+'/data').once('value');
+      if(!ex.exists()){ toast('Esse frete foi apagado por outra pessoa. Clique em Atualizar.','error'); return; }
+      if(FRETE_EDIT.mes !== mes) updates['fretes/'+FRETE_EDIT.mes+'/'+id] = null;
+    }
+    // Espelho para o vendedor (pedidos/{id}/entrega)
+    const pidAntigo = FRETE_EDIT?.original?.pedido_id || '';
+    const pidNovo = rec.pedido_id;
+    if(pidAntigo && pidAntigo !== pidNovo && await pedidoExisteFrete(pidAntigo)) updates['pedidos/'+pidAntigo+'/entrega'] = null;
+    let avisoPedido = '';
+    if(pidNovo){
+      if(await pedidoExisteFrete(pidNovo)) updates['pedidos/'+pidNovo+'/entrega'] = resumoEntregaPedido(rec, mes, id);
+      else { avisoPedido = ' (o pedido vinculado não existe mais — vínculo removido)'; rec.pedido_id = ''; }
+    }
+    updates['fretes/'+mes+'/'+id] = rec;
+    await db.ref().update(updates);
+
+    // Atualiza o cache local
+    if(FRETE_EDIT) FRETES_CACHE[FRETE_EDIT.mes] = (FRETES_CACHE[FRETE_EDIT.mes]||[]).filter(x => x.id !== id);
+    if(FRETES_CACHE[mes]) FRETES_CACHE[mes] = FRETES_CACHE[mes].filter(x => x.id !== id).concat([{ id, mes, ...rec }]);
+    else await carregarMesFretes(mes, true);
+    fecharModal('modal-frete');
+    toast('✓ ' + (rev ? 'Reverso salvo' : 'Frete salvo') + avisoPedido, avisoPedido ? '' : 'success');
+    renderFretesCards(); renderFretesPendentes(); montarFiltrosFretes(); renderTabelaFretes();
+  } catch(e){
+    toast('Erro ao salvar: '+e.message,'error');
+  } finally {
+    freteEmGravacao = false;
+    if(btn) btn.disabled = false;
+  }
+}
+
+async function excluirFrete(){
+  if(!FRETE_EDIT || !temPermissaoEditar('fretes')) return;
+  const f = FRETE_EDIT.original;
+  if(!await confirmCustom(`Excluir ${f.tipo==='reverso'?'o reverso '+esc(f.codigo_autorizacao||''):'o frete da NF '+esc(f.nf_numero||'—')} de ${esc(f.cliente_nome||'')}?\n\nNão dá para desfazer.`, 'Excluir')) return;
+  try {
+    const updates = { ['fretes/'+FRETE_EDIT.mes+'/'+FRETE_EDIT.id]: null };
+    if(f.pedido_id && await pedidoExisteFrete(f.pedido_id)) updates['pedidos/'+f.pedido_id+'/entrega'] = null;
+    await db.ref().update(updates);
+    FRETES_CACHE[FRETE_EDIT.mes] = (FRETES_CACHE[FRETE_EDIT.mes]||[]).filter(x => x.id !== FRETE_EDIT.id);
+    fecharModal('modal-frete');
+    toast('✓ Excluído','success');
+    renderFretesCards(); renderFretesPendentes(); montarFiltrosFretes(); renderTabelaFretes();
+  } catch(e){ toast('Erro ao excluir: '+e.message,'error'); }
+}
+
+// ══ O QUE O VENDEDOR VÊ NO PEDIDO ══
+function badgeEntregaPedido(p){
+  const e = p && p.entrega; if(!e) return '';
+  if(e.status === 'entregue') return `<span class="badge" style="background:#dcfce7;color:#166534;font-size:10px" title="${esc(e.transportadora)}">🚚 Entregue${e.data_entrega?' '+fmtData(e.data_entrega).slice(0,5):''}</span>`;
+  if(e.status === 'extraviado') return `<span class="badge" style="background:#fecaca;color:#7f1d1d;font-size:10px">🚚 Extraviado</span>`;
+  if(!e.previsao) return `<span class="badge" style="background:#dbeafe;color:#1e40af;font-size:10px" title="${esc(e.transportadora)}">🚚 ${esc(e.status_label||'Enviado')}</span>`;
+  const atras = e.previsao < hojeISO();
+  return `<span class="badge" style="background:${atras?'#fee2e2':'#dbeafe'};color:${atras?'#b91c1c':'#1e40af'};font-size:10px" title="${esc(e.transportadora)} · ${esc(e.status_label||'')}">🚚 Prev. ${fmtData(e.previsao).slice(0,5)}${atras?' ⚠️':''}</span>`;
+}
+function blocoEntregaPedido(p){
+  const e = p && p.entrega; if(!e) return '';
+  const atras = e.previsao && e.status !== 'entregue' && e.status !== 'extraviado' && e.previsao < hojeISO();
+  return `<div style="font-size:12px;color:#334155;background:#f8fafc;border:1px solid #cbd5e1;display:inline-flex;flex-wrap:wrap;align-items:center;gap:8px;padding:4px 10px;border-radius:6px;margin-bottom:10px">
+    🚚 ${esc(e.transportadora||'Entrega')}
+    ${e.previsao ? `· Previsão: <strong style="${atras?'color:#b91c1c':''}">${fmtData(e.previsao)}${atras?' (atrasada)':''}</strong>` : ''}
+    · ${badgeStatusFrete('envio', e.status)}
+    ${e.data_entrega ? `· Entregue em ${fmtData(e.data_entrega)}` : ''}
+    ${e.rastreio ? `· Rastreio: <strong>${esc(e.rastreio)}</strong>` : ''}
+  </div>`;
+}
+
+// ══ IMPORTAR A PLANILHA ANTIGA ══
+// Lê as abas mensais (cabeçalho TRANSPORTADORA | VENDEDOR | DATA NF | NF CROW | ...),
+// grava cada linha no mês da data da NF e pula o que já foi importado antes.
+function dataPlanilhaFrete(v){
+  if(v === null || v === undefined || v === '') return '';
+  if(typeof v === 'number' && v > 20000 && v < 80000){
+    const d = new Date(Date.UTC(1899,11,30) + Math.round(v)*86400000);
+    return d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0');
+  }
+  const m = String(v).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if(m){ const a = m[3].length === 2 ? '20'+m[3] : m[3]; return a+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0'); }
+  return '';
+}
+function abasFretesPlanilha(wb){
+  return wb.SheetNames.filter(n => {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[n], { header:1, raw:true, blankrows:false }).slice(0,15);
+    return rows.some(r => normTxtFrete(r[0]).startsWith('transportadora') && normTxtFrete(r[3]).includes('nf'));
+  });
+}
+async function lerPlanilhaFretes(input){
+  const file = input.files && input.files[0]; input.value = '';
+  if(!file) return;
+  if(!temPermissaoEditar('fretes')) return;
+  try {
+    const buf = await file.arrayBuffer();
+    FRETES_PLANILHA_WB = XLSX.read(buf, { type:'array', sheetRows: 3000 });
+  } catch(e){ toast('Não consegui ler a planilha: '+e.message,'error'); return; }
+  const abas = abasFretesPlanilha(FRETES_PLANILHA_WB);
+  const painel = document.getElementById('fretes-import-painel');
+  if(!abas.length){ toast('Nenhuma aba no formato do controle de fretes foi encontrada','error'); return; }
+  painel.style.display = '';
+  painel.innerHTML = `<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px 14px;margin-bottom:16px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+    <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Aba da planilha</label>
+      <select class="search-input" id="fretes-import-aba" style="width:auto">
+        <option value="__todas">Todas as abas (${abas.length})</option>
+        ${abas.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join('')}
+      </select></div>
+    <button class="btn btn-primary btn-sm" id="fretes-import-btn" onclick="importarPlanilhaFretes()">Importar</button>
+    <button class="btn btn-outline btn-sm" onclick="document.getElementById('fretes-import-painel').style.display='none';FRETES_PLANILHA_WB=null">Cancelar</button>
+    <div style="font-size:12px;color:var(--muted);flex-basis:100%">Linhas já importadas antes são puladas. Linhas sem status e sem previsão recente entram como "Entrega realizada".</div>
+  </div>`;
+}
+function linhaPlanilhaParaFrete(r){
+  const transp = String(r[0]||'').trim().replace(/\s+/g,' ').toUpperCase();
+  const data = dataPlanilhaFrete(r[2]);
+  if(!transp || !data) return null;
+  const txtStatus = String(r[9]||'').trim();
+  const ns = normTxtFrete(txtStatus);
+  const nf = String(r[3]===null||r[3]===undefined ? '' : r[3]).trim();
+  const rec = {
+    tipo: 'envio', data, transportadora: transp,
+    vendedor_nome: String(r[1]||'').trim(),
+    nf_numero: /^-+$/.test(nf) ? '' : nf,
+    cliente_nome: String(r[4]||'').trim(),
+    valor_nf: Math.round((Number(r[5])||0)*100)/100,
+    valor_frete: Math.round((Number(r[6])||0)*100)/100,
+    previsao: dataPlanilhaFrete(r[8]),
+    data_entrega: dataPlanilhaFrete(r[10]),
+    cte_recebido: /ok|sim|x/i.test(String(r[11]||'')),
+    boleto_recebido: /ok|sim|x/i.test(String(r[12]||'')),
+    cliente_cidade: '', cliente_uf: '', rastreio: '', obs: '',
+    pedido_id: '', pedido_numero: '', origem: 'planilha',
+    criado_por: usuarioLogado?.nome || '', criado_em: agora().toISOString()
+  };
+  if(normTxtFrete(transp) === 'reverso'){
+    rec.tipo = 'reverso'; rec.transportadora = 'CORREIOS';
+    const cod = txtStatus.match(/\d[\d.\s-]{5,}\d/);
+    rec.codigo_autorizacao = cod ? cod[0].replace(/\s/g,'') : '';
+    rec.status = rec.data_entrega ? 'recebido' : 'aguardando';
+    rec.motivo = 'Outro'; rec.prazo_postagem = '';
+    if(!cod && txtStatus) rec.obs = txtStatus;
+    rec.valor_nf = 0; rec.valor_frete = 0;
+    return rec;
+  }
+  if(ns.includes('extravi') || ns.includes('estravi')) rec.status = 'extraviado';
+  else if(ns.includes('entregarealizada')) rec.status = 'entregue';
+  else if(ns.includes('pendente')) rec.status = 'pendente';
+  else if(ns.includes('processo')) rec.status = 'em_transito';
+  else if(ns.includes('coletarealizada')) rec.status = 'coletado';
+  else {
+    // Sem status reconhecido: com data de entrega, ou já bem passado da previsão, conta como entregue
+    const ref = rec.previsao || rec.data;
+    const limite = ymdLocal(new Date(agoraTs() - 10*86400000));
+    rec.status = (rec.data_entrega || ref < limite) ? 'entregue' : 'coletado';
+    if(txtStatus) rec.obs = txtStatus;
+  }
+  return rec;
+}
+function chaveDupFrete(f){
+  return [f.tipo, f.data, normTxtFrete(f.nf_numero), normTxtFrete(f.cliente_nome), Number(f.valor_nf||0).toFixed(2), Number(f.valor_frete||0).toFixed(2), normTxtFrete(f.codigo_autorizacao)].join('|');
+}
+async function importarPlanilhaFretes(){
+  if(!FRETES_PLANILHA_WB || !temPermissaoEditar('fretes')) return;
+  const escolha = document.getElementById('fretes-import-aba').value;
+  const abas = escolha === '__todas' ? abasFretesPlanilha(FRETES_PLANILHA_WB) : [escolha];
+  const novos = [];
+  let ignoradas = 0;
+  abas.forEach(nome => {
+    const rows = XLSX.utils.sheet_to_json(FRETES_PLANILHA_WB.Sheets[nome], { header:1, raw:true, blankrows:false });
+    const iCab = rows.findIndex(r => normTxtFrete(r[0]).startsWith('transportadora'));
+    if(iCab < 0) return;
+    rows.slice(iCab+1).forEach(r => {
+      if(!r || !r[0]) return;
+      const rec = linhaPlanilhaParaFrete(r);
+      if(rec) novos.push(rec); else ignoradas++;
+    });
+  });
+  if(!novos.length){ toast('Nenhuma linha válida encontrada','error'); return; }
+  const meses = Array.from(new Set(novos.map(f => mesDeFrete(f.data))));
+  if(!await confirmCustom(`Importar ${novos.length} linha(s) de ${abas.length} aba(s), em ${meses.length} mês(es)?${ignoradas?`\n\n${ignoradas} linha(s) sem data ou transportadora serão ignoradas.`:''}`, 'Importar')) return;
+  const btn = document.getElementById('fretes-import-btn'); if(btn) btn.disabled = true;
+  try {
+    await Promise.all(meses.map(m => carregarMesFretes(m, true)));
+    const existentes = new Set(meses.flatMap(m => FRETES_CACHE[m]||[]).map(chaveDupFrete));
+    let updates = {}, n = 0, pulados = 0, gravados = 0;
+    for(const rec of novos){
+      const k = chaveDupFrete(rec);
+      if(existentes.has(k)){ pulados++; continue; }
+      existentes.add(k);
+      const mes = mesDeFrete(rec.data);
+      const id = db.ref('fretes/'+mes).push().key;
+      updates['fretes/'+mes+'/'+id] = rec;
+      n++; gravados++;
+      if(n >= 300){ await db.ref().update(updates); updates = {}; n = 0; }
+    }
+    if(n) await db.ref().update(updates);
+    await Promise.all(meses.map(m => carregarMesFretes(m, true)));
+    document.getElementById('fretes-import-painel').style.display = 'none';
+    FRETES_PLANILHA_WB = null;
+    toast(`✓ ${gravados} importado(s)${pulados?` · ${pulados} já existia(m)`:''}`,'success');
+    renderFretes(false);
+  } catch(e){ toast('Erro na importação: '+e.message,'error'); }
+  finally { if(btn) btn.disabled = false; }
+}
+
 // ══ TRANSPORTADORAS ══
 async function carregarTransportadoras(forcar){
   if(TRANSPORTADORAS_DB && !forcar) return TRANSPORTADORAS_DB;
@@ -18065,6 +19043,7 @@ function abrirModalVendedor(){
   ['vend-id','vend-nome','vend-user','vend-pass','vend-tel','vend-email','vend-comissao'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('vend-tipo').value = 'vendedor';
   document.getElementById('vend-sem-trava-preco').checked = false;
+  document.getElementById('vend-acesso-fretes').checked = false;
   montarPermissoesTabela({});
   atualizarVisibilidadePermissoes();
   document.getElementById('modal-vendedor-titulo').textContent = 'Cadastrar Usuário';
@@ -18087,6 +19066,7 @@ async function editarVendedor(id){
   document.getElementById('vend-tipo').value = v.tipo || (v.admin ? 'admin' : 'vendedor');
   document.getElementById('vend-comissao').value = v.comissao_pct || '';
   document.getElementById('vend-sem-trava-preco').checked = v.sem_trava_preco === true;
+  document.getElementById('vend-acesso-fretes').checked = v.acesso_fretes === true;
   montarPermissoesTabela(v.permissoes || {});
   atualizarVisibilidadePermissoes();
   document.getElementById('modal-vendedor-titulo').textContent = 'Editar Usuário';
@@ -18106,6 +19086,7 @@ async function salvarVendedor(){
   const permissoes = tipo==='personalizado' ? lerPermissoesTabela() : null;
   const comissaoPct = tipo==='vendedor' ? (Number(document.getElementById('vend-comissao').value)||0) : 0;
   const semTrava = !admin && document.getElementById('vend-sem-trava-preco').checked;
+  const acessoFretes = !admin && document.getElementById('vend-acesso-fretes').checked;
   if(!nome||!user){ toast('Nome e usuário são obrigatórios','error'); return; }
 
   if(id){
@@ -18114,7 +19095,8 @@ async function salvarVendedor(){
       nome, usuario:user, telefone:document.getElementById('vend-tel').value,
       email:document.getElementById('vend-email').value, admin, tipo,
       permissoes: permissoes || null, comissao_pct: comissaoPct,
-      sem_trava_preco: semTrava || null
+      sem_trava_preco: semTrava || null,
+      acesso_fretes: acessoFretes || null
     };
     if(pass) dados.senha = pass; // só atualiza a senha se foi digitada uma nova
     await db.ref('usuarios/'+id).update(dados);
@@ -18130,7 +19112,8 @@ async function salvarVendedor(){
       telefone:document.getElementById('vend-tel').value,
       email:document.getElementById('vend-email').value, admin, tipo,
       permissoes: permissoes || null, comissao_pct: comissaoPct, ativo:true,
-      sem_trava_preco: semTrava || null });
+      sem_trava_preco: semTrava || null,
+      acesso_fretes: acessoFretes || null });
     fecharModal('modal-vendedor'); renderVendedores();
     toast(`✓ Usuário ${nome} cadastrado!`,'success');
   }
