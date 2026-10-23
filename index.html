@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 22/10/2026 16:47\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 22/10/2026 16:47</span>
+            onclick="alert('Versão desta build: 23/10/2026 08:35\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 23/10/2026 08:35</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -2227,15 +2227,31 @@ tbody td{padding:11px 16px;font-size:14px}
 
 <!-- MODAL MESCLAR CLIENTES DUPLICADOS -->
 <div class="modal-overlay" id="modal-faturar-pedido">
-  <div class="modal" style="max-width:420px">
+  <div class="modal" style="max-width:520px">
     <button class="modal-close" onclick="fecharModal('modal-faturar-pedido')">×</button>
     <div class="modal-title">💰 Marcar Pedido como Faturado</div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:14px">Informe a data em que a nota fiscal foi emitida no W3 — pode ser diferente de hoje.</div>
     <input type="hidden" id="faturar-pedido-id">
     <div class="form-group">
       <label>Data do Faturamento</label>
-      <input type="date" id="faturar-pedido-data">
+      <input type="date" id="faturar-pedido-data" onchange="atualizarFreteNoFaturamento()">
     </div>
+    <!-- Lançar o frete junto com o faturamento (opcional; só no modo de 1 pedido) -->
+    <div id="fat-frete-box" style="display:none;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;margin-top:6px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <strong style="font-size:14px">🚚 Lançar frete agora <span style="font-weight:400;color:var(--muted);font-size:12px">(opcional)</span></strong>
+        <span style="font-size:12px;color:var(--muted)">Pedido: <strong id="fat-frete-total" style="color:var(--text)"></strong></span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div class="form-group" style="margin:0"><label>Nº da NF</label><input type="text" id="fat-frete-nf" inputmode="numeric" autocomplete="off"></div>
+        <div class="form-group" style="margin:0"><label>Transportadora</label><input type="text" id="fat-frete-transp" list="frete-transportadoras-lista" autocomplete="off" style="text-transform:uppercase" oninput="atualizarFreteNoFaturamento()"></div>
+        <div class="form-group" style="margin:0"><label>Valor do frete (R$)</label><input type="text" id="fat-frete-valor" inputmode="decimal" autocomplete="off" oninput="atualizarFreteNoFaturamento()">
+          <div id="fat-frete-sug" style="display:none;font-size:11px;color:#166534;cursor:pointer;text-decoration:underline;margin-top:3px" onclick="usarSugestaoFreteFaturamento()"></div></div>
+        <div class="form-group" style="margin:0"><label>Previsão de entrega</label><input type="date" id="fat-frete-prev"></div>
+      </div>
+      <div id="fat-frete-pct" style="font-size:13px;margin-top:8px;color:var(--muted)">Deixe em branco para lançar depois na aba 🚚 Fretes → A lançar.</div>
+    </div>
+    <div id="fat-frete-lote-aviso" style="display:none;font-size:12px;color:var(--muted);margin-top:6px">🚚 Os fretes destes pedidos aparecem na aba Fretes → A lançar.</div>
     <button class="btn btn-primary" style="margin-top:10px" onclick="confirmarFaturamentoPedido()">✅ Confirmar</button>
   </div>
 </div>
@@ -5423,9 +5439,92 @@ async function abrirModalFaturarPedido(id){
   const snap = await db.ref('pedidos/'+id).once('value');
   const p = snap.val(); if(!p) return;
   document.getElementById('faturar-pedido-id').value = id;
-  document.getElementById('faturar-pedido-data').value = p.data_faturamento ? p.data_faturamento.split('T')[0] : agora().toISOString().split('T')[0];
+  document.getElementById('faturar-pedido-data').value = p.data_faturamento ? p.data_faturamento.split('T')[0] : hojeISO();
   document.querySelector('#modal-faturar-pedido .modal-title').textContent = '💰 Marcar Pedido como Faturado';
+  prepararFreteNoFaturamento(id, p);
   abrirModal('modal-faturar-pedido');
+}
+
+// ── Frete junto com o faturamento ──
+// Aparece só no faturamento de 1 pedido que ainda não tem frete (pedidos/{id}/entrega).
+// Gravar o frete aqui é o mesmo que lançar na aba Fretes: registro em fretes/{AAAA-MM}
+// e o resumo (sem valores) em pedidos/{id}/entrega para o vendedor ver a previsão.
+let FAT_FRETE_PEDIDO = null;   // { id, total, cidade } do pedido aberto no modal
+function prepararFreteNoFaturamento(id, p){
+  const box = document.getElementById('fat-frete-box');
+  const aviso = document.getElementById('fat-frete-lote-aviso');
+  ['fat-frete-nf','fat-frete-transp','fat-frete-valor','fat-frete-prev'].forEach(c => { const e = document.getElementById(c); if(e) e.value = ''; });
+  FAT_FRETE_PEDIDO = null;
+  if(aviso) aviso.style.display = id ? 'none' : '';
+  if(!id || !p || p.entrega || !podeVer('fretes')){ if(box) box.style.display = 'none'; return; }
+  FAT_FRETE_PEDIDO = { id, total: Number(p.total)||0, cidade: p.cliente_cidade || '' };
+  document.getElementById('fat-frete-total').textContent = fmtMoeda(FAT_FRETE_PEDIDO.total);
+  if(p.nf_numero) document.getElementById('fat-frete-nf').value = p.nf_numero;
+  box.style.display = '';
+  carregarTransportadoras().then(preencherListaTransportadorasFrete).catch(()=>{});
+  atualizarFreteNoFaturamento();
+}
+function atualizarFreteNoFaturamento(){
+  if(!FAT_FRETE_PEDIDO) return;
+  const vFr = parseBR(document.getElementById('fat-frete-valor').value);
+  const tr = document.getElementById('fat-frete-transp').value;
+  const pctEl = document.getElementById('fat-frete-pct');
+  const sugEl = document.getElementById('fat-frete-sug');
+  const tot = FAT_FRETE_PEDIDO.total;
+  if(vFr > 0 && tot > 0){
+    const pct = vFr / tot * 100;
+    pctEl.innerHTML = `Frete = <strong style="color:${pct > 5 ? '#b91c1c' : (pct > 3 ? '#b45309' : '#166534')};font-size:15px">${pct.toLocaleString('pt-BR',{maximumFractionDigits:2})}%</strong> do valor do pedido`;
+  } else pctEl.textContent = 'Deixe em branco para lançar depois na aba 🚚 Fretes → A lançar.';
+  if(ehAgile(tr) && tot > 0){
+    const cid = AGILE_CIDADES[normTxtFrete(FAT_FRETE_PEDIDO.cidade)];
+    const sug = calcFreteAgile(cid ? 'interior' : 'bh', tot, 0).valor;
+    sugEl.textContent = 'Tabela Ágile: ' + fmtMoeda(sug) + (cid ? ' · prazo '+cid.prazo : '');
+    sugEl.dataset.valor = sug;
+    sugEl.style.display = vFr === sug ? 'none' : '';
+    const pv = document.getElementById('fat-frete-prev');
+    const dataFat = document.getElementById('faturar-pedido-data').value || hojeISO();
+    if(!pv.value){
+      const dias = cid ? (/48/.test(cid.prazo) ? 2 : (/24/.test(cid.prazo) ? 1 : 0)) : 1;
+      if(dias) pv.value = somarDiasUteisFrete(dataFat, dias);
+    }
+  } else sugEl.style.display = 'none';
+}
+function usarSugestaoFreteFaturamento(){
+  const sugEl = document.getElementById('fat-frete-sug');
+  document.getElementById('fat-frete-valor').value = Number(sugEl.dataset.valor).toFixed(2).replace('.',',');
+  atualizarFreteNoFaturamento();
+}
+// null = nada digitado (não lança); {erro, campo} = faltou algo; senão os dados
+function lerFreteNoFaturamento(){
+  if(!FAT_FRETE_PEDIDO || document.getElementById('fat-frete-box').style.display === 'none') return null;
+  const nf = String(document.getElementById('fat-frete-nf').value||'').trim();
+  const transp = String(document.getElementById('fat-frete-transp').value||'').trim().replace(/\s+/g,' ').toUpperCase();
+  const vTxt = String(document.getElementById('fat-frete-valor').value||'').trim();
+  const previsao = document.getElementById('fat-frete-prev').value || '';
+  if(!transp && !vTxt && !previsao) return null;   // só a NF (veio do pedido) não conta como lançamento
+  if(!transp) return { erro:'Informe a transportadora do frete (ou apague os campos do frete)', campo:'fat-frete-transp' };
+  if(!vTxt) return { erro:'Informe o valor do frete (0 se não houver)', campo:'fat-frete-valor' };
+  if(!nf) return { erro:'Informe o número da NF do frete', campo:'fat-frete-nf' };
+  return { nf, transp, valor: Math.round(parseBR(vTxt)*100)/100, previsao };
+}
+async function gravarFreteDoFaturamento(pid, p, dataFat, d){
+  const agoraIso = agora().toISOString();
+  const rec = {
+    tipo:'envio', data: dataFat, status:'coletado', transportadora: d.transp, nf_numero: d.nf,
+    cliente_nome: p.cliente_nome || '', cliente_cidade: p.cliente_cidade || '', cliente_uf: p.cliente_uf || '',
+    vendedor_nome: p.vendedor_nome || '', previsao: d.previsao, data_entrega:'', rastreio:'', obs:'',
+    pedido_id: pid, pedido_numero: String(p.numero||''), coleta_id: p.coleta_id || '', origem: 'faturamento',
+    valor_nf: Math.round((Number(p.total)||0)*100)/100, valor_frete: d.valor, peso_kg: null,
+    cte_recebido:false, boleto_recebido:false,
+    criado_por: usuarioLogado?.nome || '', criado_em: agoraIso, atualizado_por: usuarioLogado?.nome || '', atualizado_em: agoraIso
+  };
+  const mes = mesDeFrete(dataFat);
+  const id = db.ref('fretes/'+mes).push().key;
+  // O pedido acabou de ser gravado (faturado), então existe — pode receber o resumo
+  await db.ref().update({ ['fretes/'+mes+'/'+id]: rec, ['pedidos/'+pid+'/entrega']: resumoEntregaPedido(rec, mes, id) });
+  // Mantém a aba Fretes coerente sem precisar reler o banco
+  if(FRETES_CACHE[mes]) FRETES_CACHE[mes].push({ id, mes, ...rec });
+  const fat = (FRETES_FATURADOS||[]).find(x => x.id === pid); if(fat) fat.tem_entrega = true;
 }
 
 // Marca vários pedidos como Faturado de uma vez, todos com a MESMA data — reaproveita
@@ -5438,6 +5537,7 @@ async function abrirModalFaturarLote(){
   document.getElementById('faturar-pedido-id').value = '';
   document.getElementById('faturar-pedido-data').value = agora().toISOString().split('T')[0];
   document.querySelector('#modal-faturar-pedido .modal-title').textContent = `💰 Marcar ${faturarLoteIds.length} Pedido(s) como Faturado`;
+  prepararFreteNoFaturamento(null, null);
   abrirModal('modal-faturar-pedido');
 }
 
@@ -5479,6 +5579,8 @@ async function confirmarFaturamentoPedido(){
   // Modo individual — um único pedido (aberto pela tela de detalhes)
   const id = document.getElementById('faturar-pedido-id').value;
   if(!id) return;
+  const freteDigitado = lerFreteNoFaturamento();
+  if(freteDigitado && freteDigitado.erro){ toast(freteDigitado.erro,'error'); document.getElementById(freteDigitado.campo)?.focus(); return; }
   try {
     const snap = await db.ref('pedidos/'+id).once('value');
     const p = snap.val(); if(!p) return;
@@ -5493,7 +5595,12 @@ async function confirmarFaturamentoPedido(){
     });
     await db.ref('pedidos/'+id).update({ faturado: true, data_faturamento: dataEscolhida, historico_edicoes: historico });
     fecharModal('modal-faturar-pedido');
-    toast('✓ Faturamento registrado','success');
+    let msgFrete = '';
+    if(freteDigitado){
+      try { await gravarFreteDoFaturamento(id, p, dataEscolhida, freteDigitado); msgFrete = ' e frete lançado'; }
+      catch(e){ toast('Faturado, mas o frete não foi salvo: '+e.message+' — lance na aba Fretes','error'); }
+    }
+    toast('✓ Faturamento registrado'+msgFrete,'success');
     await verPedido(id);
     if(!jaEstavaFaturado) await crPerguntarAposFaturar(id, { ...p, faturado: true, data_faturamento: dataEscolhida });
   } catch(e){ toast('Erro ao registrar faturamento: '+e.message,'error'); }
