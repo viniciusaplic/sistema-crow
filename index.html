@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 23/10/2026 08:35\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 23/10/2026 08:35</span>
+            onclick="alert('Versão desta build: 23/10/2026 08:35\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 23/10/2026 15:20</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -743,6 +743,7 @@ tbody td{padding:11px 16px;font-size:14px}
           <button class="btn btn-outline btn-sm rel-btn admin-only" onclick="mostrarRelatorio('auditoria-estoque',this)">🔍 Auditoria de Saldo × Movimentos</button>
           <button class="btn btn-outline btn-sm rel-btn admin-only" onclick="mostrarRelatorio('codigos-duplicados',this)">⚠️ Códigos Duplicados</button>
           <button class="btn btn-outline btn-sm rel-btn admin-only" onclick="mostrarRelatorio('insumos-inativos',this)">🧹 Insumos Inativos</button>
+          <button class="btn btn-outline btn-sm rel-btn admin-only" onclick="mostrarRelatorio('substituir-insumo',this)">🔁 Substituir Insumo nas Composições</button>
         </div>
 
         <!-- Filtros específicos do relatório Abaixo do Mínimo -->
@@ -20834,7 +20835,7 @@ function mostrarRelatorio(tipo, btnEl){
     tipo === 'vendas-produto' ? 'block' : 'none';
   // Diagnóstico de Consumo não usa período/vendedor/agrupamento — esconde só esses campos,
   // mantendo visíveis os botões Gerar/Excel que ficam no mesmo container
-  const escondePeriodoVendedorAgrupar = ['diagnostico-consumo','mrp','comissionamento','sugestao-compra','recalc-estoque-minimo','codigos-duplicados','insumos-inativos','auditoria-estoque','baixas-duplicadas'].includes(tipo);
+  const escondePeriodoVendedorAgrupar = ['diagnostico-consumo','mrp','comissionamento','sugestao-compra','recalc-estoque-minimo','codigos-duplicados','insumos-inativos','auditoria-estoque','baixas-duplicadas','substituir-insumo'].includes(tipo);
   document.querySelector('#rel-filtros .filtro-group:nth-child(1)').style.display = escondePeriodoVendedorAgrupar ? 'none' : '';
   document.querySelector('#rel-filtros .filtro-group:nth-child(2)').style.display = escondePeriodoVendedorAgrupar ? 'none' : '';
 
@@ -20846,6 +20847,7 @@ function mostrarRelatorio(tipo, btnEl){
   document.getElementById('rel-conteudo').innerHTML =
     '<div style="text-align:center;color:var(--muted);padding:40px">Clique em Gerar para carregar</div>';
   document.getElementById('rel-grafico-wrap').style.display = 'none';
+  if(tipo === 'substituir-insumo') relSubstituirInsumo(document.getElementById('rel-conteudo'));
 }
 
 async function gerarRelatorio(){
@@ -20862,6 +20864,7 @@ async function gerarRelatorio(){
   if(tipo === 'recalc-estoque-minimo'){ await relRecalcEstoqueMinimo(el); return; }
   if(tipo === 'codigos-duplicados'){ await relCodigosDuplicados(el); return; }
   if(tipo === 'insumos-inativos'){ await relInsumosInativos(el); return; }
+  if(tipo === 'substituir-insumo'){ await relSubstituirInsumo(el); return; }
   if(tipo === 'baixas-duplicadas'){ await relBaixasDuplicadas(el); return; }
   if(tipo === 'auditoria-estoque'){ await relAuditoriaEstoque(el); return; }
   const tipoProd = document.getElementById('rel-tipoprod')?.value || 'vendavel';
@@ -22722,6 +22725,197 @@ async function carregarSerieDiariaConsumo(forcar){
 
   RECALC_SERIE_CACHE = { ts:agoraTs(), porDia };
   return RECALC_SERIE_CACHE;
+}
+
+// ── Substituir Insumo nas Composições (admin) ──
+// Troca um insumo por outro em todas as receitas (fichas técnicas) de uma vez.
+// Mantém a quantidade de cada produto. Produtos que já têm o insumo novo (ou que têm o
+// antigo em mais de uma linha) ficam de fora para revisão manual. OPs já lançadas não
+// são tocadas — elas guardam os próprios itens.
+// Firebase: 1 leitura de 'receitas' (direto, sem cache, porque é caminho de gravação) e
+// 1 gravação multi-caminho só nos nós 'receitas/<produto>/itens' afetados + 1 backup.
+let SUBST_INS_CTX = null;
+
+function _itensReceitaArr(r){
+  const it = r?.itens;
+  if(Array.isArray(it)) return it.filter(Boolean);
+  if(it && typeof it === 'object') return Object.values(it).filter(Boolean);
+  return [];
+}
+
+async function relSubstituirInsumo(el){
+  if(!usuarioLogado || !usuarioLogado.admin){
+    el.innerHTML = '<div style="padding:24px;text-align:center;color:#dc2626">🔒 Ferramenta restrita a administradores.</div>';
+    return;
+  }
+  if(!INSUMOS_DB.length) await carregarInsumosFirebase();
+  const opts = INSUMOS_DB
+    .filter(i=>i.codigo)
+    .map(i=>`<option value="${esc(i.codigo)}">${esc(i.nome||'')}${i.inativo?' (inativo)':''}</option>`).join('');
+  el.innerHTML = `
+    <div style="padding:12px 16px;background:#eff6ff;border-left:4px solid #1565c0;border-radius:6px;margin-bottom:14px;font-size:12.5px;color:#1e3a5f;line-height:1.7">
+      Troca um insumo por outro em <strong>todas as composições de produto</strong> de uma vez, mantendo a quantidade de cada produto.<br>
+      Produtos que já têm o insumo novo na composição ficam de fora e aparecem para revisão.
+      OPs já lançadas <strong>não são alteradas</strong>. O insumo antigo continua cadastrado, com o saldo dele.
+    </div>
+    <datalist id="subst-ins-lista">${opts}</datalist>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:14px">
+      <div class="filtro-group">
+        <label style="font-size:12px;font-weight:600">Insumo que SAI</label>
+        <input type="text" id="subst-ins-antigo" list="subst-ins-lista" placeholder="Ex.: M0130" style="width:170px;text-transform:uppercase">
+      </div>
+      <div style="font-size:20px;padding-bottom:6px">→</div>
+      <div class="filtro-group">
+        <label style="font-size:12px;font-weight:600">Insumo que ENTRA</label>
+        <input type="text" id="subst-ins-novo" list="subst-ins-lista" placeholder="Ex.: M0204" style="width:170px;text-transform:uppercase">
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="previaSubstituirInsumo()">🔍 Ver produtos afetados</button>
+      <button class="btn btn-outline btn-sm" onclick="desfazerSubstituirInsumo()">↺ Desfazer última substituição</button>
+    </div>
+    <div id="subst-ins-resultado"></div>`;
+}
+
+async function previaSubstituirInsumo(){
+  if(!usuarioLogado || !usuarioLogado.admin){ toast('Ação restrita a administradores','error'); return; }
+  const antigo = (document.getElementById('subst-ins-antigo')?.value||'').trim().toUpperCase();
+  const novo   = (document.getElementById('subst-ins-novo')?.value||'').trim().toUpperCase();
+  const out = document.getElementById('subst-ins-resultado');
+  if(!antigo || !novo){ toast('Informe os dois insumos','error'); return; }
+  if(antigo === novo){ toast('Os dois códigos são iguais','error'); return; }
+  if(!INSUMOS_DB.length) await carregarInsumosFirebase();
+  const insNovo = INSUMOS_DB.find(i=>(i.codigo||'').trim().toUpperCase()===novo);
+  if(!insNovo){ toast(`Insumo ${novo} não encontrado no cadastro de insumos`,'error'); return; }
+  if(insNovo.inativo){ toast(`O insumo ${novo} está INATIVO — reative antes de usar`,'error'); return; }
+  const insAntigo = INSUMOS_DB.find(i=>(i.codigo||'').trim().toUpperCase()===antigo);
+
+  out.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px">⏳ Lendo composições...</div>';
+  // Leitura direta (sem cache): a prévia é a base da gravação.
+  let receitas;
+  try {
+    const snap = await db.ref('receitas').once('value');
+    receitas = snap.val() || {};
+    RECEITAS_DB = receitas;
+  } catch(e){ out.innerHTML=''; toast('Erro ao ler composições: '+(e?.message||e),'error'); return; }
+  if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
+
+  const trocar = [], revisar = [];
+  Object.entries(receitas).forEach(([prod, r])=>{
+    const itens = _itensReceitaArr(r);
+    const linhasAntigo = itens.filter(it=>(it.codigo||'').trim().toUpperCase()===antigo);
+    if(!linhasAntigo.length) return;
+    const temNovo = itens.some(it=>(it.codigo||'').trim().toUpperCase()===novo);
+    const p = PRODUTOS_DB.find(x=>x.codigo===prod);
+    const reg = { prod, nome: p?.nome || r?.produto_nome || '', qtd: linhasAntigo.map(l=>Number(l.qtd||0)).join(' + '), itens };
+    if(temNovo) { reg.motivo = `já tem ${novo} na composição`; revisar.push(reg); }
+    else if(linhasAntigo.length > 1) { reg.motivo = `${antigo} aparece ${linhasAntigo.length}x na composição`; revisar.push(reg); }
+    else trocar.push(reg);
+  });
+  trocar.sort((a,b)=>a.prod.localeCompare(b.prod));
+  revisar.sort((a,b)=>a.prod.localeCompare(b.prod));
+  SUBST_INS_CTX = { antigo, novo, nomeNovo: insNovo.nome||'', trocar, revisar };
+
+  if(!trocar.length && !revisar.length){
+    out.innerHTML = `<div style="padding:18px;text-align:center;color:var(--muted)">Nenhuma composição usa o insumo <strong>${esc(antigo)}</strong>.</div>`;
+    return;
+  }
+
+  const th = 'padding:9px 11px;position:sticky;top:0;z-index:3;background:var(--primary);color:rgba(255,255,255,.85);white-space:nowrap;text-align:left';
+  const linha = (l, cor, extra) => `<tr style="border-bottom:1px solid var(--border);${cor}">
+      <td style="padding:8px 11px;font-weight:700;white-space:nowrap">${esc(l.prod)}</td>
+      <td style="padding:8px 11px">${esc(l.nome)}${extra?`<div style="font-size:11.5px;color:#b45309;font-weight:600">${esc(extra)}</div>`:''}</td>
+      <td style="padding:8px 11px;text-align:center;white-space:nowrap">${esc(l.qtd)}</td>
+    </tr>`;
+
+  let html = `
+    <div style="padding:12px 16px;background:#f8fafc;border:1px solid var(--border);border-radius:8px;margin-bottom:12px;font-size:13px;line-height:1.7">
+      <strong>${esc(antigo)}</strong>${insAntigo?` — ${esc(insAntigo.nome||'')}`:''} &nbsp;→&nbsp; <strong>${esc(novo)}</strong> — ${esc(insNovo.nome||'')}<br>
+      <strong style="color:#15803d">${trocar.length}</strong> produto(s) serão alterados.
+      ${revisar.length?`<strong style="color:#b45309">${revisar.length}</strong> ficam de fora para revisão manual.`:''}
+    </div>`;
+  if(trocar.length){
+    html += `<div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+        <button class="btn btn-primary btn-sm" id="subst-ins-btn" onclick="aplicarSubstituirInsumo()">✅ Substituir em ${trocar.length} produto(s)</button>
+      </div>`;
+  }
+  html += `<div style="overflow:auto;max-height:60vh;border:1px solid var(--border);border-radius:8px">
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+    <thead><tr><th style="${th}">Produto</th><th style="${th}">Descrição</th><th style="${th};text-align:center">Qtd. por un.</th></tr></thead><tbody>`;
+  revisar.forEach(l=>{ html += linha(l, 'background:#fffbeb;', '⚠ Não será alterado — '+l.motivo); });
+  trocar.forEach(l=>{ html += linha(l, '', ''); });
+  html += '</tbody></table></div>';
+  out.innerHTML = html;
+}
+
+async function aplicarSubstituirInsumo(){
+  if(!usuarioLogado || !usuarioLogado.admin){ toast('Ação restrita a administradores','error'); return; }
+  const ctx = SUBST_INS_CTX;
+  if(!ctx || !ctx.trocar.length){ toast('Gere a prévia primeiro','error'); return; }
+  if(!confirm(`Substituir ${ctx.antigo} por ${ctx.novo} em ${ctx.trocar.length} composição(ões)?\n\nA quantidade de cada produto é mantida. As composições atuais ficam salvas em backup e dá para desfazer.`)) return;
+  const btn = document.getElementById('subst-ins-btn');
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ Gravando...'; }
+  try {
+    // 1) Backup das composições como estão ANTES de gravar
+    const chave = 'bk_' + agoraTs();
+    await db.ref('backups_substituicao_insumo/'+chave).set({
+      ts: agoraTs(),
+      data: agora().toISOString(),
+      usuario: usuarioLogado.nome || '',
+      antigo: ctx.antigo, novo: ctx.novo,
+      itens: ctx.trocar.map(l=>({ produto: l.prod, itens_anteriores: l.itens }))
+    });
+    // 2) Gravação multi-caminho (em lotes de 400 nós)
+    const novasPorProd = {};
+    ctx.trocar.forEach(l=>{
+      novasPorProd[l.prod] = l.itens.map(it=>
+        (it.codigo||'').trim().toUpperCase()===ctx.antigo ? { ...it, codigo: ctx.novo, nome: ctx.nomeNovo } : it);
+    });
+    const prods = Object.keys(novasPorProd);
+    for(let i=0; i<prods.length; i+=400){
+      const updates = {};
+      prods.slice(i, i+400).forEach(pr=>{ updates['receitas/'+pr+'/itens'] = novasPorProd[pr]; });
+      await db.ref().update(updates);
+    }
+    prods.forEach(pr=>{ if(RECEITAS_DB[pr]) RECEITAS_DB[pr].itens = novasPorProd[pr]; });
+    toast(`✓ ${prods.length} composição(ões) atualizadas`,'success');
+    document.getElementById('subst-ins-resultado').innerHTML =
+      `<div style="padding:18px;background:#dcfce7;border-radius:8px;color:#166534;font-size:13.5px;line-height:1.7">
+        ✓ <strong>${esc(ctx.antigo)}</strong> substituído por <strong>${esc(ctx.novo)}</strong> em <strong>${prods.length} produto(s)</strong>.
+        ${ctx.revisar.length?`<br>⚠ ${ctx.revisar.length} produto(s) ficaram de fora para revisão: ${ctx.revisar.map(l=>esc(l.prod)).join(', ')}`:''}
+      </div>`;
+    SUBST_INS_CTX = null;
+  } catch(e){
+    console.error(e);
+    toast('Erro ao gravar: '+(e?.message||e),'error');
+    if(btn){ btn.disabled = false; btn.textContent = `✅ Substituir em ${ctx.trocar.length} produto(s)`; }
+  }
+}
+
+async function desfazerSubstituirInsumo(){
+  if(!usuarioLogado || !usuarioLogado.admin){ toast('Ação restrita a administradores','error'); return; }
+  const snap = await db.ref('backups_substituicao_insumo').orderByKey().limitToLast(1).once('value');
+  const dados = snap.val();
+  if(!dados){ toast('Nenhuma substituição para desfazer','error'); return; }
+  const chave = Object.keys(dados)[0];
+  const bk = dados[chave];
+  const itens = Array.isArray(bk.itens) ? bk.itens : Object.values(bk.itens||{});
+  if(!itens.length){ toast('Backup vazio','error'); return; }
+  if(!confirm(`↺ Desfazer a troca ${bk.antigo} → ${bk.novo} em ${itens.length} composição(ões)?\n\nFeita em ${new Date(bk.ts).toLocaleString('pt-BR')} por ${bk.usuario||'—'}.\nQualquer alteração feita depois nessas composições será perdida.`)) return;
+  try {
+    for(let i=0; i<itens.length; i+=400){
+      const updates = {};
+      itens.slice(i, i+400).forEach(it=>{ updates['receitas/'+it.produto+'/itens'] = it.itens_anteriores; });
+      await db.ref().update(updates);
+    }
+    itens.forEach(it=>{ if(RECEITAS_DB[it.produto]) RECEITAS_DB[it.produto].itens = it.itens_anteriores; });
+    await db.ref('backups_substituicao_insumo/'+chave).remove();
+    toast(`✓ ${itens.length} composição(ões) restauradas`,'success');
+    const out = document.getElementById('subst-ins-resultado');
+    if(out) out.innerHTML = `<div style="padding:18px;background:#dcfce7;border-radius:8px;color:#166534;font-size:13.5px">
+        ↺ Desfeito: <strong>${itens.length}</strong> composição(ões) voltaram a usar <strong>${esc(bk.antigo)}</strong>.</div>`;
+  } catch(e){
+    console.error(e);
+    toast('Erro ao desfazer: '+(e?.message||e),'error');
+  }
 }
 
 async function relInsumosInativos(el){
