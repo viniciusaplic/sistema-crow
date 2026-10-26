@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 23/10/2026 08:35\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 23/10/2026 15:20</span>
+            onclick="alert('Versão desta build: 26/10/2026 09:50\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 26/10/2026 09:50</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -1418,6 +1418,8 @@ tbody td{padding:11px 16px;font-size:14px}
         <button class="btn btn-outline btn-sm" onclick="limparFiltrosCR()">Limpar</button>
       </div>
       <div class="table-wrap" style="overflow-x:auto"><div id="cr-tabela"></div></div>
+      <button id="btn-cr-topo" type="button" title="Voltar ao topo" onclick="window.scrollTo({top:0,behavior:'smooth'})"
+        style="display:none;position:fixed;right:20px;bottom:20px;z-index:900;width:48px;height:48px;border-radius:50%;border:none;background:#166534;color:#fff;font-size:22px;line-height:1;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.25)">↑</button>
     </div>
 
     
@@ -2269,7 +2271,7 @@ tbody td{padding:11px 16px;font-size:14px}
     <div class="form-row">
       <div class="form-group"><label>Forma de pagamento *</label><select id="cr-gerar-forma"></select></div>
       <div class="form-group"><label>Observação (opcional)</label>
-      <input type="text" id="cr-gerar-obs" maxlength="200" placeholder="Ex.: boleto enviado por e-mail"></div>
+      <textarea id="cr-gerar-obs" maxlength="500" rows="4" style="resize:vertical;min-height:90px;width:100%;line-height:1.4;white-space:pre-wrap" placeholder="Ex.: boleto enviado por e-mail"></textarea></div>
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
       <button class="btn btn-outline" onclick="fecharModal('modal-cr-gerar')">Agora não</button>
@@ -2307,7 +2309,7 @@ tbody td{padding:11px 16px;font-size:14px}
     <div class="form-group" id="cr-receber-valor-wrap" style="margin-bottom:12px"><label>Valor recebido</label><input type="number" id="cr-receber-valor" min="0" step="0.01" oninput="atualizarSaldoReceberCR()"></div>
     <div class="form-group" style="margin-bottom:12px">
       <label>Observação / destino do pagamento</label>
-      <input type="text" id="cr-receber-obs" maxlength="300" placeholder="Ex.: depositado no Itaú, usado para pagar fornecedor X…">
+      <textarea id="cr-receber-obs" maxlength="500" rows="4" style="resize:vertical;min-height:90px;width:100%;line-height:1.4;white-space:pre-wrap" placeholder="Ex.: depositado no Itaú, usado para pagar fornecedor X…"></textarea>
     </div>
     <label id="cr-receber-saldo-wrap" style="display:none;align-items:center;gap:8px;font-size:13px;margin-bottom:8px">
       <input type="checkbox" id="cr-receber-saldo" checked style="width:18px;height:18px;accent-color:var(--accent)">
@@ -2332,7 +2334,7 @@ tbody td{padding:11px 16px;font-size:14px}
     </div>
     <div class="form-row">
       <div class="form-group"><label>Forma de pagamento *</label><select id="cr-manual-forma"></select></div>
-      <div class="form-group"><label>Observação</label><input type="text" id="cr-manual-obs" maxlength="200" placeholder="Ex.: pedido W3 1234, saldo de acordo…"></div>
+      <div class="form-group"><label>Observação</label><textarea id="cr-manual-obs" maxlength="500" rows="4" style="resize:vertical;min-height:90px;width:100%;line-height:1.4;white-space:pre-wrap" placeholder="Ex.: pedido W3 1234, saldo de acordo…"></textarea></div>
     </div>
     <div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:12px">
       <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Atalho: preencha o total e a condição e clique em Gerar parcelas</div>
@@ -2354,7 +2356,7 @@ tbody td{padding:11px 16px;font-size:14px}
     <div id="cr-manual-soma" style="font-size:13px;margin:12px 0"></div>
     <div class="form-group" id="cr-manual-obs-rec-wrap" style="display:none;margin-bottom:12px">
       <label>Observação / destino do pagamento (parcelas já recebidas)</label>
-      <input type="text" id="cr-manual-obs-rec" maxlength="300" placeholder="Ex.: depositado no Itaú">
+      <textarea id="cr-manual-obs-rec" maxlength="500" rows="4" style="resize:vertical;min-height:90px;width:100%;line-height:1.4;white-space:pre-wrap" placeholder="Ex.: depositado no Itaú"></textarea>
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn btn-outline" onclick="fecharModal('modal-cr-manual')">Cancelar</button>
@@ -2373,7 +2375,7 @@ tbody td{padding:11px 16px;font-size:14px}
       <div class="form-group"><label>Valor</label><input type="number" id="cr-editar-valor" min="0" step="0.01"></div>
     </div>
     <div class="form-group" style="margin-bottom:12px"><label>Forma de pagamento</label><select id="cr-editar-forma"></select></div>
-    <div class="form-group"><label>Observação</label><input type="text" id="cr-editar-obs" maxlength="300"></div>
+    <div class="form-group"><label>Observação</label><textarea id="cr-editar-obs" maxlength="500" rows="4" style="resize:vertical;min-height:90px;width:100%;line-height:1.4;white-space:pre-wrap"></textarea></div>
     <button class="btn btn-primary" style="margin-top:14px" onclick="salvarEditarCR()">💾 Salvar</button>
   </div>
 </div>
@@ -2998,6 +3000,12 @@ async function lerNoCache(no){
   return { val: () => dados };
 }
 function invalidarCacheNo(no){ delete CACHE_NOS[no]; }
+// Botão "voltar ao topo" do Contas a Receber: aparece só nessa aba e depois de rolar a página.
+// Fica dentro de #tab-financeiro, então some sozinho quando outra aba é aberta.
+window.addEventListener('scroll', () => {
+  const b = document.getElementById('btn-cr-topo');
+  if(b) b.style.display = window.scrollY > 400 ? '' : 'none';
+}, { passive: true });
 function agoraTs(){ return Date.now() + SERVER_TIME_OFFSET; }
 function agora(){ return new Date(agoraTs()); }
 const storage = firebase.storage();
@@ -6073,7 +6081,7 @@ function renderTabelaCR(){
   const linkPedido = t => t.pedido_id
     ? `<a href="#" onclick="event.preventDefault();verPedido('${t.pedido_id}')" style="color:var(--accent);font-weight:600">#${esc(t.pedido_numero)}</a>`
     : `${t.pedido_numero ? esc(t.pedido_numero)+'<br>' : ''}<span class="badge badge-gray" title="Lançado manualmente">manual</span>`;
-  const linhaObs = txt => txt ? `<div style="font-size:12px;color:var(--muted)">${esc(txt)}</div>` : '';
+  const linhaObs = txt => txt ? `<div style="font-size:12px;color:var(--muted);white-space:pre-wrap">${esc(txt)}</div>` : '';
 
   if(CR_SUBABA === 'abertas'){
     const lista = crListaAbertasFiltrada();
@@ -6133,7 +6141,7 @@ function renderTabelaCR(){
       <td style="white-space:nowrap">${fmtData(t.vencimento)}</td>
       <td style="white-space:nowrap">${esc(formaRec(t))}</td>
       <td style="text-align:right;white-space:nowrap;font-weight:600">${fmtMoeda(t.valor_recebido)}${crCentavos(t.valor_recebido)!==crCentavos(t.valor)?`<div style="font-size:11px;color:var(--muted);font-weight:400">título ${fmtMoeda(t.valor)}</div>`:''}</td>
-      <td style="font-size:13px">${esc(t.obs_recebimento||'')}${t.lote_id?`<div><a href="#" onclick="event.preventDefault();CR_FILTRO_LOTE='${t.lote_id}';renderTabelaCR()" class="badge badge-green" style="text-decoration:none" title="Ver os títulos baixados junto">lote de ${t.lote_qtd||'?'} título(s)</a></div>`:''}</td>
+      <td style="font-size:13px;white-space:pre-wrap">${esc(t.obs_recebimento||'')}${t.lote_id?`<div><a href="#" onclick="event.preventDefault();CR_FILTRO_LOTE='${t.lote_id}';renderTabelaCR()" class="badge badge-green" style="text-decoration:none" title="Ver os títulos baixados junto">lote de ${t.lote_qtd||'?'} título(s)</a></div>`:''}</td>
       ${pode?`<td style="text-align:right"><button class="btn btn-outline btn-sm" onclick="estornarBaixaCR('${(t.data_recebimento||'').slice(0,7)}','${t.key}')">↩️ Estornar</button></td>`:''}
     </tr>`).join('')}
     </tbody></table>${crRodape(lista, 'valor_recebido', formaRec, 'recebimento(s)')}`;
@@ -6243,7 +6251,7 @@ async function confirmarReceberCR(){
         if(saldoC > 0 && document.getElementById('cr-receber-saldo').checked){
           baixa.valor = recebidoC / 100; // o baixado fica com o que foi pago; o resto vira título novo
           const nk = db.ref('contas_receber/abertas').push().key;
-          novo = { ...t, valor: saldoC/100, saldo_de: key, obs: ('Saldo de recebimento parcial' + (crObsTitulo(t) ? ' · '+crObsTitulo(t) : '')).slice(0, 200), descricao: null, criado_em: quando, criado_por: quem };
+          novo = { ...t, valor: saldoC/100, saldo_de: key, obs: ('Saldo de recebimento parcial' + (crObsTitulo(t) ? ' · '+crObsTitulo(t) : '')).slice(0, 500), descricao: null, criado_em: quando, criado_por: quem };
           updates['contas_receber/abertas/'+nk] = novo;
           if(t.pedido_id) updates['pedidos/'+t.pedido_id+'/contas_receber/'+nk] = true;
           novo = { key: nk, ...novo };
