@@ -11498,13 +11498,27 @@ function imprimirEtiquetaProduto(codigo, tipo){
 
 async function abrirHistoricoEstoque(codigo){
   let p = PRODUTOS_DB.find(x=>x.codigo===codigo);
-  let nomeExibir, estoqueExibir;
+  let nomeExibir, estoqueExibir, tipoItem, chaveItem;
   if(p){
-    nomeExibir = p.nome; estoqueExibir = p.quantidade;
+    nomeExibir = p.nome; estoqueExibir = p.quantidade; tipoItem = 'produto'; chaveItem = p.codigo;
   } else {
     const insumo = INSUMOS_DB.find(x=>x.codigo===codigo);
     if(!insumo) return;
-    nomeExibir = insumo.nome; estoqueExibir = insumo.estoque_atual;
+    nomeExibir = insumo.nome; estoqueExibir = insumo.estoque_atual; tipoItem = 'insumo'; chaveItem = insumo.key;
+  }
+
+  // A lista de produtos/insumos é carregada uma vez no login e não acompanha o que outros
+  // usuários lançam depois. Sem isto, o topo mostrava o saldo da hora do login (ex: 65)
+  // enquanto a lista, lida do banco agora, já mostrava 25. Lê só o número do saldo
+  // (poucos bytes) e atualiza a memória, para o resto da tela também ficar certo.
+  if(chaveItem){
+    try {
+      const snapSaldo = await db.ref(caminhoEstoque(tipoItem, chaveItem)).once('value');
+      if(snapSaldo.exists()){
+        estoqueExibir = Number(snapSaldo.val())||0;
+        sincronizarEstoqueMemoria(tipoItem, chaveItem, estoqueExibir);
+      }
+    } catch(e){ console.warn('[CROW] saldo atual do histórico não lido do banco:', e?.message||e); }
   }
 
   const snap = await db.ref('movimentos_estoque').orderByChild('codigo').equalTo(codigo).once('value');
