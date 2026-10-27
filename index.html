@@ -220,7 +220,7 @@ tbody td{padding:11px 16px;font-size:14px}
 .btn-maps:hover{opacity:.9}
 
 /* NOTIFICACAO */
-.toast{position:fixed;bottom:24px;right:24px;background:var(--primary);color:#fff;padding:14px 20px;border-radius:10px;font-size:14px;z-index:9998;opacity:0;transform:translateY(20px);transition:all .3s;max-width:320px;pointer-events:none}
+.toast{position:fixed;bottom:24px;right:24px;background:var(--primary);color:#fff;padding:14px 20px;border-radius:10px;font-size:14px;z-index:9998;opacity:0;transform:translateY(20px);transition:all .3s;max-width:320px}
 .toast.show{opacity:1;transform:translateY(0)}
 .toast.success{background:var(--success)}
 .toast.error{background:var(--accent)}
@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 26/10/2026 15:55\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 27/10/2026 09:30</span>
+            onclick="alert('Versão desta build: 27/10/2026 09:05\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 27/10/2026 09:05</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -391,6 +391,7 @@ tbody td{padding:11px 16px;font-size:14px}
       <div class="nav-group-menu">
         <div class="nav-tab" data-tab="separacao" onclick="showTab('separacao',this)">📦 Separação</div>
         <div class="nav-tab" data-tab="coleta" onclick="showTab('coleta',this)">📝 Coleta</div>
+        <div class="nav-tab" data-tab="recebimento" onclick="showTab('recebimento',this)">📥 Recebimento</div>
         <div class="nav-tab" data-tab="fretes" onclick="showTab('fretes',this)">🚚 Fretes e Entregas</div>
         <div class="nav-tab" data-tab="producao" onclick="showTab('producao',this)">🏭 Ordens de Produção</div>
         <div class="nav-tab" data-tab="garantias" onclick="showTab('garantias',this)">🛡️ Garantias</div>
@@ -1273,6 +1274,43 @@ tbody td{padding:11px 16px;font-size:14px}
         <input class="search-input" id="coleta-hist-busca" placeholder="Buscar NF, pedido, cliente…" oninput="renderHistoricoColetas()">
       </div>
       <div id="coleta-historico"></div>
+    </div>
+
+
+    <!-- RECEBIMENTO — conferência da mercadoria que chegou dos fornecedores (expedição).
+         A conferência fica em conferencias_compra/{compraId}; o estoque só entra quando o
+         admin marca o pedido de compra como Recebido. -->
+    <div id="tab-recebimento" style="display:none">
+      <style>
+        .receb-item{border:1px solid var(--border);border-left:4px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:var(--card);display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center}
+        .receb-item.st-ok{border-left-color:#16a34a}
+        .receb-item.st-falta,.receb-item.st-avaria{border-left-color:#dc2626;background:#fff7f7}
+        .receb-item.st-sobra{border-left-color:#d97706;background:#fffbeb}
+        .receb-item-info{min-width:0}
+        .receb-sit{min-width:96px;align-items:flex-start}
+        .receb-desc{font-size:13px;word-break:break-word;margin-top:2px}
+        .receb-item-campos{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+        .receb-campo{display:flex;flex-direction:column;gap:3px}
+        .receb-campo label{font-size:10px;text-transform:uppercase;color:var(--muted);font-weight:600;letter-spacing:.4px}
+        .receb-campo input{width:84px;border:1px solid var(--border);border-radius:8px;padding:8px;font-size:16px;text-align:center;font-family:inherit;background:var(--card)}
+        .receb-campo input:focus{border-color:var(--accent);outline:none}
+        .receb-campo input:disabled{background:#f5f5f5;color:var(--text)}
+        .receb-campo.receb-obs input{width:170px;text-align:left;font-size:13px}
+        .receb-pedida{font-size:18px;font-weight:700;min-width:56px;text-align:center;padding:6px 0}
+        .receb-resumo{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 14px}
+        .receb-resumo .badge{font-size:13px;padding:5px 12px}
+        .receb-aviso{padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:12px}
+        @media (max-width:900px){ .receb-item{grid-template-columns:1fr} .receb-campo.receb-obs input{width:140px} }
+      </style>
+      <div class="section-header">
+        <div class="section-title">📥 Recebimento de Mercadoria</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input class="search-input" id="receb-busca" placeholder="Fornecedor, NF, pedido, produto…" oninput="filtrarRecebimento()">
+          <button class="btn btn-outline btn-sm" onclick="renderRecebimento(true)">🔄 Atualizar</button>
+        </div>
+      </div>
+      <div style="font-size:13px;color:var(--muted);margin:-4px 0 12px">Pedidos de compra a caminho. Clique no pedido que chegou, conte cada item e finalize a conferência — o Compras dá a entrada no estoque.</div>
+      <div id="receb-lista"></div>
     </div>
 
 
@@ -2517,6 +2555,13 @@ tbody td{padding:11px 16px;font-size:14px}
 </div>
 
 <!-- MODAL DETALHE PEDIDO DE COMPRA -->
+<div class="modal-overlay" id="modal-recebimento">
+  <div class="modal" style="max-width:1000px">
+    <button class="modal-close" onclick="fecharModal('modal-recebimento')">×</button>
+    <div id="receb-conteudo"></div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-compra-detalhe">
   <div class="modal" style="max-width:900px">
     <button class="modal-close" onclick="fecharModal('modal-compra-detalhe')">×</button>
@@ -3043,6 +3088,7 @@ const MODULOS_PERMISSAO = [
   { id:'catalogo',     label:'Catálogo' },
   { id:'separacao',    label:'Separação' },
   { id:'coleta',       label:'Coleta / Romaneio' },
+  { id:'recebimento',  label:'Recebimento (conferência de compras)' },
   { id:'producao',     label:'Ordens de Produção' },
   { id:'compras',      label:'Pedidos de Compra' },
   { id:'garantias',    label:'Garantias com Fornecedor' },
@@ -3058,9 +3104,9 @@ const MODULOS_PERMISSAO = [
 // Módulos que um "vendedor" comum sempre vê (filtrado aos próprios registros nas telas)
 const MODULOS_VENDEDOR_PADRAO = ['pedidos','orcamentos','clientes','produtos','promocoes','catalogo','garantias_clientes'];
 // Módulos que o tipo Expedição pode VER
-const MODULOS_EXPEDICAO_VER = ['pedidos','catalogo','produtos','separacao','coleta','producao','compras','estoque','garantias_clientes'];
+const MODULOS_EXPEDICAO_VER = ['pedidos','catalogo','produtos','separacao','coleta','recebimento','producao','compras','estoque','garantias_clientes'];
 // Módulos que o tipo Expedição pode EDITAR
-const MODULOS_EXPEDICAO_EDITAR = ['separacao','coleta','producao'];
+const MODULOS_EXPEDICAO_EDITAR = ['separacao','coleta','recebimento','producao'];
 
 // Retorna true se o usuário logado é do tipo Expedição
 function ehExpedicao(){
@@ -3826,6 +3872,7 @@ function showTab(tab, el){
   }
   if(tab==='separacao') renderSeparacao();
   if(tab==='coleta') renderColeta();
+  if(tab==='recebimento') renderRecebimento(false);
   if(tab==='fretes') renderFretes(false);
   if(tab==='financeiro') renderFinanceiro();
   if(tab==='estoque'){
@@ -12129,6 +12176,11 @@ async function darEntradaEstoqueCompra(compraId, compra, statusAnterior){
   const naoLocalizados = [];
   const paraGuardar = [];
 
+  // Conferência da expedição (aba Recebimento). Finalizada = entra o CONFERIDO menos avarias;
+  // sem conferência finalizada = entra a quantidade do pedido, como sempre foi.
+  const conf = await lerConferenciaCompra(compraId);
+  const usaConf = conf?.status === 'finalizada';
+
   for(let idx = 0; idx < compra.itens.length; idx++){
     const item = compra.itens[idx];
     const chaveItem = chaveItemCompra(item, idx);
@@ -12136,6 +12188,19 @@ async function darEntradaEstoqueCompra(compraId, compra, statusAnterior){
     // Idempotência: se este item desta compra já entrou, não entra de novo. Protege tanto
     // contra reexecução após queda no meio quanto contra alternar o status Recebido→volta→Recebido.
     if(aplicados[chaveItem]){ pulados++; continue; }
+
+    const qtdConf = qtdEntradaConferida(conf, chaveItem);
+    const qtdEntrada = qtdConf === null ? (Number(item.qtd) || 0) : qtdConf;
+    const sufixoConf = qtdConf === null ? '' : ' (conferido)';
+
+    // Item conferido com zero (não chegou ou chegou todo avariado): nada a movimentar, mas
+    // fica marcado como aplicado para não entrar a quantidade do pedido numa nova tentativa.
+    if(qtdEntrada <= 0){
+      await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado/'+chaveItem).set(
+        qtdConf === null ? { qtd:0, ts:agoraTs() } : { qtd:0, conferida:true, ts:agoraTs() });
+      entraram++;
+      continue;
+    }
 
     if(item.tipo === 'insumo'){
       const insumo = INSUMOS_DB.find(x=>x.codigo===item.codigo);
@@ -12146,17 +12211,21 @@ async function darEntradaEstoqueCompra(compraId, compra, statusAnterior){
         continue;
       }
       await movimentarEstoque('insumo', chaveIns, { codigo:item.codigo, nome:item.nome,
-        delta:item.qtd, motivo:`Compra ${compra.nf?'NF '+compra.nf:''} — ${esc(compra.fornecedor)}`, origemTipo:'compra', origemId:compraId });
+        delta:qtdEntrada, motivo:`Compra ${compra.nf?'NF '+compra.nf:''} — ${esc(compra.fornecedor)}${sufixoConf}`, origemTipo:'compra', origemId:compraId });
     } else {
       await movimentarEstoque('produto', item.codigo, { codigo:item.codigo, nome:item.nome,
-        delta:item.qtd, motivo:`Compra ${compra.nf?'NF '+compra.nf:''} — ${esc(compra.fornecedor)}`, origemTipo:'compra', origemId:compraId });
+        delta:qtdEntrada, motivo:`Compra ${compra.nf?'NF '+compra.nf:''} — ${esc(compra.fornecedor)}${sufixoConf}`, origemTipo:'compra', origemId:compraId });
     }
 
     // Marca item a item, logo após aplicar: se cair aqui, o próximo recebimento retoma
     // exatamente de onde parou.
-    await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado/'+chaveItem).set({ qtd:item.qtd, ts:agoraTs() });
+    await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado/'+chaveItem).set(
+      qtdConf === null ? { qtd:qtdEntrada, ts:agoraTs() } : { qtd:qtdEntrada, conferida:true, ts:agoraTs() });
     entraram++;
-    paraGuardar.push({ codigo:item.codigo, nome:item.nome, qtd:item.qtd, tipo: item.tipo==='insumo' ? 'insumo' : 'produto' });
+    paraGuardar.push({ codigo:item.codigo, nome:item.nome, qtd:qtdEntrada, tipo: item.tipo==='insumo' ? 'insumo' : 'produto' });
+  }
+  if(usaConf){
+    try { await db.ref('conferencias_compra/'+compraId).update({ estoque_aplicado_em: agoraTs(), estoque_aplicado_por: usuarioLogado?.nome || '' }); } catch(e){}
   }
   mostrarOndeGuardar(`Compra recebida — ${compra.fornecedor||''}${compra.nf ? ' · NF '+compra.nf : ''}`, paraGuardar);
 
@@ -12472,6 +12541,7 @@ async function abrirDetalheCompra(id){
   if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
   if(!INSUMOS_DB.length) await carregarInsumosFirebase();
   const statusInfo = statusInfoCompra(c.status);
+  const confCompra = await lerConferenciaCompra(id);
 
   // Fluxo sequencial de avanço de status
   const ordem = ['negociacao','separacao','transito','recebido','concluido'];
@@ -12483,7 +12553,7 @@ async function abrirDetalheCompra(id){
 
   let botaoAvancar = '';
   if(proximoStatus === 'recebido'){
-    botaoAvancar = `<button class="btn btn-primary" style="flex:1" onclick="marcarCompraRecebida('${c.id}')">✅ Marcar como Recebido</button>`;
+    botaoAvancar = `<button class="btn btn-primary" style="flex:1" onclick="marcarCompraRecebida('${c.id}')">✅ Marcar como Recebido${confCompra?.status==='finalizada' ? ' (entra o conferido)' : ''}</button>`;
   } else if(proximoStatus){
     const labelProximo = statusInfoCompra(proximoStatus).label;
     botaoAvancar = `<button class="btn btn-primary" style="flex:1" onclick="avancarStatusCompra('${c.id}','${proximoStatus}')">➜ Avançar para "${labelProximo}"</button>`;
@@ -12570,6 +12640,7 @@ async function abrirDetalheCompra(id){
     </table>
     <div style="font-size:11px;color:var(--muted);margin-top:6px">💡 Passe o mouse sobre o código ou a descrição do item pra ver o estoque atual e mínimo.</div>
     <div id="compra-conferencia-progresso" style="margin-top:10px;font-size:12px;color:var(--muted)"></div>
+    ${htmlConferenciaNoDetalheCompra(c, confCompra)}
     <div style="margin-top:12px;font-size:13px;color:var(--muted);text-align:right">
       Mercadoria: ${fmtMoeda(totalBruto)} · IPI: ${fmtMoeda(totalIpi)} · ST: ${fmtMoeda(totalSt)} · Frete: ${fmtMoeda(c.frete)}
     </div>
@@ -12598,7 +12669,11 @@ async function alterarStatusManualCompra(id, novoStatus){
   }
 
   if(novoStatus === 'recebido' && statusAnterior !== 'recebido'){
-    if(!confirm(`Marcar como "Recebido"?\n\nIsso vai dar entrada automática no estoque de ${c.itens.length} item(ns).`)) return;
+    const confRec = await lerConferenciaCompra(id);
+    if(!confirm(textoConfirmRecebimentoCompra(c, confRec))){
+      const sel = document.getElementById('compra-detalhe-status-select'); if(sel) sel.value = '';
+      return;
+    }
     // Entrada primeiro: se cair no meio, o status não avança e o recebimento pode ser
     // refeito sem duplicar os itens que já entraram.
     await darEntradaEstoqueCompra(id, c, statusAnterior);
@@ -12642,7 +12717,8 @@ async function marcarCompraRecebida(id){
   if(!temPermissaoEditar('compras')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const c = COMPRAS_CACHE.find(x=>x.id===id);
   if(!c) return;
-  if(!confirm(`Marcar compra de "${c.fornecedor}" como recebida?\n\nIsso vai dar entrada automática no estoque de ${c.itens.length} item(ns).`)) return;
+  const confRec = await lerConferenciaCompra(id);
+  if(!confirm(`Compra de "${c.fornecedor}"\n\n` + textoConfirmRecebimentoCompra(c, confRec))) return;
 
   const statusAnterior = c.status;
   // Entrada primeiro: se cair no meio, o status não avança e o recebimento pode ser
@@ -12654,6 +12730,467 @@ async function marcarCompraRecebida(id){
   fecharModal('modal-compra-detalhe');
   await renderCompras();
   toast('✓ Compra recebida! Estoque atualizado.','success');
+}
+
+// ══════════════════════════════════════════════
+// ══ RECEBIMENTO — CONFERÊNCIA DE MERCADORIA (expedição) ══
+// A expedição conta o que chegou de cada pedido de compra a caminho. A conferência fica em
+// conferencias_compra/{compraId} — nó separado de propósito: salvarPedidoCompra regrava o
+// pedido inteiro com set() e apagaria qualquer dado guardado dentro dele.
+// O estoque NÃO entra aqui: o admin vê o resultado no pedido de compra e, ao marcar Recebido,
+// entra a quantidade CONFERIDA menos as avarias (darEntradaEstoqueCompra).
+// Leituras: a lista usa lerNoCache('pedidos_compra') (mesmo cache dos relatórios) e só a
+// conferência de cada pedido listado; abrir um pedido lê só aquele pedido.
+// ══════════════════════════════════════════════
+const STATUS_A_RECEBER = ['transito','importacao','separacao'];
+let RECEB_LISTA = [];
+let RECEB_CONFS = {};
+let recebAtual = null;      // { id, compra, conf }
+let salvandoReceb = false;
+
+async function lerConferenciaCompra(compraId){
+  try { return (await db.ref('conferencias_compra/'+compraId).once('value')).val(); }
+  catch(e){ return null; }
+}
+
+// Quanto entra no estoque de um item pela conferência finalizada (recebido − avariado).
+// null = sem conferência finalizada para o item → quem chama usa a quantidade do pedido.
+function qtdEntradaConferida(conf, chave){
+  if(!conf || conf.status !== 'finalizada' || !conf.itens || !conf.itens[chave]) return null;
+  const it = conf.itens[chave];
+  if(it.qtd_recebida === undefined || it.qtd_recebida === null) return null;
+  return Math.max(0, (Number(it.qtd_recebida) || 0) - (Number(it.qtd_avaria) || 0));
+}
+
+function fmtQtdReceb(n){ return Number(n || 0).toLocaleString('pt-BR', { maximumFractionDigits: 3 }); }
+
+function situacaoItemReceb(pedida, recebida, avaria){
+  if(recebida === null || recebida === undefined || recebida === '' || isNaN(recebida))
+    return { cod:'pendente', label:'A conferir', cor:'#1f4e78', bg:'#ddebf7' };
+  pedida = Number(pedida) || 0; recebida = Number(recebida); avaria = Number(avaria) || 0;
+  if(avaria > 0) return { cod:'avaria', label:'Avaria ' + fmtQtdReceb(avaria), cor:'#9c0006', bg:'#ffc7ce' };
+  if(recebida < pedida) return { cod:'falta', label:'Falta ' + fmtQtdReceb(pedida - recebida), cor:'#9c0006', bg:'#ffc7ce' };
+  if(recebida > pedida) return { cod:'sobra', label:'Sobra ' + fmtQtdReceb(recebida - pedida), cor:'#9c5700', bg:'#ffeb9c' };
+  return { cod:'ok', label:'OK', cor:'#006100', bg:'#c6efce' };
+}
+
+// Totais de uma conferência salva (para os selos da lista)
+function resumoConferenciaSalva(conf){
+  const r = { total:0, conferidos:0, divergencias:0 };
+  Object.values(conf?.itens || {}).forEach(it => {
+    r.total++;
+    if(it.qtd_recebida === undefined || it.qtd_recebida === null) return;
+    r.conferidos++;
+    if(situacaoItemReceb(it.qtd_pedida, it.qtd_recebida, it.qtd_avaria).cod !== 'ok') r.divergencias++;
+  });
+  return r;
+}
+
+function badgeConferencia(conf, totalItens){
+  if(!conf) return '<span class="badge" style="background:#f0f0f0;color:#666">Não conferido</span>';
+  const r = resumoConferenciaSalva(conf);
+  if(conf.status === 'finalizada'){
+    return r.divergencias
+      ? `<span class="badge" style="background:#ffc7ce;color:#9c0006">Conferido · ${r.divergencias} divergência(s)</span>`
+      : '<span class="badge" style="background:#c6efce;color:#006100">Conferido OK</span>';
+  }
+  return `<span class="badge" style="background:#fff3cd;color:#8a6d00">Em conferência · ${r.conferidos}/${totalItens || r.total}</span>`;
+}
+
+function fmtDataHoraReceb(ts){ return ts ? new Date(ts).toLocaleString('pt-BR', { dateStyle:'short', timeStyle:'short' }) : ''; }
+
+async function renderRecebimento(forcar){
+  if(!podeVer('recebimento')){ toast('Acesso restrito — sem permissão nesta área','error'); return; }
+  const el = document.getElementById('receb-lista'); if(!el) return;
+  el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px">Carregando…</div>';
+  try {
+    if(forcar) invalidarCacheNo('pedidos_compra');
+    const snap = await lerNoCache('pedidos_compra');
+    const todos = snap.val() || {};
+    RECEB_LISTA = Object.keys(todos).map(id => ({ id, ...todos[id] }))
+      .filter(c => STATUS_A_RECEBER.includes(c.status))
+      .sort((a,b) => (a.data || '').localeCompare(b.data || ''));
+    const confs = await Promise.all(RECEB_LISTA.map(c => lerConferenciaCompra(c.id)));
+    RECEB_CONFS = {};
+    RECEB_LISTA.forEach((c,i) => { if(confs[i]) RECEB_CONFS[c.id] = confs[i]; });
+  } catch(e){
+    el.innerHTML = '';
+    toast('Erro ao carregar compras a receber: ' + e.message, 'error');
+    return;
+  }
+  filtrarRecebimento();
+}
+
+function filtrarRecebimento(){
+  const el = document.getElementById('receb-lista'); if(!el) return;
+  const q = (document.getElementById('receb-busca')?.value || '').toLowerCase().trim();
+  const lista = RECEB_LISTA.filter(c => {
+    if(!q) return true;
+    const conf = RECEB_CONFS[c.id];
+    if([c.fornecedor, c.nf, c.numero_origem, conf?.nf].some(v => String(v || '').toLowerCase().includes(q))) return true;
+    return (c.itens || []).some(i => String(i.codigo || '').toLowerCase().includes(q) || String(i.nome || '').toLowerCase().includes(q));
+  });
+  if(!lista.length){
+    el.innerHTML = `<div style="text-align:center;color:var(--muted);padding:32px">${q ? 'Nenhum pedido encontrado para essa busca' : 'Nenhum pedido de compra a caminho'}</div>`;
+    return;
+  }
+  el.innerHTML = lista.map(c => {
+    const st = statusInfoCompra(c.status);
+    const conf = RECEB_CONFS[c.id];
+    const nf = conf?.nf || c.nf;
+    return `<div class="pedido-card" style="cursor:pointer" onclick="abrirConferenciaRecebimento('${c.id}')">
+      <div class="pedido-card-header">
+        <div style="min-width:0">
+          <div class="pedido-card-num">${esc(c.fornecedor || '—')}${nf ? ' · NF ' + esc(nf) : ''}</div>
+          <div style="font-size:12px;color:var(--accent);font-weight:600;margin-top:2px">🔖 ${c.numero_origem ? 'Pedido #' + esc(c.numero_origem) : 'ID: ' + c.id.substring(0,8)}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">${(c.itens || []).length} item(ns)${c.data ? ' · pedido em ' + new Date(c.data + 'T00:00').toLocaleDateString('pt-BR') : ''}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+          <span class="badge" style="background:${st.bg};color:${st.cor}">${st.label}</span>
+          ${badgeConferencia(conf, (c.itens || []).length)}
+        </div>
+      </div>
+      ${conf?.status === 'finalizada' ? `<div style="font-size:12px;color:var(--muted)">✔ Finalizada por ${esc(conf.finalizado_por || '')} em ${fmtDataHoraReceb(conf.finalizado_em)} — aguardando entrada no estoque</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+async function abrirConferenciaRecebimento(id){
+  if(!podeVer('recebimento')){ toast('Acesso restrito — sem permissão nesta área','error'); return; }
+  let compra, conf;
+  try {
+    const [snapC, cf] = await Promise.all([ db.ref('pedidos_compra/' + id).once('value'), lerConferenciaCompra(id) ]);
+    compra = snapC.val(); conf = cf;
+  } catch(e){ toast('Erro ao abrir o pedido: ' + e.message, 'error'); return; }
+  if(!compra){ toast('Pedido de compra não encontrado', 'error'); return; }
+  recebAtual = { id, compra, conf: conf || null };
+  desenharConferenciaRecebimento();
+  abrirModal('modal-recebimento');
+  const primeiro = document.querySelector('#receb-conteudo input[id^="receb-rec-"]:not([disabled])');
+  if(primeiro && primeiro.value === '') setTimeout(() => primeiro.focus(), 80);
+}
+
+function desenharConferenciaRecebimento(){
+  const { compra, conf } = recebAtual;
+  const finalizada = conf?.status === 'finalizada';
+  const aCaminho = STATUS_A_RECEBER.includes(compra.status);
+  const podeEditar = temPermissaoEditar('recebimento') && !finalizada && aCaminho;
+  const dis = podeEditar ? '' : 'disabled';
+  const ci = conf?.itens || {};
+  const itens = compra.itens || [];
+
+  const nomesTransp = new Set((TRANSPORTADORAS_DB || []).filter(t => t.nome).map(t => t.nome));
+  const dlTransp = Array.from(nomesTransp).sort((a,b) => a.localeCompare(b,'pt-BR')).map(n => `<option value="${esc(n)}"></option>`).join('');
+
+  let aviso = '';
+  if(!aCaminho){
+    aviso = `<div class="receb-aviso" style="background:#dcfce7;color:#166534">✔ Este pedido já está como "${statusInfoCompra(compra.status).label}" — a conferência não pode mais ser alterada.</div>`;
+  } else if(finalizada){
+    aviso = `<div class="receb-aviso" style="background:#e0f2fe;color:#075985">✔ Conferência finalizada por <strong>${esc(conf.finalizado_por || '')}</strong> em ${fmtDataHoraReceb(conf.finalizado_em)}. Aguardando o Compras dar entrada no estoque.</div>`;
+  } else if(conf){
+    aviso = `<div class="receb-aviso" style="background:#fff3cd;color:#8a6d00">Conferência em andamento — salva por ${esc(conf.atualizado_por || '')} em ${fmtDataHoraReceb(conf.atualizado_em)}.</div>`;
+  }
+
+  const linhas = itens.map((it, idx) => {
+    const c = ci[chaveItemCompra(it, idx)] || {};
+    const rec = (c.qtd_recebida === undefined || c.qtd_recebida === null) ? '' : c.qtd_recebida;
+    const av = c.qtd_avaria ? c.qtd_avaria : '';
+    return `<div class="receb-item" id="receb-item-${idx}">
+      <div class="receb-item-info">
+        <div><strong>${esc(it.codigo || '—')}</strong>${it.codigo_fornecedor ? ` <span style="font-size:12px;color:var(--muted)">· cód. fornec. ${esc(it.codigo_fornecedor)}</span>` : ''}</div>
+        <div class="receb-desc">${esc(it.nome || '')}</div>
+      </div>
+      <div class="receb-item-campos">
+        <div class="receb-campo"><label>Pedido</label><div class="receb-pedida">${fmtQtdReceb(it.qtd)}</div></div>
+        <div class="receb-campo"><label>Recebido</label><input type="number" min="0" step="any" inputmode="decimal" id="receb-rec-${idx}" value="${rec}" ${dis} oninput="atualizarItemRecebimento(${idx})" onkeydown="teclaRecebimento(event, ${idx})"></div>
+        <div class="receb-campo"><label>Avariado</label><input type="number" min="0" step="any" inputmode="decimal" id="receb-av-${idx}" value="${av}" ${dis} oninput="atualizarItemRecebimento(${idx})"></div>
+        <div class="receb-campo receb-obs"><label>Obs.</label><input type="text" id="receb-obs-${idx}" value="${esc(c.obs || '')}" ${dis} placeholder="ex.: caixa amassada"></div>
+        <div class="receb-campo receb-sit"><label>&nbsp;</label><span class="badge" id="receb-sit-${idx}"></span></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const v = (x) => (x === undefined || x === null) ? '' : esc(x);
+  let botoes = '';
+  if(podeEditar){
+    botoes = `<button class="btn btn-outline" onclick="salvarConferenciaRecebimento(false)">💾 Salvar e continuar depois</button>
+      <button class="btn btn-primary" style="flex:1" onclick="salvarConferenciaRecebimento(true)">✅ Finalizar conferência</button>`;
+  } else if(finalizada && aCaminho && temPermissaoEditar('compras')){
+    botoes = `<button class="btn btn-outline" onclick="reabrirConferenciaRecebimento()">↩️ Reabrir conferência</button>`;
+  }
+
+  document.getElementById('receb-conteudo').innerHTML = `
+    <div class="modal-title">📥 ${esc(compra.fornecedor || '—')}${compra.numero_origem ? ' — Pedido #' + esc(compra.numero_origem) : ''}</div>
+    ${aviso}
+    <div class="form-row triple" style="margin-bottom:10px">
+      <div class="form-group"><label>NF do fornecedor</label><input type="text" id="receb-nf" value="${v(conf ? conf.nf : compra.nf)}" ${dis}></div>
+      <div class="form-group"><label>Transportadora</label><input type="text" id="receb-transp" list="receb-transp-lista" value="${v(conf?.transportadora)}" ${dis}><datalist id="receb-transp-lista">${dlTransp}</datalist></div>
+      <div class="form-group"><label>Conferido por</label><input type="text" value="${esc(conf?.iniciado_por || usuarioLogado?.nome || '')}" disabled></div>
+    </div>
+    <div class="form-row triple" style="margin-bottom:6px">
+      <div class="form-group"><label>Volumes na NF</label><input type="number" min="0" step="1" id="receb-vol-nf" value="${v(conf?.volumes_nf)}" ${dis} oninput="atualizarResumoRecebimento()"></div>
+      <div class="form-group"><label>Volumes recebidos</label><input type="number" min="0" step="1" id="receb-vol-rec" value="${v(conf?.volumes_recebidos)}" ${dis} oninput="atualizarResumoRecebimento()"></div>
+      <div class="form-group"><label>Observação geral</label><input type="text" id="receb-obs-geral" value="${v(conf?.obs)}" ${dis} placeholder="ex.: chegou sem lacre"></div>
+    </div>
+    <div class="receb-resumo" id="receb-resumo"></div>
+    ${podeEditar ? '<div style="font-size:12px;color:var(--muted);margin-bottom:8px">Conte e digite a quantidade que chegou de cada item (Enter vai para o próximo). Se não chegou nada, digite 0. Peça danificada: some no Recebido e informe também em Avariado.</div>' : ''}
+    <div id="receb-itens">${linhas || '<div style="color:var(--muted);padding:16px">Pedido sem itens</div>'}</div>
+    <div class="form-actions" style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">${botoes}</div>
+  `;
+  itens.forEach((_, idx) => atualizarItemRecebimento(idx, true));
+  atualizarResumoRecebimento();
+}
+
+function lerNumReceb(id){
+  const el = document.getElementById(id); if(!el) return null;
+  const t = String(el.value).trim();
+  if(t === '') return null;
+  const n = Number(t.replace(',', '.'));
+  return isNaN(n) ? NaN : n;
+}
+
+function atualizarItemRecebimento(idx, semResumo){
+  const it = recebAtual?.compra?.itens?.[idx]; if(!it) return;
+  const sit = situacaoItemReceb(it.qtd, lerNumReceb('receb-rec-'+idx), lerNumReceb('receb-av-'+idx));
+  const b = document.getElementById('receb-sit-'+idx);
+  if(b){ b.textContent = sit.label; b.style.background = sit.bg; b.style.color = sit.cor; }
+  const row = document.getElementById('receb-item-'+idx);
+  if(row) row.className = 'receb-item' + (sit.cod !== 'pendente' ? ' st-' + sit.cod : '');
+  if(!semResumo) atualizarResumoRecebimento();
+}
+
+function atualizarResumoRecebimento(){
+  const el = document.getElementById('receb-resumo'); if(!el || !recebAtual) return;
+  const cont = { ok:0, falta:0, sobra:0, avaria:0, pendente:0 };
+  (recebAtual.compra.itens || []).forEach((it, idx) => {
+    cont[situacaoItemReceb(it.qtd, lerNumReceb('receb-rec-'+idx), lerNumReceb('receb-av-'+idx)).cod]++;
+  });
+  const total = (recebAtual.compra.itens || []).length;
+  const pill = (txt, bg, cor) => `<span class="badge" style="background:${bg};color:${cor}">${txt}</span>`;
+  let h = pill(`${total - cont.pendente} de ${total} conferidos`, '#eef2f7', '#334155');
+  if(cont.ok) h += pill(`${cont.ok} OK`, '#c6efce', '#006100');
+  if(cont.falta) h += pill(`${cont.falta} com falta`, '#ffc7ce', '#9c0006');
+  if(cont.sobra) h += pill(`${cont.sobra} com sobra`, '#ffeb9c', '#9c5700');
+  if(cont.avaria) h += pill(`${cont.avaria} com avaria`, '#ffc7ce', '#9c0006');
+  const vn = lerNumReceb('receb-vol-nf'), vr = lerNumReceb('receb-vol-rec');
+  if(vn !== null && vr !== null && !isNaN(vn) && !isNaN(vr) && vn !== vr)
+    h += pill(`⚠ Volumes: NF ${vn} × recebidos ${vr}`, '#ffc7ce', '#9c0006');
+  el.innerHTML = h;
+}
+
+// Enter no "Recebido" pula para o próximo item — conferência rápida no teclado do notebook
+function teclaRecebimento(ev, idx){
+  if(ev.key !== 'Enter') return;
+  ev.preventDefault();
+  const prox = document.getElementById('receb-rec-' + (idx + 1));
+  if(prox) prox.focus(); else ev.target.blur();
+}
+
+async function salvarConferenciaRecebimento(finalizar){
+  if(!temPermissaoEditar('recebimento')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  if(!recebAtual || salvandoReceb) return;
+  const { id, compra } = recebAtual;
+
+  const itens = {};
+  const lista = [];
+  for(let idx = 0; idx < (compra.itens || []).length; idx++){
+    const it = compra.itens[idx];
+    const rec = lerNumReceb('receb-rec-'+idx);
+    const av = lerNumReceb('receb-av-'+idx);
+    if((rec !== null && (isNaN(rec) || rec < 0)) || (av !== null && (isNaN(av) || av < 0))){
+      toast(`Quantidade inválida no item ${it.codigo || idx + 1}`, 'error');
+      document.getElementById('receb-rec-'+idx)?.focus(); return;
+    }
+    if((av || 0) > 0 && rec === null){
+      toast(`Item ${it.codigo || idx + 1}: informe também quanto chegou no total (Recebido).`, 'error');
+      document.getElementById('receb-rec-'+idx)?.focus(); return;
+    }
+    if(rec !== null && (av || 0) > rec){
+      toast(`Item ${it.codigo || idx + 1}: avariado não pode ser maior que o recebido.`, 'error');
+      document.getElementById('receb-av-'+idx)?.focus(); return;
+    }
+    const reg = {
+      codigo: it.codigo || '', nome: it.nome || '', tipo: it.tipo === 'insumo' ? 'insumo' : 'produto',
+      qtd_pedida: Number(it.qtd) || 0,
+      qtd_recebida: rec,
+      qtd_avaria: av || 0,
+      obs: (document.getElementById('receb-obs-'+idx)?.value || '').trim()
+    };
+    itens[chaveItemCompra(it, idx)] = reg;
+    lista.push(reg);
+  }
+
+  const volNf = lerNumReceb('receb-vol-nf'), volRec = lerNumReceb('receb-vol-rec');
+  if([volNf, volRec].some(x => x !== null && (isNaN(x) || x < 0))){ toast('Volumes inválidos', 'error'); return; }
+
+  if(finalizar){
+    const semQtd = lista.findIndex(i => i.qtd_recebida === null);
+    if(semQtd >= 0){
+      const faltam = lista.filter(i => i.qtd_recebida === null).length;
+      toast(`Faltam ${faltam} item(ns) sem quantidade recebida. Se não chegou nada, digite 0.`, 'error');
+      document.getElementById('receb-rec-'+semQtd)?.focus(); return;
+    }
+    const div = lista.filter(i => situacaoItemReceb(i.qtd_pedida, i.qtd_recebida, i.qtd_avaria).cod !== 'ok');
+    let msg;
+    if(div.length){
+      msg = `Finalizar a conferência com ${div.length} divergência(s)?\n\n`
+        + div.slice(0, 12).map(i => `• ${i.codigo} — ${situacaoItemReceb(i.qtd_pedida, i.qtd_recebida, i.qtd_avaria).label}`).join('\n')
+        + (div.length > 12 ? `\n… e mais ${div.length - 12}` : '')
+        + '\n\nDepois de finalizar não dá mais para alterar.';
+    } else {
+      msg = 'Tudo conferido igual ao pedido.\n\nFinalizar a conferência? Depois de finalizar não dá mais para alterar.';
+    }
+    if(volNf !== null && volRec !== null && volNf !== volRec) msg += `\n\n⚠ Volumes diferentes: NF ${volNf} × recebidos ${volRec}`;
+    if(!await confirmCustom(esc(msg), 'Finalizar')) return;
+  }
+
+  salvandoReceb = true;
+  try {
+    // Relê na hora de gravar: o pedido pode ter sido recebido, ou a conferência finalizada por
+    // outra pessoa, enquanto esta tela estava aberta.
+    const [snapSt, snapConf] = await Promise.all([
+      db.ref('pedidos_compra/' + id + '/status').once('value'),
+      db.ref('conferencias_compra/' + id).once('value')
+    ]);
+    if(!STATUS_A_RECEBER.includes(snapSt.val())){
+      toast('Este pedido já foi recebido ou mudou de status — a conferência não foi salva.', 'error'); return;
+    }
+    const confAnt = snapConf.val() || {};
+    if(confAnt.status === 'finalizada'){
+      toast('Esta conferência já foi finalizada por ' + (confAnt.finalizado_por || 'outra pessoa') + '.', 'error'); return;
+    }
+    const nome = usuarioLogado?.nome || '';
+    const ts = agoraTs();
+    const dados = {
+      compra_numero: compra.numero_origem || null,
+      fornecedor: compra.fornecedor || '',
+      nf: (document.getElementById('receb-nf')?.value || '').trim(),
+      transportadora: (document.getElementById('receb-transp')?.value || '').trim(),
+      volumes_nf: volNf,
+      volumes_recebidos: volRec,
+      obs: (document.getElementById('receb-obs-geral')?.value || '').trim(),
+      itens,
+      status: finalizar ? 'finalizada' : 'em_andamento',
+      iniciado_por: confAnt.iniciado_por || nome,
+      iniciado_em: confAnt.iniciado_em || ts,
+      atualizado_por: nome,
+      atualizado_em: ts,
+      finalizado_por: finalizar ? nome : null,
+      finalizado_em: finalizar ? ts : null,
+      historico: confAnt.historico || null
+    };
+    await db.ref('conferencias_compra/' + id).set(dados);
+    recebAtual.conf = dados;
+    RECEB_CONFS[id] = dados;
+    filtrarRecebimento();
+    if(finalizar){
+      fecharModal('modal-recebimento');
+      toast('✓ Conferência finalizada. O Compras vai dar a entrada no estoque.', 'success');
+    } else {
+      desenharConferenciaRecebimento();
+      toast('✓ Conferência salva — dá para continuar depois.', 'success');
+    }
+  } catch(e){
+    toast('Erro ao salvar a conferência: ' + e.message, 'error');
+  } finally {
+    salvandoReceb = false;
+  }
+}
+
+async function reabrirConferenciaRecebimento(){
+  if(!temPermissaoEditar('compras')){ toast('Só o Compras/admin pode reabrir uma conferência', 'error'); return; }
+  if(!recebAtual) return;
+  const { id } = recebAtual;
+  if(!await confirmCustom('Reabrir esta conferência?\n\nA expedição poderá alterar as quantidades e finalizar de novo.', 'Reabrir')) return;
+  try {
+    const snapSt = await db.ref('pedidos_compra/' + id + '/status').once('value');
+    if(!STATUS_A_RECEBER.includes(snapSt.val())){ toast('Este pedido já foi recebido — não dá para reabrir a conferência.', 'error'); return; }
+    const logKey = db.ref('conferencias_compra/' + id + '/historico').push().key;
+    await db.ref('conferencias_compra/' + id).update({
+      status: 'em_andamento', finalizado_por: null, finalizado_em: null,
+      ['historico/' + logKey]: { acao: 'reaberta', por: usuarioLogado?.nome || '', em: agoraTs() }
+    });
+    recebAtual.conf = await lerConferenciaCompra(id);
+    if(recebAtual.conf) RECEB_CONFS[id] = recebAtual.conf;
+    desenharConferenciaRecebimento();
+    filtrarRecebimento();
+    toast('✓ Conferência reaberta', 'success');
+  } catch(e){ toast('Erro ao reabrir: ' + e.message, 'error'); }
+}
+
+// Texto do confirm ao marcar o pedido de compra como Recebido (os três caminhos de status)
+function textoConfirmRecebimentoCompra(c, conf){
+  const itens = c?.itens || [];
+  const n = itens.length;
+  if(conf?.status === 'finalizada'){
+    let diferentes = 0, semConf = 0;
+    itens.forEach((it, idx) => {
+      const q = qtdEntradaConferida(conf, chaveItemCompra(it, idx));
+      if(q === null) semConf++;
+      else if(q !== (Number(it.qtd) || 0)) diferentes++;
+    });
+    return `Marcar como "Recebido"?\n\nVai entrar no estoque a quantidade CONFERIDA pela expedição (recebido − avariado) de ${n} item(ns).`
+      + (diferentes ? `\n\n${diferentes} item(ns) entram com quantidade diferente do pedido.` : '\n\nConferência bateu com o pedido.')
+      + (semConf ? `\n⚠ ${semConf} item(ns) sem conferência (pedido alterado depois?) — entram com a quantidade do pedido.` : '');
+  }
+  if(conf){
+    return `⚠ A expedição começou a conferência mas NÃO finalizou.\n\nMarcar como "Recebido" mesmo assim? Vai entrar a quantidade PEDIDA de ${n} item(ns).`;
+  }
+  return `Marcar como "Recebido"?\n\n⚠ Sem conferência da expedição: vai entrar no estoque a quantidade PEDIDA de ${n} item(ns).`;
+}
+
+// Bloco "Conferência da expedição" dentro do detalhe do pedido de compra (admin/compras)
+function htmlConferenciaNoDetalheCompra(c, conf){
+  const aCaminho = STATUS_A_RECEBER.includes(c?.status);
+  if(!conf){
+    return aCaminho
+      ? '<div style="margin-top:14px;padding:10px 14px;background:#f1f5f9;border-radius:8px;font-size:13px;color:#475569">📥 A expedição ainda não conferiu este pedido (aba Operações → Recebimento). Se marcar Recebido sem conferência, entra a quantidade pedida.</div>'
+      : '';
+  }
+  const finalizada = conf.status === 'finalizada';
+  const linhas = (c.itens || []).map((it, idx) => {
+    const ch = chaveItemCompra(it, idx);
+    const ci = conf.itens?.[ch];
+    const temRec = ci && ci.qtd_recebida !== undefined && ci.qtd_recebida !== null;
+    const sit = temRec ? situacaoItemReceb(it.qtd, ci.qtd_recebida, ci.qtd_avaria) : { label:'Não conferido', bg:'#f0f0f0', cor:'#666' };
+    const entra = temRec ? Math.max(0, (Number(ci.qtd_recebida) || 0) - (Number(ci.qtd_avaria) || 0)) : null;
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:6px"><strong>${esc(it.codigo || '—')}</strong><div style="font-size:11px;color:var(--muted)">${esc(it.nome || '')}</div></td>
+      <td style="padding:6px;text-align:center">${fmtQtdReceb(it.qtd)}</td>
+      <td style="padding:6px;text-align:center">${temRec ? fmtQtdReceb(ci.qtd_recebida) : '—'}</td>
+      <td style="padding:6px;text-align:center">${temRec && ci.qtd_avaria ? fmtQtdReceb(ci.qtd_avaria) : '—'}</td>
+      <td style="padding:6px;text-align:center;font-weight:700">${entra === null ? '—' : fmtQtdReceb(entra)}</td>
+      <td style="padding:6px;text-align:center"><span class="badge" style="background:${sit.bg};color:${sit.cor}">${sit.label}</span>${ci?.obs ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${esc(ci.obs)}</div>` : ''}</td>
+    </tr>`;
+  }).join('');
+  const volDif = conf.volumes_nf !== undefined && conf.volumes_nf !== null && conf.volumes_recebidos !== undefined && conf.volumes_recebidos !== null && conf.volumes_nf !== conf.volumes_recebidos;
+  const info = [
+    conf.nf ? 'NF ' + esc(conf.nf) : '',
+    conf.transportadora ? '🚚 ' + esc(conf.transportadora) : '',
+    (conf.volumes_nf !== undefined && conf.volumes_nf !== null) || (conf.volumes_recebidos !== undefined && conf.volumes_recebidos !== null)
+      ? `<span style="${volDif ? 'color:#b91c1c;font-weight:700' : ''}">Volumes: NF ${conf.volumes_nf ?? '—'} × recebidos ${conf.volumes_recebidos ?? '—'}</span>` : ''
+  ].filter(Boolean).join(' · ');
+  const cab = finalizada
+    ? `✔ Finalizada por <strong>${esc(conf.finalizado_por || '')}</strong> em ${fmtDataHoraReceb(conf.finalizado_em)}`
+    : `⏳ Em andamento — ${esc(conf.atualizado_por || '')} em ${fmtDataHoraReceb(conf.atualizado_em)} (ainda não finalizada)`;
+  const aplicado = conf.estoque_aplicado_em ? `<div style="font-size:12px;color:#166534;margin-top:4px">📦 Entrada no estoque feita por ${esc(conf.estoque_aplicado_por || '')} em ${fmtDataHoraReceb(conf.estoque_aplicado_em)}, pela quantidade conferida.</div>` : '';
+  return `<div style="border-top:1px solid var(--border);margin-top:18px;padding-top:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+      <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase">📥 Conferência da expedição</div>
+      ${badgeConferencia(conf, (c.itens || []).length)}
+    </div>
+    <div style="font-size:13px;margin-bottom:4px">${cab}</div>
+    ${info ? `<div style="font-size:13px;color:var(--muted);margin-bottom:4px">${info}</div>` : ''}
+    ${conf.obs ? `<div style="font-size:13px;margin-bottom:6px;padding:6px 10px;background:#fffbeb;border-radius:6px">📝 ${esc(conf.obs)}</div>` : ''}
+    ${aplicado}
+    <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:6px">
+      <thead><tr style="background:var(--bg)">
+        <th style="padding:6px;text-align:left">Item</th><th style="padding:6px">Pedido</th><th style="padding:6px">Recebido</th>
+        <th style="padding:6px">Avariado</th><th style="padding:6px">Entra no estoque</th><th style="padding:6px">Situação</th>
+      </tr></thead>
+      <tbody>${linhas}</tbody>
+    </table>
+  </div>`;
 }
 
 // ══════════════════════════════════════════════
