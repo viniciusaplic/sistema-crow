@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 27/10/2026 09:25\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 27/10/2026 09:25</span>
+            onclick="alert('Versão desta build: 27/10/2026 09:45\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 27/10/2026 09:45</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -441,6 +441,8 @@ tbody td{padding:11px 16px;font-size:14px}
       <!-- Alertas de manutenção ficam no topo do Painel: são avisos de prazo vencendo,
            e só cumprem a função se forem a primeira coisa vista ao abrir o sistema. -->
       <div id="dash-alertas-manutencao"></div>
+      <!-- Conferências de compra finalizadas pela expedição, esperando o admin/Compras dar entrada -->
+      <div id="dash-conferencias-pendentes"></div>
       <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
         <button class="btn btn-outline btn-sm" id="btn-privacidade" onclick="alternarPrivacidade()"
           title="Mostrar ou ocultar os valores em R$ desta tela">👁️ Mostrar valores</button>
@@ -3940,6 +3942,7 @@ function resetarPrivacidade(){
 
 async function renderPainel(){
   renderAlertasManutencao();
+  renderConferenciasPendentesPainel();
   const hoje = agora(); hoje.setHours(0,0,0,0);
   const mesInicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
 
@@ -12227,6 +12230,7 @@ async function darEntradaEstoqueCompra(compraId, compra, statusAnterior){
   if(usaConf){
     try { await db.ref('conferencias_compra/'+compraId).update({ estoque_aplicado_em: agoraTs(), estoque_aplicado_por: usuarioLogado?.nome || '' }); } catch(e){}
   }
+  try { await db.ref(NO_CONF_PENDENTES + '/' + compraId).remove(); } catch(e){}
   mostrarOndeGuardar(`Compra recebida — ${compra.fornecedor||''}${compra.nf ? ' · NF '+compra.nf : ''}`, paraGuardar);
 
   if(pulados){
@@ -12685,7 +12689,7 @@ async function alterarStatusManualCompra(id, novoStatus){
   }
 
   fecharModal('modal-compra-detalhe');
-  await renderCompras();
+  await atualizarTelasAposStatusCompra(id, novoStatus);
   toast(`✓ Status alterado para "${statusInfoCompra(novoStatus).label}"`,'success');
 }
 
@@ -12709,7 +12713,7 @@ async function avancarStatusCompra(id, novoStatus){
   await db.ref('pedidos_compra/'+id+'/status').set(novoStatus);
   await registrarHistoricoStatusCompra(id, statusAnterior, novoStatus);
   fecharModal('modal-compra-detalhe');
-  await renderCompras();
+  await atualizarTelasAposStatusCompra(id, novoStatus);
   toast(`✓ Status atualizado para "${statusInfoCompra(novoStatus).label}"`,'success');
 }
 
@@ -12728,8 +12732,96 @@ async function marcarCompraRecebida(id){
   await registrarHistoricoStatusCompra(id, statusAnterior, 'recebido');
 
   fecharModal('modal-compra-detalhe');
-  await renderCompras();
+  await atualizarTelasAposStatusCompra(id, 'recebido');
   toast('✓ Compra recebida! Estoque atualizado.','success');
+}
+
+// Atualiza as telas depois de mudar o status de um pedido de compra. A lista de Compras
+// (que baixa todos os pedidos de compra) só é recarregada se estiver aberta.
+async function atualizarTelasAposStatusCompra(id, novoStatus){
+  const c = COMPRAS_CACHE.find(x => x.id === id);
+  if(c) c.status = novoStatus;
+  invalidarCacheNo('pedidos_compra');
+  if(document.getElementById('tab-compras')?.style.display !== 'none') await renderCompras();
+  if(document.getElementById('tab-painel')?.style.display !== 'none') renderConferenciasPendentesPainel();
+}
+
+// ══ CONFERÊNCIAS AGUARDANDO ENTRADA (Painel do admin/Compras) ══
+// Lista pequena e separada: o Painel abre a cada login e não pode baixar todos os pedidos
+// de compra. Cada conferência finalizada grava um resumo aqui; sai quando o estoque entra,
+// quando a conferência é reaberta, ou quando o pedido não está mais a caminho.
+const NO_CONF_PENDENTES = 'compras_conferidas_pendentes';
+
+function resumoConfPendente(conf){
+  const r = resumoConferenciaSalva(conf);
+  return {
+    fornecedor: conf.fornecedor || '',
+    compra_numero: conf.compra_numero || null,
+    nf: conf.nf || null,
+    finalizado_por: conf.finalizado_por || '',
+    finalizado_em: conf.finalizado_em || null,
+    itens: r.total,
+    divergencias: r.divergencias
+  };
+}
+
+async function renderConferenciasPendentesPainel(){
+  const el = document.getElementById('dash-conferencias-pendentes'); if(!el) return;
+  if(!temPermissaoEditar('compras')){ el.innerHTML = ''; return; }
+  try {
+    const lista = (await db.ref(NO_CONF_PENDENTES).once('value')).val() || {};
+    const ids = Object.keys(lista);
+    if(!ids.length){ el.innerHTML = ''; return; }
+    // Limpeza: pedido recebido/cancelado/excluído por outro caminho sai da lista.
+    const status = await Promise.all(ids.map(id => db.ref('pedidos_compra/' + id + '/status').once('value').then(sn => sn.val()).catch(() => undefined)));
+    const validos = [];
+    const remover = {};
+    ids.forEach((id, i) => {
+      if(status[i] === undefined) { validos.push(id); return; } // erro de leitura: mantém
+      if(STATUS_A_RECEBER.includes(status[i])) validos.push(id); else remover[id] = null;
+    });
+    if(Object.keys(remover).length){ try { await db.ref(NO_CONF_PENDENTES).update(remover); } catch(e){} }
+    if(!validos.length){ el.innerHTML = ''; return; }
+    validos.sort((a, b) => (lista[a].finalizado_em || 0) - (lista[b].finalizado_em || 0));
+    el.innerHTML = `<div class="section-header" style="margin-bottom:10px"><div class="section-title">📥 Conferências aguardando entrada no estoque (${validos.length})</div></div>
+      ${validos.map(id => {
+        const p = lista[id];
+        const selo = p.divergencias
+          ? `<span class="badge" style="background:#ffc7ce;color:#9c0006">${p.divergencias} divergência(s)</span>`
+          : '<span class="badge" style="background:#c6efce;color:#006100">Conferido OK</span>';
+        return `<div class="pedido-card" style="cursor:pointer;border-left:3px solid ${p.divergencias ? '#dc2626' : '#16a34a'}" onclick="abrirConferenciaPendentePainel('${esc(id)}')">
+          <div class="pedido-card-header">
+            <div style="min-width:0">
+              <div class="pedido-card-num">${esc(p.fornecedor || 'Fornecedor')}</div>
+              <div style="font-size:12px;color:var(--muted);margin-top:2px">
+                ${p.compra_numero ? 'Pedido ' + esc(p.compra_numero) + ' · ' : ''}${p.nf ? 'NF ' + esc(p.nf) + ' · ' : ''}${p.itens || 0} item(ns)
+              </div>
+            </div>
+            ${selo}
+          </div>
+          <div class="pedido-card-info">✔ Conferido por <span>${esc(p.finalizado_por || '—')}</span>${p.finalizado_em ? ' em ' + fmtDataHoraReceb(p.finalizado_em) : ''} · <span style="color:var(--accent);font-weight:600">Clique para conferir e dar entrada</span></div>
+        </div>`;
+      }).join('')}
+      <div style="height:14px"></div>`;
+  } catch(e){ el.innerHTML = ''; console.warn('[CROW] falha ao listar conferências pendentes:', e); }
+}
+
+async function abrirConferenciaPendentePainel(id){
+  if(!temPermissaoEditar('compras')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  try {
+    // Lê só este pedido (não a lista inteira de compras)
+    const c = (await db.ref('pedidos_compra/' + id).once('value')).val();
+    if(!c || !STATUS_A_RECEBER.includes(c.status)){
+      try { await db.ref(NO_CONF_PENDENTES + '/' + id).remove(); } catch(e){}
+      toast('Este pedido de compra já foi recebido ou não está mais a caminho.', 'error');
+      renderConferenciasPendentesPainel();
+      return;
+    }
+    const comp = { id, ...c };
+    const i = COMPRAS_CACHE.findIndex(x => x.id === id);
+    if(i >= 0) COMPRAS_CACHE[i] = comp; else COMPRAS_CACHE.push(comp);
+    await abrirDetalheCompra(id);
+  } catch(e){ toast('Erro ao abrir o pedido de compra: ' + e.message, 'error'); }
 }
 
 // ══════════════════════════════════════════════
@@ -12813,6 +12905,14 @@ async function renderRecebimento(forcar){
     const confs = await Promise.all(RECEB_LISTA.map(c => lerConferenciaCompra(c.id)));
     RECEB_CONFS = {};
     RECEB_LISTA.forEach((c,i) => { if(confs[i]) RECEB_CONFS[c.id] = confs[i]; });
+    // Conferências finalizadas antes da lista de pendentes existir (ou cuja gravação falhou):
+    // garante que aparecem no Painel do admin. Só escreve se houver alguma.
+    const faltando = {};
+    RECEB_LISTA.forEach(c => {
+      const cf = RECEB_CONFS[c.id];
+      if(cf?.status === 'finalizada' && !cf.estoque_aplicado_em) faltando[c.id] = resumoConfPendente(cf);
+    });
+    if(Object.keys(faltando).length){ try { await db.ref(NO_CONF_PENDENTES).update(faltando); } catch(e){} }
   } catch(e){
     el.innerHTML = '';
     toast('Erro ao carregar compras a receber: ' + e.message, 'error');
@@ -13080,6 +13180,9 @@ async function salvarConferenciaRecebimento(finalizar){
       historico: confAnt.historico || null
     };
     await db.ref('conferencias_compra/' + id).set(dados);
+    if(finalizar){
+      try { await db.ref(NO_CONF_PENDENTES + '/' + id).set(resumoConfPendente(dados)); } catch(e){ console.warn('[CROW] pendente da conferência não gravado:', e); }
+    }
     recebAtual.conf = dados;
     RECEB_CONFS[id] = dados;
     filtrarRecebimento();
@@ -13110,6 +13213,7 @@ async function reabrirConferenciaRecebimento(){
       status: 'em_andamento', finalizado_por: null, finalizado_em: null,
       ['historico/' + logKey]: { acao: 'reaberta', por: usuarioLogado?.nome || '', em: agoraTs() }
     });
+    try { await db.ref(NO_CONF_PENDENTES + '/' + id).remove(); } catch(e){}
     recebAtual.conf = await lerConferenciaCompra(id);
     if(recebAtual.conf) RECEB_CONFS[id] = recebAtual.conf;
     desenharConferenciaRecebimento();
