@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 27/10/2026 09:45\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 27/10/2026 09:45</span>
+            onclick="alert('Versão desta build: 28/10/2026 14:50\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 28/10/2026 14:50</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -13921,13 +13921,17 @@ function renderAnaliseGCli(){
               <div style="display:flex;gap:8px;align-items:center;font-size:13px;padding:5px 0;border-bottom:1px dashed var(--border);flex-wrap:wrap">
                 <div style="flex:1;min-width:150px"><strong>${esc(ins.codigo)}</strong> ${esc(ins.nome)}</div>
                 <div style="width:46px;text-align:center">${ins.qtd} un</div>
+                <label style="font-size:12px;white-space:nowrap;cursor:pointer" title="Tira a peça nova do estoque">
+                  <input type="checkbox" ${(ins.baixa ?? it.baixa_estoque) !== false ?'checked':''} ${ro?'disabled':''}
+                    onchange="setInsumoAnaliseCampo(${idx},${j},'baixa',this.checked)"> Dar baixa
+                </label>
                 <select ${ro?'disabled':''} onchange="setInsumoAnaliseCampo(${idx},${j},'fornecedor',this.value)"
                   style="min-width:180px;padding:4px;border-radius:6px;font-size:12px;border:${ins.fornecedor?'1px solid var(--border)':'2px solid #dc2626'};background:${ins.fornecedor?'#fff':'#fef2f2'}">
                   ${optsFornPeca(ins.fornecedor||'')}
                 </select>
                 ${ro?'':`<button class="btn btn-outline btn-sm" onclick="removerInsumoAnalise(${idx},${j})">×</button>`}
               </div>`).join('') || '<div style="font-size:12px;color:var(--muted)">Nenhuma peça lançada ainda.</div>'}
-            <div style="font-size:11px;color:var(--muted);margin-top:6px">Cada peça vai para a caixa do seu próprio fornecedor. O campo é obrigatório: escolha o fornecedor ou marque "Não enviar para a caixa".</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:6px">Cada peça tem sua baixa e seu destino. Peça defeituosa: escolha o fornecedor da caixa. Peça que faltou e você completou (cortesia): marque "Não enviar para a caixa" e deixe "Dar baixa" marcado.</div>
             ${ro?'':`
             <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
               <input type="text" id="analise-ins-${idx}" list="analise-insumos-list" placeholder="Código do insumo"
@@ -13938,11 +13942,11 @@ function renderAnaliseGCli(){
             </div>`}
           </div>` : ''}
 
-        ${(it.resolucao==='troca_insumo' || it.resolucao==='troca_produto') ? `
+        ${it.resolucao==='troca_produto' ? `
           <label style="display:block;font-size:13px;margin-bottom:5px">
             <input type="checkbox" ${it.baixa_estoque?'checked':''} ${ro?'disabled':''}
               onchange="setAnaliseCampo(${idx},'baixa_estoque',this.checked)">
-            Dar baixa no estoque da peça nova que saiu
+            Dar baixa no estoque do produto novo que saiu
           </label>
         ` : ''}
         ${it.resolucao==='troca_produto' ? `
@@ -13997,7 +14001,7 @@ function adicionarInsumoAnalise(idx){
   const ins = INSUMOS_DB.find(x=>x.codigo === cod) || PRODUTOS_DB.find(x=>x.codigo === cod);
   if(!ins){ toast(`"${cod}" não encontrado no cadastro`,'error'); return; }
   const tipo = INSUMOS_DB.find(x=>x.codigo === cod) ? 'insumo' : 'produto';
-  analiseGCli.itens[idx].insumos.push({ codigo: ins.codigo, nome: ins.nome, qtd, tipo, fornecedor: '' });
+  analiseGCli.itens[idx].insumos.push({ codigo: ins.codigo, nome: ins.nome, qtd, tipo, fornecedor: '', baixa: true });
   renderAnaliseGCli();
 }
 
@@ -14070,9 +14074,13 @@ async function salvarAnaliseGCli(finalizar){
           ? [{ codigo: it.codigo, nome: it.nome, qtd: Number(it.qtd_conferida)||0, tipo:'produto' }]
           : it.insumos;
 
-        if(it.baixa_estoque){
+        {
           for(const pc of pecas){
             if(!pc.qtd) continue;
+            const darBaixaPeca = it.resolucao === 'troca_produto'
+              ? !!it.baixa_estoque
+              : (pc.baixa ?? it.baixa_estoque) !== false;
+            if(!darBaixaPeca) continue;
             const motivo = `Garantia de cliente #${a.garantia.numero} — ${a.garantia.cliente_nome}`;
             if(pc.tipo === 'insumo'){
               const chave = await resolverChaveInsumo(pc.codigo, null);
