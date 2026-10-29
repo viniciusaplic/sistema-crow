@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 28/10/2026 14:50\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 28/10/2026 14:50</span>
+            onclick="alert('Versão desta build: 29/10/2026 16:10\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 29/10/2026 16:10</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -732,6 +732,7 @@ tbody td{padding:11px 16px;font-size:14px}
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('vendas-cliente',this)">🏢 Por Cliente</button>
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('clientes-inativos',this)">😴 Clientes Inativos</button>
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('vendas-produto',this)">📦 Por Produto</button>
+          <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('vendas-item',this)">🔎 Vendas por Item</button>
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('vendas-cidade',this)">🗺️ Por Cidade</button>
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('compras-fornecedor',this)">🚚 Compras por Fornecedor</button>
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('estoque-posicao',this)">📊 Posição de Estoque</button>
@@ -776,6 +777,12 @@ tbody td{padding:11px 16px;font-size:14px}
           <div class="filtro-group">
             <label>Até</label>
             <input type="date" id="rel-data-fim" onchange="gerarRelatorio()">
+          </div>
+          <div class="filtro-group" id="rel-filtro-item-wrap" style="display:none">
+            <label>Código do item</label>
+            <input type="text" id="rel-item-codigo" list="rel-item-lista" placeholder="Digite o código" autocomplete="off"
+              style="text-transform:uppercase;min-width:160px" onkeydown="if(event.key==='Enter'){event.preventDefault();gerarRelatorio();}">
+            <datalist id="rel-item-lista"></datalist>
           </div>
           <div class="filtro-group" id="rel-filtro-tipoprod-wrap" style="display:none">
             <label>Tipo de item</label>
@@ -21509,7 +21516,15 @@ function mostrarRelatorio(tipo, btnEl){
   if(btnEl) btnEl.classList.add('active');
   // Mostrar/esconder filtros conforme o relatório
   document.getElementById('rel-filtro-vendedor-wrap').style.display =
-    ['vendas-vendedor','vendas-cliente','clientes-inativos','vendas-cidade'].includes(tipo) ? 'block' : 'none';
+    ['vendas-vendedor','vendas-cliente','clientes-inativos','vendas-cidade','vendas-item'].includes(tipo) ? 'block' : 'none';
+  document.getElementById('rel-filtro-item-wrap').style.display = tipo === 'vendas-item' ? 'block' : 'none';
+  if(tipo === 'vendas-item'){
+    // Autocomplete só com o que já está em memória — não faz leitura extra no Firebase
+    const dl = document.getElementById('rel-item-lista');
+    if(dl && !dl.childElementCount && PRODUTOS_DB.length)
+      dl.innerHTML = PRODUTOS_DB.filter(p=>p.codigo).map(p=>`<option value="${esc(p.codigo)}">${esc(p.nome||'')}</option>`).join('');
+    setTimeout(()=>document.getElementById('rel-item-codigo')?.focus(), 50);
+  }
   document.getElementById('rel-filtro-periodo-wrap').style.display =
     ['vendas-periodo'].includes(tipo) ? 'block' : 'none';
   document.getElementById('rel-filtro-estoque-minimo-wrap').style.display =
@@ -21560,12 +21575,20 @@ async function gerarRelatorio(){
     return;
   }
 
+  if(tipo === 'vendas-item'){
+    const codDig = (document.getElementById('rel-item-codigo').value||'').trim();
+    if(!codDig){ toast('Digite o código do item','error'); document.getElementById('rel-item-codigo').focus(); return; }
+    if(!dataIni || !dataFim){ toast('Informe o período (De e Até)','error'); return; }
+  }
+
   el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:40px">⏳ Carregando...</div>';
 
   // Com periodo informado, busca so a faixa (indice data_faturamento). Sem periodo, cai no
   // indice antigo porque ai o relatorio realmente precisa do historico inteiro.
   const qRel = dataIni
-    ? db.ref('pedidos').orderByChild('data_faturamento').startAt(dataIni)
+    ? (dataFim
+        ? db.ref('pedidos').orderByChild('data_faturamento').startAt(dataIni).endAt(dataFim+'\uf8ff')
+        : db.ref('pedidos').orderByChild('data_faturamento').startAt(dataIni))
     : db.ref('pedidos').orderByChild('faturado').equalTo(true);
   const snap = await qRel.once('value');
   const todos = snap.val() || {};
@@ -21588,6 +21611,7 @@ async function gerarRelatorio(){
     case 'vendas-cliente': relVendasCliente(pedidos, el); break;
     case 'clientes-inativos': await relClientesInativos(dataIni, dataFim, vendedorFiltro, el); break;
     case 'vendas-produto': await relVendasProduto(pedidos, el, tipoProd, dataIni, dataFim); break;
+    case 'vendas-item': relVendasItem(pedidos, el, dataIni, dataFim); break;
     case 'compras-fornecedor': await relComprasFornecedor(dataIni, dataFim, el); break;
     case 'estoque-posicao': await relEstoquePosicao(el); break;
     case 'vendas-cidade': relVendasCidade(pedidos, el); break;
@@ -21783,6 +21807,129 @@ async function relVendasProduto(pedidos, el, tipoProd, dataIni, dataFim){
     el.innerHTML += '<div style="font-weight:700;font-size:15px;margin:28px 0 8px">🔩 Insumos — consumo no período</div>' + r.html;
     relatorioCache = { tipo:'vendas-produto', lista: lista.concat(r.lista) };
   }
+}
+
+// ── Vendas por Item: digita o código + período ──
+// Usa os mesmos pedidos FATURADOS do período (data da nota). Valor do item já com o
+// desconto do item aplicado (qtd × preço × (1 − desc%)).
+function relVendasItem(pedidos, el, dataIni, dataFim){
+  const codDig = (document.getElementById('rel-item-codigo').value||'').trim();
+  const alvo = codDig.toUpperCase();
+  const linhas = [];
+  const parecidos = {};
+  pedidos.forEach(p=>{
+    (p.itens||[]).forEach(it=>{
+      const c = String(it.codigo||'').trim().toUpperCase();
+      if(!c) return;
+      if(c !== alvo){
+        if(alvo.length >= 2 && c.includes(alvo)) parecidos[c] = it.nome||'';
+        return;
+      }
+      const qtd = Number(it.qtd||0), preco = Number(it.preco||0), desc = Number(it.desconto_item||0);
+      linhas.push({
+        data: (p.data_faturamento||'').split('T')[0], num: p.numero||p.id||'', nf: p.nf_numero||'',
+        cliente: p.cliente_nome||'(sem cliente)', vendedor: p.vendedor_nome||'',
+        nome: it.nome||'', qtd, preco, desc, total: qtd*preco*(1-desc/100)
+      });
+    });
+  });
+  document.getElementById('rel-grafico-wrap').style.display = 'none';
+
+  const prod = PRODUTOS_DB.find(p=>String(p.codigo||'').trim().toUpperCase()===alvo);
+  const nomeItem = (prod&&prod.nome) || (linhas[0]&&linhas[0].nome) || '';
+  const fmtD = d => d ? d.split('-').reverse().join('/') : '—';
+  const periodoTxt = `${fmtD(dataIni)} a ${fmtD(dataFim)}`;
+
+  if(!linhas.length){
+    relatorioCache = { tipo:'vendas-item', lista: [] };
+    const sug = Object.entries(parecidos).slice(0,15);
+    el.innerHTML = `<div style="text-align:center;padding:30px">
+      <div style="font-size:15px;font-weight:700;margin-bottom:6px">Nenhuma venda faturada de <span style="color:var(--accent)">${esc(codDig)}</span> ${nomeItem?'— '+esc(nomeItem):''}</div>
+      <div style="color:var(--muted);font-size:13px">Período ${periodoTxt}${prod?'':' · código não encontrado no cadastro de produtos'}</div>
+      ${sug.length?`<div style="margin-top:16px;font-size:13px">Códigos parecidos vendidos no período:<div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:8px">
+        ${sug.map(([c,n])=>`<button class="btn btn-outline btn-sm" title="${esc(n)}" onclick="document.getElementById('rel-item-codigo').value='${esc(c).replace(/'/g,"\\'")}';gerarRelatorio()">${esc(c)}</button>`).join('')}
+      </div></div>`:''}
+    </div>`;
+    return;
+  }
+
+  linhas.sort((a,b)=>(a.data||'').localeCompare(b.data||'') || String(a.num).localeCompare(String(b.num),undefined,{numeric:true}));
+  const totQtd = linhas.reduce((s,l)=>s+l.qtd,0);
+  const totVal = linhas.reduce((s,l)=>s+l.total,0);
+  const nPed = new Set(linhas.map(l=>l.num)).size;
+  const nCli = new Set(linhas.map(l=>l.cliente)).size;
+  const precoMedio = totQtd ? totVal/totQtd : 0;
+
+  // Por mês
+  const meses = {};
+  linhas.forEach(l=>{
+    const k = (l.data||'').slice(0,7);
+    if(!meses[k]) meses[k] = { k, qtd:0, total:0, peds:new Set() };
+    meses[k].qtd += l.qtd; meses[k].total += l.total; meses[k].peds.add(l.num);
+  });
+  const listaMes = Object.values(meses).sort((a,b)=>a.k.localeCompare(b.k));
+  const nomeMes = k => { const [a,m] = k.split('-'); return new Date(+a, +m-1, 1).toLocaleDateString('pt-BR',{month:'short',year:'numeric'}); };
+
+  // Por cliente
+  const clis = {};
+  linhas.forEach(l=>{
+    if(!clis[l.cliente]) clis[l.cliente] = { nome:l.cliente, qtd:0, total:0, peds:new Set(), ultima:'' };
+    const c = clis[l.cliente];
+    c.qtd += l.qtd; c.total += l.total; c.peds.add(l.num); if(l.data > c.ultima) c.ultima = l.data;
+  });
+  const listaCli = Object.values(clis).sort((a,b)=>b.qtd-a.qtd || b.total-a.total);
+
+  relatorioCache = { tipo:'vendas-item', lista: linhas, cod: codDig.toUpperCase(), nome: nomeItem, periodo: periodoTxt,
+    meses: listaMes.map(m=>({mes:nomeMes(m.k), pedidos:m.peds.size, qtd:m.qtd, total:m.total})),
+    clientes: listaCli.map(c=>({nome:c.nome, pedidos:c.peds.size, qtd:c.qtd, total:c.total, ultima:c.ultima})) };
+
+  if(listaMes.length > 1)
+    renderGrafico(listaMes.map(m=>nomeMes(m.k)), [{label:'Qtd vendida', data:listaMes.map(m=>m.qtd), backgroundColor:'rgba(200,16,46,.7)'}]);
+
+  const card = (lbl,val) => `<div style="flex:1;min-width:130px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px">
+    <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">${lbl}</div>
+    <div style="font-size:19px;font-weight:700;margin-top:4px">${val}</div></div>`;
+  const titulo = (t) => `<div style="font-weight:700;font-size:14px;margin:24px 0 8px">${t}</div>`;
+
+  el.innerHTML = `
+    <div style="font-size:17px;font-weight:700">${esc(codDig.toUpperCase())} — ${esc(nomeItem)}</div>
+    <div style="font-size:12px;color:var(--muted);margin:2px 0 14px">Vendas faturadas · ${periodoTxt}${document.getElementById('rel-vendedor').value?' · Vendedor: '+esc(document.getElementById('rel-vendedor').value):''}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:10px">
+      ${card('Qtd vendida', totQtd.toLocaleString('pt-BR'))}
+      ${card('Faturamento', fmtMoeda(totVal))}
+      ${card('Pedidos', nPed)}
+      ${card('Clientes', nCli)}
+      ${card('Preço médio', fmtMoeda(precoMedio))}
+      ${prod?card('Estoque atual', Number(prod.estoque||0).toLocaleString('pt-BR')):''}
+    </div>
+    ${titulo('📅 Por mês')}
+    ${tabelaRel(['Mês',{label:'Pedidos',align:'center'},{label:'Qtd',align:'center'},{label:'Faturamento',align:'right'}],
+      listaMes.map(m=>[nomeMes(m.k), m.peds.size, m.qtd.toLocaleString('pt-BR'), fmtMoeda(m.total)]),
+      ['TOTAL', nPed, totQtd.toLocaleString('pt-BR'), fmtMoeda(totVal)])}
+    ${titulo('🏢 Por cliente')}
+    ${tabelaRel(['#','Cliente',{label:'Pedidos',align:'center'},{label:'Qtd',align:'center'},{label:'Faturamento',align:'right'},{label:'Última compra',align:'center'}],
+      listaCli.map((c,i)=>[i+1, esc(c.nome), c.peds.size, c.qtd.toLocaleString('pt-BR'), fmtMoeda(c.total), fmtD(c.ultima)]))}
+    ${titulo('🧾 Pedidos')}
+    ${tabelaRel([{label:'Faturado',align:'center'},'Pedido','NF','Cliente','Vendedor',{label:'Qtd',align:'center'},{label:'Preço',align:'right'},{label:'Desc.',align:'center'},{label:'Total',align:'right'}],
+      linhas.map(l=>[fmtD(l.data), '#'+esc(l.num), esc(l.nf||'—'), esc(l.cliente), esc(l.vendedor||'—'), l.qtd.toLocaleString('pt-BR'), fmtMoeda(l.preco), l.desc?l.desc.toLocaleString('pt-BR')+'%':'—', fmtMoeda(l.total)]),
+      ['','','','TOTAL','',totQtd.toLocaleString('pt-BR'),'','',fmtMoeda(totVal)])}`;
+}
+
+function exportarRelatorioExcelVendasItem(){
+  const r = relatorioCache;
+  const wb = XLSX.utils.book_new();
+  const cab = [[`Vendas por Item — ${r.cod} — ${r.nome}`],[`Período: ${r.periodo} (pedidos faturados)`],[]];
+  const add = (nome, linhas) => {
+    const ws = XLSX.utils.aoa_to_sheet(cab);
+    XLSX.utils.sheet_add_json(ws, linhas, { origin: 'A4' });
+    XLSX.utils.book_append_sheet(wb, ws, nome);
+  };
+  const fd = d => d ? d.split('-').reverse().join('/') : '';
+  add('Pedidos', r.lista.map(l=>({'Faturado':fd(l.data),'Pedido':l.num,'NF':l.nf,'Cliente':l.cliente,'Vendedor':l.vendedor,'Qtd':l.qtd,'Preço':l.preco,'Desc %':l.desc,'Total':Number(l.total.toFixed(2))})));
+  add('Por Mês', r.meses.map(m=>({'Mês':m.mes,'Pedidos':m.pedidos,'Qtd':m.qtd,'Faturamento':Number(m.total.toFixed(2))})));
+  add('Por Cliente', r.clientes.map(c=>({'Cliente':c.nome,'Pedidos':c.pedidos,'Qtd':c.qtd,'Faturamento':Number(c.total.toFixed(2)),'Última compra':fd(c.ultima)})));
+  XLSX.writeFile(wb, `vendas_item_${r.cod.replace(/[^\w-]/g,'_')}_${agora().toISOString().split('T')[0]}.xlsx`);
+  toast('✓ Excel exportado!','success');
 }
 
 // ── Consumo de Insumos por período (Por Produto → Insumos) ──
@@ -24597,6 +24744,7 @@ function exportarRelatorioExcel(){
     case 'auditoria-estoque': dados = lista.map(g=>({'Tipo':g.tipo,'Código':g.codigo,'Produto/Insumo':g.nome,'Saldo Atual':g.saldo,'Saldo Esperado':g.esperado,'Diferença':g.dif,'Movimentos após o balanço':g.aplicados,'Último balanço':g.desdeTs?new Date(g.desdeTs).toLocaleDateString('pt-BR'):''})); break;
     case 'sugestao-compra': dados = lista.map(g=>({'Tipo':g.tipo||'—','Código':g.codigo,'Produto/Insumo':g.nome,'Fornecedor':g.fornecedor,'CMD':Number(g.cmd.toFixed(3)),'Lead Time (dias)':g.leadTime,'Disponível':g.disponivel,'Em Trânsito':g.emTransito,'Estoque Mínimo':g.es,'Nec. Produção':g.origem==='receita'?Number(g.necessidade.toFixed(2)):'','Ponto de Pedido':g.pontoPedido===null?'':Number(g.pontoPedido.toFixed(2)),'Cobertura (dias)':isFinite(g.cobertura)?Math.floor(g.cobertura):'','Sugestão de Compra':g.sugestao})); break;
     case 'estoque-minimo': return exportarRelatorioExcelEstoqueMinimo(lista);
+    case 'vendas-item': return exportarRelatorioExcelVendasItem();
     case 'diagnostico-consumo': return exportarRelatorioExcelDiagnosticoConsumo();
     case 'mrp': return exportarMRPExcel();
     case 'sugestao-jornal': dados = lista.map((g,i)=>({'#':i+1,'Código':g.codigo,'Produto':g.nome,'Qtd Vendida':g.qtd,'Disponível':g.disponivel,'Em Trânsito':g.emTransito?'Sim':'Não'})); break;
