@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 30/10/2026 12:01\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 30/10/2026 12:01</span>
+            onclick="alert('Versão desta build: 30/10/2026 12:01\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 03/11/2026 14:50</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -826,6 +826,7 @@ tbody td{padding:11px 16px;font-size:14px}
       <div class="section-header">
         <div class="section-title">👤 Usuários</div>
         <div class="search-box">
+          <button class="btn btn-outline btn-sm" style="color:#1565c0;border-color:#1565c0" onclick="abrirModalTransferirCarteira()">🔁 Transferir Carteira</button>
           <button class="btn btn-outline btn-sm" onclick="abrirModalCorrigirVendedorMassa()">🔧 Corrigir Pedidos de Vendedor</button>
           <button class="btn btn-outline btn-sm" style="color:#166534;border-color:#166534" onclick="abrirModalFaturarRetroativo()">💰 Faturar Retroativo (Concluídos)</button>
           <button class="btn btn-primary" onclick="abrirModalVendedor()">+ Novo Usuário</button>
@@ -2097,6 +2098,34 @@ tbody td{padding:11px 16px;font-size:14px}
     </div>
     <button class="btn btn-primary btn-sm" onclick="preVisualizarFaturarRetroativo()">🔍 Pré-visualizar</button>
     <div id="fat-retro-resultado" style="margin-top:14px"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-transferir-carteira">
+  <div class="modal" style="max-width:560px">
+    <button class="modal-close" onclick="fecharModal('modal-transferir-carteira')">×</button>
+    <div class="modal-title">🔁 Transferir Carteira de Vendedor</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px">
+      Passa os clientes e os pedidos escolhidos de um vendedor para outro (ex: quando alguém sai e entra outra pessoa no lugar).
+      Os pedidos faturados <strong>antes</strong> da data escolhida continuam no nome do vendedor antigo.
+    </div>
+    <div class="form-row"><div class="form-group">
+      <label>De (vendedor que saiu)</label>
+      <select id="tc-origem" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px"></select>
+    </div><div class="form-group">
+      <label>Para (novo vendedor)</label>
+      <select id="tc-destino" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px"></select>
+    </div></div>
+    <div style="border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;display:flex;flex-direction:column;gap:10px">
+      <label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="tc-clientes" checked> Passar <strong>todos os clientes</strong> da carteira</label>
+      <label style="display:flex;gap:8px;align-items:center;cursor:pointer;flex-wrap:wrap"><input type="checkbox" id="tc-faturados" checked> Pedidos <strong>faturados</strong> a partir de <input type="date" id="tc-data-fat" style="padding:4px 6px;border:1px solid var(--border);border-radius:6px"></label>
+      <label style="display:flex;gap:8px;align-items:center;cursor:pointer;flex-wrap:wrap"><input type="checkbox" id="tc-abertos"> Pedidos <strong>ainda não faturados</strong> lançados a partir de <input type="date" id="tc-data-abertos" style="padding:4px 6px;border:1px solid var(--border);border-radius:6px"></label>
+    </div>
+    <div class="form-actions" style="justify-content:space-between">
+      <button class="btn btn-outline" onclick="fecharModal('modal-transferir-carteira')">Cancelar</button>
+      <button class="btn btn-secondary" onclick="previaTransferirCarteira()">🔍 Ver o que vai mudar</button>
+    </div>
+    <div id="tc-resultado" style="margin-top:14px;font-size:13px"></div>
   </div>
 </div>
 
@@ -5124,6 +5153,119 @@ async function aplicarFaturarRetroativo(){
   faturarRetroativoCache = [];
   el.innerHTML = `<div style="padding:14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534">✅ ${count} pedido(s) marcado(s) como faturado(s), cada um com a própria data.</div>`;
   toast(`✓ ${count} pedido(s) faturado(s) retroativamente`,'success');
+}
+
+// ══ TRANSFERIR CARTEIRA DE VENDEDOR (admin) ══
+// Troca o vendedor dos clientes e dos pedidos escolhidos. Leituras econômicas: clientes vêm do
+// CLIENTES_DB já carregado; pedidos faturados pelo índice data_faturamento; em aberto pelo índice data.
+let TRANSF_CARTEIRA = null;
+let TC_USUARIOS = null;
+function tcNorm(t){ return String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim(); }
+function tcEhDaOrigem(reg, origem){
+  if(!reg) return false;
+  if(reg.vendedor_id && reg.vendedor_id === origem.id) return true;
+  return !!origem.nome && tcNorm(reg.vendedor_nome) === tcNorm(origem.nome);
+}
+async function abrirModalTransferirCarteira(){
+  if(!usuarioLogado.admin){ toast('Apenas admin pode transferir carteira','error'); return; }
+  if(!TC_USUARIOS){
+    const snapU = await db.ref('usuarios').once('value');
+    const us = snapU.val() || {};
+    TC_USUARIOS = Object.keys(us).map(k=>({ ...us[k], id: us[k].id || k })).filter(u=>u.nome).sort((a,b)=>a.nome.localeCompare(b.nome));
+  }
+  const opt = u => `<option value="${u.id}" data-nome="${esc(u.nome)}">${esc(u.nome)}${u.ativo===false?' (inativo)':''}</option>`;
+  document.getElementById('tc-origem').innerHTML = '<option value="">— escolha —</option>' + TC_USUARIOS.map(opt).join('');
+  document.getElementById('tc-destino').innerHTML = '<option value="">— escolha —</option>' + TC_USUARIOS.filter(u=>u.ativo!==false).map(opt).join('');
+  const hoje = new Date();
+  const d90 = new Date(); d90.setDate(d90.getDate()-90);
+  document.getElementById('tc-data-fat').value = ymdLocal(hoje);
+  document.getElementById('tc-data-abertos').value = ymdLocal(d90);
+  document.getElementById('tc-resultado').innerHTML = '';
+  TRANSF_CARTEIRA = null;
+  abrirModal('modal-transferir-carteira');
+}
+async function previaTransferirCarteira(){
+  const so = document.getElementById('tc-origem'), sd = document.getElementById('tc-destino');
+  if(!so.value || !sd.value){ toast('Escolha os dois vendedores','error'); return; }
+  if(so.value === sd.value){ toast('Origem e destino são o mesmo vendedor','error'); return; }
+  const origem = { id: so.value, nome: so.options[so.selectedIndex].dataset.nome };
+  const destino = { id: sd.value, nome: sd.options[sd.selectedIndex].dataset.nome };
+  const querCli = document.getElementById('tc-clientes').checked;
+  const querFat = document.getElementById('tc-faturados').checked;
+  const querAb = document.getElementById('tc-abertos').checked;
+  const dFat = document.getElementById('tc-data-fat').value;
+  const dAb = document.getElementById('tc-data-abertos').value;
+  if(!querCli && !querFat && !querAb){ toast('Marque pelo menos uma opção','error'); return; }
+  if(querFat && !dFat){ toast('Informe a data dos faturados','error'); return; }
+  if(querAb && !dAb){ toast('Informe a data dos pedidos em aberto','error'); return; }
+  const el = document.getElementById('tc-resultado');
+  el.innerHTML = '⏳ Buscando...';
+
+  const clientes = querCli ? CLIENTES_DB.filter(c => c._key && tcEhDaOrigem(c, origem)) : [];
+  const pedidos = {};
+  if(querFat){
+    const v = (await db.ref('pedidos').orderByChild('data_faturamento').startAt(dFat).once('value')).val() || {};
+    for(const [id,p] of Object.entries(v)) if(p && p.faturado && tcEhDaOrigem(p, origem)) pedidos[id] = { ...p, _motivo:'faturado' };
+  }
+  if(querAb){
+    const v = (await db.ref('pedidos').orderByChild('data').startAt(dAb).once('value')).val() || {};
+    for(const [id,p] of Object.entries(v)){
+      if(!p || p.faturado || pedidos[id]) continue;
+      if(String(p.status||'').toLowerCase().startsWith('cancel')) continue;
+      if(tcEhDaOrigem(p, origem)) pedidos[id] = { ...p, _motivo:'em aberto' };
+    }
+  }
+  const listaPed = Object.entries(pedidos).map(([id,p])=>({ id, ...p })).sort((a,b)=>(b.numero||0)-(a.numero||0));
+  TRANSF_CARTEIRA = { origem, destino, clientes, pedidos: listaPed };
+
+  if(!clientes.length && !listaPed.length){
+    el.innerHTML = `<span style="color:var(--muted)">Nada encontrado no nome de <strong>${esc(origem.nome)}</strong> com esses filtros.</span>`;
+    return;
+  }
+  el.innerHTML = `
+    <div style="padding:10px;background:#fef3c7;border-radius:8px;margin-bottom:10px">
+      <strong>${esc(origem.nome)} → ${esc(destino.nome)}</strong><br>
+      ${querCli?`👥 ${clientes.length} cliente(s)<br>`:''}
+      ${(querFat||querAb)?`📦 ${listaPed.length} pedido(s)`:''}
+    </div>
+    ${listaPed.length?`<div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;margin-bottom:10px">
+      ${listaPed.map(p=>`<div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:12px">#${p.numero||'—'} — ${esc(p.cliente_nome||'')} — <em>${p._motivo}${p.data_faturamento?' em '+fmtData(p.data_faturamento):''}</em></div>`).join('')}
+    </div>`:''}
+    <button class="btn btn-primary" style="width:100%" onclick="aplicarTransferirCarteira()">✓ Transferir para ${esc(destino.nome)}</button>`;
+}
+async function aplicarTransferirCarteira(){
+  const t = TRANSF_CARTEIRA; if(!t) return;
+  const ok = await confirmCustom(`Transferir ${t.clientes.length} cliente(s) e ${t.pedidos.length} pedido(s) de ${t.origem.nome} para ${t.destino.nome}?`, 'Transferir');
+  if(!ok) return;
+  const el = document.getElementById('tc-resultado');
+  el.innerHTML = '⏳ Transferindo...';
+  const updates = {};
+  const ts = agoraTs();
+  for(const c of t.clientes){
+    updates['clientes/'+c._key+'/vendedor_id'] = t.destino.id;
+    updates['clientes/'+c._key+'/vendedor_nome'] = t.destino.nome;
+  }
+  for(const p of t.pedidos){
+    const hist = Array.isArray(p.historico_edicoes) ? p.historico_edicoes.slice() : Object.values(p.historico_edicoes||{});
+    hist.push({ ts, usuario_nome: usuarioLogado.nome, usuario_tipo:'admin',
+      alteracoes:[`🔁 Carteira transferida: vendedor "${p.vendedor_nome||'—'}" → "${t.destino.nome}"`] });
+    updates['pedidos/'+p.id+'/vendedor_id'] = t.destino.id;
+    updates['pedidos/'+p.id+'/vendedor_nome'] = t.destino.nome;
+    updates['pedidos/'+p.id+'/historico_edicoes'] = hist;
+  }
+  try {
+    await db.ref().update(updates);
+  } catch(e){
+    el.innerHTML = `<span style="color:var(--danger,#dc2626)">Erro ao transferir: ${esc(e.message||String(e))}. Nada foi alterado.</span>`;
+    return;
+  }
+  const keys = new Set(t.clientes.map(c=>c._key));
+  CLIENTES_DB.forEach(c=>{ if(keys.has(c._key)){ c.vendedor_id = t.destino.id; c.vendedor_nome = t.destino.nome; } });
+  try { if(localStorage.getItem('crow_clientes')) localStorage.setItem('crow_clientes', JSON.stringify(CLIENTES_DB)); } catch(e){}
+  invalidarCachePedidos();
+  el.innerHTML = `<span style="color:var(--success)">✓ ${t.clientes.length} cliente(s) e ${t.pedidos.length} pedido(s) passados para "${esc(t.destino.nome)}".</span>`;
+  toast('✓ Carteira transferida','success');
+  TRANSF_CARTEIRA = null;
 }
 
 async function abrirModalCorrigirVendedorMassa(){
