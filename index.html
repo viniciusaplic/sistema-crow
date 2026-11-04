@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 30/10/2026 12:01\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 03/11/2026 14:50</span>
+            onclick="alert('Versão desta build: 04/11/2026 14:40\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 04/11/2026 14:40</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -19595,7 +19595,8 @@ function renderModalProduto(codigo){
         <button class="btn btn-outline" onclick="imprimirEtiquetaProduto('${codigo}','${tipo}')">🏷️ Etiqueta Produto</button>` : ''}
         ${isAdmin ? (tipo==='vendavel' ? `<button class="btn ${p.inativo?'btn-primary':'btn-outline'}" style="${p.inativo?'':'color:#dc2626;border-color:#dc2626'}" onclick="toggleInativoProduto('${codigo}')">
           ${p.inativo?'✅ Reativar':'🚫 Inativar'}
-        </button>` : `
+        </button>
+        <button class="btn btn-outline" style="color:#7c3aed;border-color:#7c3aed" onclick="converterProdutoEmInsumo('${codigo}')" title="Para item cadastrado por engano como vendável">🔁 Converter em Insumo</button>` : `
           <button class="btn ${p.inativo?'btn-primary':'btn-outline'}" style="${p.inativo?'':'color:#dc2626;border-color:#dc2626'}" onclick="toggleInativoInsumo('${codigo}')">
             ${p.inativo?'✅ Reativar':'🚫 Inativar'}
           </button>
@@ -20150,6 +20151,104 @@ async function toggleInativoProduto(codigo){
   renderModalProduto(codigo);
   renderProdutos();
   toast(novoStatus ? '✓ Produto inativado' : '✓ Produto reativado','success');
+}
+
+// Converte um item cadastrado por engano como PRODUTO VENDÁVEL em INSUMO, com o mesmo
+// código e o mesmo saldo. Insumo novo + remoção do produto + backup vão numa ÚNICA gravação
+// (multi-path update): se a conexão cair, ou faz tudo ou não faz nada.
+// O histórico de movimentos e as composições guardam só o código, então continuam valendo.
+// Bloqueia se houver algo aberto que ainda vai mexer no estoque do PRODUTO (pedido de venda
+// aberto, reserva, OP, compra não recebida) — a baixa cairia num registro que não existe mais.
+// Leituras: direto do banco (rotina que grava), só nós/filtros necessários.
+async function converterProdutoEmInsumo(codigo){
+  if(!usuarioLogado?.admin){ toast('Só admin pode converter produto em insumo','error'); return; }
+  const p = PRODUTOS_DB.find(x=>x.codigo===codigo);
+  if(!p) return;
+  const keyInsumo = 'ins_' + codigo;
+  toast('Verificando pendências do item…');
+  let snapProd, snapIns, ops, snapsPed, compras;
+  try {
+    if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
+    let snapCompras;
+    [snapProd, snapIns, ops, snapsPed, snapCompras] = await Promise.all([
+      db.ref('produtos/'+codigo).once('value'),
+      db.ref('insumos/'+keyInsumo).once('value'),
+      buscarOPsAbertasProduto(codigo),
+      Promise.all(['AA','EA','AP','EX'].map(st => db.ref('pedidos').orderByChild('status').equalTo(st).once('value'))),
+      db.ref('pedidos_compra').once('value')
+    ]);
+    compras = snapCompras.val() || {};
+    // Aproveita a leitura para os relatórios não baixarem de novo nos próximos 2 min
+    CACHE_NOS['pedidos_compra'] = { dados: compras, ts: (typeof performance!=='undefined'&&performance.now)?performance.now():Date.now() };
+  } catch(e){
+    toast('Erro ao verificar pendências: '+e.message,'error'); return;
+  }
+  if(!snapProd.exists()){ toast(`O produto ${codigo} não existe mais no banco. Dê Ctrl+F5.`,'error'); return; }
+  const prod = snapProd.val() || {};
+
+  const bloqueios = [];
+  if(snapIns.exists() || INSUMOS_DB.some(i => (i.codigo||'').toUpperCase() === codigo.toUpperCase()))
+    bloqueios.push('Já existe um INSUMO com este código. Resolva a duplicidade pelo relatório "⚠️ Códigos Duplicados".');
+  if(RECEITAS_DB[codigo]?.itens?.length)
+    bloqueios.push(`Este produto tem composição própria (${RECEITAS_DB[codigo].itens.length} itens). Insumo não tem composição — remova a composição primeiro.`);
+  if(ops === null) bloqueios.push('Não consegui consultar as OPs. Tente de novo.');
+  else if(ops.length) bloqueios.push(`Tem ${ops.length} OP(s) aberta(s) produzindo este item.`);
+  const pedAbertos = [];
+  snapsPed.forEach(sn => Object.values(sn.val()||{}).forEach(ped => {
+    if((ped.itens||[]).some(it => it.codigo === codigo)) pedAbertos.push(ped.numero || ped.id || '?');
+  }));
+  if(pedAbertos.length) bloqueios.push(`Está em ${pedAbertos.length} pedido(s) de venda aberto(s): ${pedAbertos.slice(0,8).join(', ')}${pedAbertos.length>8?'…':''}.`);
+  if(Number(prod.reservado||0) > 0) bloqueios.push(`Tem ${prod.reservado} unidade(s) reservada(s) para venda.`);
+  const pcAbertos = [];
+  Object.entries(compras).forEach(([k, pc]) => {
+    if(['recebido','concluido','cancelado'].includes(pc?.status)) return;
+    if((pc?.itens||[]).some(it => it.codigo === codigo && it.tipo !== 'insumo')) pcAbertos.push(pc.numero || k);
+  });
+  if(pcAbertos.length) bloqueios.push(`Está como PRODUTO em ${pcAbertos.length} pedido(s) de compra não recebido(s): ${pcAbertos.slice(0,8).join(', ')}. Troque o item para insumo no pedido de compra antes.`);
+
+  if(bloqueios.length){
+    alert(`Não dá para converter ${codigo} ainda:\n\n• ` + bloqueios.join('\n• '));
+    return;
+  }
+
+  const saldo = Number(prod.quantidade||0);
+  const ok = await confirmCustom(`Converter "${esc(prod.nome||p.nome||codigo)}" (${esc(codigo)}) de PRODUTO VENDÁVEL para INSUMO?\n\n• Mesmo código, saldo ${saldo.toLocaleString('pt-BR')} vai junto\n• Some das buscas de pedido de venda e da tabela de preços\n• Histórico de movimentos e composições continuam valendo\n• Fica um backup do cadastro original`, 'Converter');
+  if(!ok) return;
+
+  const dados = { ...prod };
+  ['preco_venda','preco_minimo','quantidade','reservado','etiqueta_unica_por_lote','_temp','_tipo','_titulo_novo'].forEach(k => delete dados[k]);
+  Object.assign(dados, {
+    codigo,
+    nome: prod.nome || p.nome || '',
+    unidade: prod.unidade || 'UN',
+    estoque_atual: saldo,
+    estoque_minimo: Number(prod.estoque_minimo||0),
+    fornecedor: prod.fornecedor || '',
+    preco_custo: Number(prod.preco_custo||0),
+    localizacao: prod.localizacao || '',
+    categoria: prod.categoria || '',
+    ts: agoraTs(),
+    ts_cadastro: prod.ts_cadastro || agoraTs(),
+    convertido_de_produto: agoraTs()
+  });
+
+  const bkKey = db.ref('backups_conversao_produto').push().key;
+  const updates = {};
+  updates['insumos/'+keyInsumo] = dados;
+  updates['produtos/'+codigo] = null;
+  updates['backups_conversao_produto/'+bkKey] = { codigo, produto: prod, usuario: usuarioLogado?.nome||'', ts: agoraTs() };
+  try {
+    await db.ref().update(updates);
+  } catch(e){
+    toast('Erro ao converter — nada foi alterado: '+e.message,'error'); return;
+  }
+
+  // Atualiza a memória local sem baixar as coleções de novo
+  PRODUTOS_DB = PRODUTOS_DB.filter(x => x.codigo !== codigo);
+  if(INSUMOS_DB.length) INSUMOS_DB.push({ key:keyInsumo, ...dados });
+  fecharModal('modal-produto-detalhe');
+  renderProdutos();
+  toast(`✓ ${codigo} agora é INSUMO (saldo ${saldo.toLocaleString('pt-BR')}). Peça para a equipe dar Ctrl+F5.`,'success');
 }
 
 async function toggleInativoInsumo(codigo){
