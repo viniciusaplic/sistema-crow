@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 05/11/2026 11:25\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 05/11/2026 11:25</span>
+            onclick="alert('Versão desta build: 05/11/2026 11:25\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 05/11/2026 17:45</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -12216,7 +12216,15 @@ function renderItensCompra(){
   document.getElementById('compra-total-liquido').textContent = fmtMoeda(totalLiquido);
 }
 
+let _salvandoCompra = false;
 async function salvarPedidoCompra(){
+  // Duplo clique em Salvar rodava tudo duas vezes (dois pedidos novos, ou entrada dobrada).
+  if(_salvandoCompra){ toast('Aguarde, salvando o pedido de compra…','info'); return; }
+  _salvandoCompra = true;
+  try { await _salvarPedidoCompraInterno(); } finally { _salvandoCompra = false; }
+}
+
+async function _salvarPedidoCompraInterno(){
   if(!temPermissaoEditar('compras')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const fornecedor = document.getElementById('compra-fornecedor').value;
   if(!fornecedor){ toast('Selecione um fornecedor','error'); return; }
@@ -12259,7 +12267,9 @@ async function salvarPedidoCompra(){
     historicoExistente = snapAtual.val();
   }
 
-  await db.ref('pedidos_compra/'+key).set({
+  // update() e não set(): set() apagava o registro estoque_aplicado (itens que já entraram
+  // no estoque) a cada salvamento, abrindo caminho para entrada em dobro.
+  await db.ref('pedidos_compra/'+key).update({
     fornecedor: compraAtual.fornecedor, nf: compraAtual.nf, data: compraAtual.data,
     frete: compraAtual.frete, desconto: compraAtual.desconto || 0, obs: compraAtual.obs || '',
     numero_origem: compraAtual.numero_origem || null,
@@ -12336,6 +12346,10 @@ function mostrarOndeGuardar(titulo, itens){
 async function darEntradaEstoqueCompra(compraId, compra, statusAnterior){
   const snapAplicado = await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado').once('value');
   const aplicados = snapAplicado.val() || {};
+  if(!snapAplicado.exists()){
+    const snapExiste = await db.ref('pedidos_compra/'+compraId+'/fornecedor').once('value');
+    if(!snapExiste.exists()){ toast('Pedido de compra não encontrado — entrada não lançada','error'); return; }
+  }
 
   // Compras salvas antes deste controle não têm o registro de itens aplicados. Se houver
   // indício de que já foram recebidas alguma vez, perguntamos antes de lançar: reaplicar
@@ -12376,16 +12390,18 @@ async function darEntradaEstoqueCompra(compraId, compra, statusAnterior){
     const qtdConf = qtdEntradaConferida(conf, chaveItem);
     const qtdEntrada = qtdConf === null ? (Number(item.qtd) || 0) : qtdConf;
     const sufixoConf = qtdConf === null ? '' : ' (conferido)';
+    const marcaFinal = qtdConf === null ? { qtd:Math.max(0,qtdEntrada), ts:agoraTs() } : { qtd:Math.max(0,qtdEntrada), conferida:true, ts:agoraTs() };
+    const refMarca = db.ref('pedidos_compra/'+compraId+'/estoque_aplicado/'+chaveItem);
 
     // Item conferido com zero (não chegou ou chegou todo avariado): nada a movimentar, mas
     // fica marcado como aplicado para não entrar a quantidade do pedido numa nova tentativa.
     if(qtdEntrada <= 0){
-      await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado/'+chaveItem).set(
-        qtdConf === null ? { qtd:0, ts:agoraTs() } : { qtd:0, conferida:true, ts:agoraTs() });
-      entraram++;
+      const r0 = await refMarca.transaction(atual => atual ? undefined : marcaFinal);
+      if(r0.committed) entraram++; else pulados++;
       continue;
     }
 
+    let tipoMov = 'produto', chaveMov = item.codigo;
     if(item.tipo === 'insumo'){
       const insumo = INSUMOS_DB.find(x=>x.codigo===item.codigo);
       const chaveIns = await resolverChaveInsumo(item.codigo, insumo?.key);
@@ -12394,17 +12410,27 @@ async function darEntradaEstoqueCompra(compraId, compra, statusAnterior){
         naoLocalizados.push(item.codigo + ' — ' + (item.nome||''));
         continue;
       }
-      await movimentarEstoque('insumo', chaveIns, { codigo:item.codigo, nome:item.nome,
-        delta:qtdEntrada, motivo:`Compra ${compra.nf?'NF '+compra.nf:''} — ${esc(compra.fornecedor)}${sufixoConf}`, origemTipo:'compra', origemId:compraId });
-    } else {
-      await movimentarEstoque('produto', item.codigo, { codigo:item.codigo, nome:item.nome,
-        delta:qtdEntrada, motivo:`Compra ${compra.nf?'NF '+compra.nf:''} — ${esc(compra.fornecedor)}${sufixoConf}`, origemTipo:'compra', origemId:compraId });
+      tipoMov = 'insumo'; chaveMov = chaveIns;
     }
 
-    // Marca item a item, logo após aplicar: se cair aqui, o próximo recebimento retoma
-    // exatamente de onde parou.
-    await db.ref('pedidos_compra/'+compraId+'/estoque_aplicado/'+chaveItem).set(
-      qtdConf === null ? { qtd:qtdEntrada, ts:agoraTs() } : { qtd:qtdEntrada, conferida:true, ts:agoraTs() });
+    // TRAVA ANTI-DUPLICIDADE: reserva o item no Firebase de forma atômica ANTES de mexer no
+    // estoque. Se outro clique, outra aba ou outro usuário estiver recebendo a mesma compra
+    // ao mesmo tempo, só um consegue a reserva — o outro pula o item. (Antes, os dois liam
+    // "nada aplicado" ao mesmo tempo e os dois davam entrada: estoque dobrado.)
+    const rTrava = await refMarca.transaction(atual => atual ? undefined : { ...marcaFinal, aplicando:true });
+    if(!rTrava.committed){ pulados++; continue; }
+
+    try {
+      await movimentarEstoque(tipoMov, chaveMov, { codigo:item.codigo, nome:item.nome,
+        delta:qtdEntrada, motivo:`Compra ${compra.nf?'NF '+compra.nf:''} — ${esc(compra.fornecedor)}${sufixoConf}`, origemTipo:'compra', origemId:compraId });
+    } catch(e){
+      // Entrada falhou: libera a reserva para o item poder entrar numa nova tentativa.
+      try { await refMarca.remove(); } catch(e2){}
+      throw e;
+    }
+
+    // Confirma a marca (tira o "aplicando"): se cair aqui, o item já entrou e não entra de novo.
+    await refMarca.set(marcaFinal);
     entraram++;
     paraGuardar.push({ codigo:item.codigo, nome:item.nome, qtd:qtdEntrada, tipo: item.tipo==='insumo' ? 'insumo' : 'produto' });
   }
@@ -12842,7 +12868,13 @@ async function abrirDetalheCompra(id){
   abrirModal('modal-compra-detalhe');
 }
 
+let _alterandoStatusCompra = false;
 async function alterarStatusManualCompra(id, novoStatus){
+  if(_alterandoStatusCompra){ toast('Aguarde, alterando o status…','info'); return; }
+  _alterandoStatusCompra = true;
+  try { await _alterarStatusManualCompraInterno(id, novoStatus); } finally { _alterandoStatusCompra = false; }
+}
+async function _alterarStatusManualCompraInterno(id, novoStatus){
   if(!novoStatus) return;
   if(!temPermissaoEditar('compras')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const c = COMPRAS_CACHE.find(x=>x.id===id);
@@ -12898,7 +12930,13 @@ async function avancarStatusCompra(id, novoStatus){
   toast(`✓ Status atualizado para "${statusInfoCompra(novoStatus).label}"`,'success');
 }
 
+let _recebendoCompra = false;
 async function marcarCompraRecebida(id){
+  if(_recebendoCompra){ toast('Aguarde, recebimento em andamento…','info'); return; }
+  _recebendoCompra = true;
+  try { await _marcarCompraRecebidaInterno(id); } finally { _recebendoCompra = false; }
+}
+async function _marcarCompraRecebidaInterno(id){
   if(!temPermissaoEditar('compras')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const c = COMPRAS_CACHE.find(x=>x.id===id);
   if(!c) return;
