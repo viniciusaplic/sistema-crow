@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 04/11/2026 14:40\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 04/11/2026 14:40</span>
+            onclick="alert('Versão desta build: 05/11/2026 11:25\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 05/11/2026 11:25</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -10276,33 +10276,51 @@ function imprimirEtiquetasProdutoEmLote(codigo, tipo, quantidade){
     return;
   }
 
+  // Mesmo modelo da etiqueta da aba Produtos (imprimirEtiquetaProduto): nome em cima,
+  // código à direita, código de barras embaixo. Cada etiqueta numa "página" de 50x30mm.
   const etiquetaHtml = `
-    <div class="etq">
-      <div class="topo">
-        <div class="nome">${esc(item.nome)}</div>
-        <div class="codigo-lateral">${codigo}</div>
-      </div>
+    <div class="pag"><div class="etq">
+      <div class="nome">${esc(item.nome)}</div>
+      <div class="cod">${codigo}</div>
       <div class="barcode-wrap">${svgBarcode}</div>
-    </div>`;
+    </div></div>`;
 
   const win = window.open('', '_blank');
   win.document.write(`
     <html><head><title>Etiquetas de Produto — ${codigo} (${quantidade}x)</title>
     <style>
       @page { size: 50mm 30mm; margin: 0; }
-      body { margin: 0; font-family: Arial, sans-serif; }
-      .etq {
-        width: 44mm; height: 28mm; box-sizing: border-box; padding: 1mm 0.5mm;
-        display: flex; flex-direction: column; align-items: center; justify-content: space-between;
-        overflow: hidden; page-break-after: always;
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { width: 50mm; font-family: Arial, sans-serif; background: #fff; }
+      .pag {
+        width: 50mm; height: 30mm; overflow: hidden;
+        display: flex; align-items: center; justify-content: center;
+        page-break-after: always; break-after: page;
       }
-      .etq:last-child { page-break-after: auto; }
-      .topo { width: 100%; flex: 1 1 auto; min-height: 0; display: flex; align-items: flex-start; gap: 1mm; overflow: hidden; }
-      .nome { flex: 1 1 auto; min-width: 0; font-size: 10px; font-weight: 700; line-height: 1.1; text-align: center; overflow: hidden;
-        display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
-      .barcode-wrap { flex: 0 0 auto; display: flex; justify-content: center; background: #fff; }
+      .pag:last-child { page-break-after: auto; break-after: auto; }
+      .etq {
+        width: 46mm; height: 26mm; overflow: hidden;
+        padding: 1mm;
+        display: flex; flex-direction: column; justify-content: space-between;
+      }
+      .nome {
+        font-size: 7.5px; font-weight: 700; line-height: 1.2;
+        text-transform: uppercase; word-break: break-word;
+        display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical;
+        overflow: hidden; flex-shrink: 0;
+      }
+      .cod {
+        font-size: 10px; font-weight: 900;
+        white-space: nowrap; overflow-wrap: break-word;
+        color: #000; width: 100%; text-align: right;
+        flex-shrink: 0;
+      }
+      .barcode-wrap {
+        flex: 1 1 auto; min-height: 0; overflow: hidden;
+        display: flex; align-items: center; justify-content: center;
+        background: #fff;
+      }
       .barcode-wrap svg { display: block; flex: 0 0 auto; }
-      .codigo-lateral { flex: 0 0 auto; font-size: 10px; font-weight: 900; white-space: nowrap; text-align: right; }
     </style>
     </head><body>
       ${etiquetaHtml.repeat(quantidade)}
