@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 05/11/2026 11:25\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 05/11/2026 17:45</span>
+            onclick="alert('Versão desta build: 05/11/2026 11:25\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 05/11/2026 17:55</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -10375,17 +10375,28 @@ async function concluirOP(key){
   if(op.conclusao_lock){ toast(`A conclusão desta OP foi iniciada por ${op.conclusao_lock.por||'outro usuário'} e não terminou. NÃO conclua de novo: confira as movimentações de estoque da OP #${op.numero} e acione o administrador.`,'error'); return; }
   const qtdProduzida = Number(document.getElementById('op-qtd-concluir').value) || op.qtd_solicitada;
 
-  // Verifica antecipadamente se algum insumo vai ficar negativo, pra avisar antes de confirmar
+  // Verifica antecipadamente se algum insumo vai ficar negativo, pra avisar antes de confirmar.
+  // Resolve a chave REAL do insumo (antes era sempre 'ins_'+codigo: insumo cadastrado com outra
+  // chave não era encontrado e a baixa era PULADA EM SILÊNCIO).
   const alertasEstoque = [];
+  const semCadastro = [];
+  const chavesReceita = [];
   for(const item of (op.receita||[])){
     const consumir = item.qtd * qtdProduzida;
-    const insumoKey = 'ins_' + item.codigo;
+    const memIns = INSUMOS_DB.find(x => String(x.codigo||'').toUpperCase() === String(item.codigo||'').toUpperCase());
+    const insumoKey = await resolverChaveInsumo(item.codigo, item.key || memIns?.key);
+    chavesReceita.push(insumoKey);
+    if(!insumoKey){ semCadastro.push(`${item.codigo} — ${item.nome||''} (${consumir} un)`); continue; }
     const snap = await db.ref('insumos/'+insumoKey).once('value');
     const insumo = snap.val();
     const estoqueAtualInsumo = Number(insumo?.estoque_atual||0);
     if(estoqueAtualInsumo - consumir < 0){
       alertasEstoque.push(`${item.codigo} — ${insumo?.nome||'?'} (estoque: ${estoqueAtualInsumo}, necessário: ${consumir}, ficaria em ${estoqueAtualInsumo - consumir})`);
     }
+  }
+  if(semCadastro.length){
+    alert(`⛔ OP #${op.numero} NÃO pode ser concluída.\n\nEstes itens da receita não existem no cadastro de INSUMOS, então o sistema não teria onde dar baixa:\n\n${semCadastro.join('\n')}\n\nCadastre o item como insumo (com o mesmo código) ou corrija a receita do produto e tente de novo.`);
+    return;
   }
 
   let msgConfirm = `Confirmar conclusão da OP #${op.numero}?\n\nIsso vai:\n- Dar baixa nos insumos da receita\n- Somar ${qtdProduzida} unidade(s) no estoque de ${esc(op.produto_nome)}\n\nEsta ação não pode ser desfeita.`;
@@ -10425,15 +10436,14 @@ async function concluirOP(key){
   try {
     // Baixa nos insumos (proporcional à quantidade produzida)
     baixaIniciada = true;
-    for(const item of (op.receita||[])){
+    for(let ri = 0; ri < (op.receita||[]).length; ri++){
+      const item = op.receita[ri];
       const consumir = item.qtd * qtdProduzida;
-      const insumoKey = 'ins_' + item.codigo;
-      const snap = await db.ref('insumos/'+insumoKey).once('value');
-      const insumo = snap.val();
-      if(insumo){
-        await movimentarEstoque('insumo', insumoKey, { codigo:item.codigo, nome:insumo.nome, delta:-consumir,
-          motivo:`Consumo em produção — OP #${op.numero}`, origemTipo:'op', origemId:key });
-      }
+      const insumoKey = chavesReceita[ri];
+      if(!insumoKey) continue; // não chega aqui: a conclusão é bloqueada acima
+      const memIns = INSUMOS_DB.find(x => x.key === insumoKey) || INSUMOS_DB.find(x => x.codigo === item.codigo);
+      await movimentarEstoque('insumo', insumoKey, { codigo:item.codigo, nome:memIns?.nome || item.nome || item.codigo, delta:-consumir,
+        motivo:`Consumo em produção — OP #${op.numero}`, origemTipo:'op', origemId:key });
     }
 
     // Soma no estoque do produto pronto (cria o registro se ainda não existir)
