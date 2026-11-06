@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 05/11/2026 11:25\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 05/11/2026 17:55</span>
+            onclick="alert('Versão desta build: 05/11/2026 11:25\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 05/11/2026 18:30</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -1647,6 +1647,7 @@ tbody td{padding:11px 16px;font-size:14px}
           <button class="btn btn-outline btn-sm" onclick="exportarEstoqueExcel()">📥 Exportar Excel</button>
           <button class="btn btn-outline btn-sm" id="btn-toggle-estoque-view" onclick="toggleEstoqueView()">🔍 Analisar Movimentações</button>
           <button class="btn btn-outline btn-sm admin-only" style="color:#7c3aed;border-color:#7c3aed" onclick="abrirModalEstornoProducao()">↩️ Estorno de Produção</button>
+          <button class="btn btn-outline btn-sm admin-only" style="color:#dc2626;border-color:#dc2626" onclick="abrirDiagnosticoBaixaProducao()">🩺 Diagnóstico de baixa</button>
           <button class="btn btn-primary" id="btn-lancar-movimento" onclick="abrirModalMovimentoEstoque()">+ Lançar Movimento</button>
         </div>
       </div>
@@ -10629,7 +10630,7 @@ async function aplicarDeltaEstoque(tipo, chave, delta){
   let anterior = 0;
   const res = await db.ref(caminhoEstoque(tipo, chave)).transaction(atual => {
     anterior = Number(atual)||0;
-    return anterior + d;
+    return arred4(anterior + d);
   });
   // Transaction abortada (regra do banco, erro de rede) devolve committed=false e o valor
   // atual do no. Sem esta checagem o codigo seguia como se a baixa tivesse acontecido,
@@ -10698,8 +10699,11 @@ async function finalizarMovimento(movKey, r, motivoFinal){
 
 // Soma/subtrai no saldo e registra o movimento. Substitui o par
 // aplicarDeltaEstoque() + registrarMovimentoEstoque().
+// Arredonda em 4 casas: 0,17 × 7 dava 1,1899999… no histórico e no saldo.
+function arred4(n){ return Math.round((Number(n)||0) * 10000) / 10000; }
 async function movimentarEstoque(tipo, chave, dados){
-  const delta = Number(dados.delta)||0;
+  const delta = arred4(dados.delta);
+  dados = { ...dados, delta };
   const movKey = await gravarMovimentoPendente({
     ...dados, tipoPrevisto: delta >= 0 ? 'entrada' : 'saida', qtdPrevista: Math.abs(delta)
   });
@@ -12350,6 +12354,69 @@ function mostrarOndeGuardar(titulo, itens){
       <body style="font-family:Arial,sans-serif;padding:20px"><h2 style="margin:0 0 4px">Lista de guarda</h2>
       <div style="color:#555;margin-bottom:12px">${esc(titulo)} · ${new Date().toLocaleString('pt-BR')}</div>${tabela(true)}</body></html>`);
     w.document.close(); w.focus(); setTimeout(()=>w.print(), 300);
+  };
+}
+
+// ══════════════════════════════════════════════
+// DIAGNÓSTICO DE BAIXA DA PRODUÇÃO — confere cada item de cada receita contra o cadastro de
+// insumos. Até 05/11/2026 a conclusão da OP procurava o insumo só por 'ins_'+código e, se não
+// achava, PULAVA A BAIXA EM SILÊNCIO. Mostra quais insumos foram afetados (fazer contagem) e
+// quais receitas têm item sem cadastro. Leitura: no máximo 1 (receitas), se ainda não carregadas.
+// ══════════════════════════════════════════════
+async function abrirDiagnosticoBaixaProducao(){
+  if(!usuarioLogado?.admin){ toast('Somente administrador','error'); return; }
+  if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
+  if(!INSUMOS_DB.length) await carregarInsumosFirebase();
+  const norm = c => String(c||'').trim().toUpperCase();
+  const insPorCod = new Map(INSUMOS_DB.map(i => [norm(i.codigo), i]));
+  const chaveExiste = new Set(INSUMOS_DB.map(i => i.key));
+  const pulava = new Map(), semCad = new Map();   // codigo -> {nome, produtos:Set}
+  const add = (mapa, cod, nome, prod) => { if(!mapa.has(cod)) mapa.set(cod, { nome, produtos:new Set() }); mapa.get(cod).produtos.add(prod); };
+  for(const prodCod in RECEITAS_DB){
+    for(const it of (RECEITAS_DB[prodCod]?.itens || [])){
+      const cod = norm(it.codigo);
+      if(!cod) continue;
+      const ins = insPorCod.get(cod);
+      if(!ins){ add(semCad, cod, it.nome || '', prodCod); continue; }
+      // A conclusão antiga lia insumos/'ins_'+codigo-da-receita. Se essa chave não existe, pulava.
+      if(!chaveExiste.has('ins_' + String(it.codigo||''))) add(pulava, cod, ins.nome || it.nome || '', prodCod);
+    }
+  }
+  const tab = (mapa, cor) => [...mapa.entries()].sort((a,b)=>a[0].localeCompare(b[0],'pt-BR',{numeric:true})).map(([cod,d]) =>
+    `<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px;white-space:nowrap"><strong style="color:${cor}">${esc(cod)}</strong></td>
+     <td style="padding:6px">${esc(d.nome)}</td><td style="padding:6px;font-size:12px;color:var(--muted)">${[...d.produtos].map(esc).join(', ')}</td></tr>`).join('');
+  const cab = '<thead><tr style="background:#1F3A5F;color:#fff"><th style="padding:6px;text-align:left">Insumo</th><th style="padding:6px;text-align:left">Descrição</th><th style="padding:6px;text-align:left">Usado em (produto)</th></tr></thead>';
+  document.getElementById('diagbaixa-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'diagbaixa-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.innerHTML = `<div style="background:var(--surface,#fff);color:var(--text,#111);border-radius:12px;max-width:760px;width:100%;max-height:85vh;overflow:auto;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,.4)">
+    <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;margin-bottom:10px">🩺 Diagnóstico de baixa da produção</div>
+    <div style="font-weight:700;margin:6px 0">1) Insumos que a produção NÃO baixava (corrigido nesta versão) — ${pulava.size}</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">O saldo desses insumos está MAIOR que o real. Faça a contagem física e lance balanço.</div>
+    ${pulava.size ? `<table style="width:100%;border-collapse:collapse;font-size:13px">${cab}<tbody>${tab(pulava,'#dc2626')}</tbody></table>` : '<div style="font-size:13px">Nenhum ✓</div>'}
+    <div style="font-weight:700;margin:16px 0 6px">2) Itens de receita sem cadastro de insumo — ${semCad.size}</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Nunca deram baixa. Agora a OP desses produtos fica bloqueada até corrigir a receita ou cadastrar o insumo.</div>
+    ${semCad.size ? `<table style="width:100%;border-collapse:collapse;font-size:13px">${cab}<tbody>${tab(semCad,'#b45309')}</tbody></table>` : '<div style="font-size:13px">Nenhum ✓</div>'}
+    <div style="font-weight:700;margin:16px 0 6px">Consultar a receita de um produto</div>
+    <div style="display:flex;gap:8px"><input id="diagbaixa-cod" class="search-input" placeholder="Código do produto (ex.: 7455)" style="flex:1"><button class="btn btn-outline btn-sm" id="diagbaixa-ver">Ver</button></div>
+    <div id="diagbaixa-receita" style="font-size:13px;margin-top:8px"></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn btn-primary btn-sm" onclick="document.getElementById('diagbaixa-overlay').remove()">Fechar</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+  document.getElementById('diagbaixa-ver').onclick = () => {
+    const cod = norm(document.getElementById('diagbaixa-cod').value);
+    const out = document.getElementById('diagbaixa-receita');
+    const chaveRec = Object.keys(RECEITAS_DB).find(k => norm(k) === cod);
+    const itens = chaveRec ? (RECEITAS_DB[chaveRec]?.itens || []) : [];
+    if(!itens.length){ out.innerHTML = `<span style="color:#dc2626;font-weight:700">O produto ${esc(cod)} não tem receita cadastrada — a OP dele não baixa nenhum insumo.</span>`; return; }
+    out.innerHTML = itens.map(it => {
+      const ins = insPorCod.get(norm(it.codigo));
+      const st = !ins ? '<span style="color:#b45309">sem cadastro de insumo</span>'
+        : !chaveExiste.has('ins_' + String(it.codigo||'')) ? '<span style="color:#dc2626">não baixava (corrigido)</span>'
+        : '<span style="color:#166534">baixa OK</span>';
+      return `<div>• <strong>${esc(it.codigo)}</strong> — ${esc(ins?.nome || it.nome || '')} · ${Number(it.qtd||0)} por unidade · ${st}</div>`;
+    }).join('');
   };
 }
 
