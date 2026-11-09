@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 05/11/2026 11:25\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 05/11/2026 18:30</span>
+            onclick="alert('Versão desta build: 09/11/2026 10:30\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 09/11/2026 10:30</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -3084,6 +3084,15 @@ async function lerNoCache(no){
   return { val: () => dados };
 }
 function invalidarCacheNo(no){ delete CACHE_NOS[no]; }
+// Busca só os pedidos com os status pedidos (índice 'status' no Firebase), em vez de baixar
+// a base inteira de pedidos. Usado em telas do dia a dia que só olham pedidos em aberto.
+async function buscarPedidosPorStatus(listaStatus){
+  const snaps = await Promise.all(listaStatus.map(st =>
+    db.ref('pedidos').orderByChild('status').equalTo(st).once('value')));
+  const todos = {};
+  snaps.forEach(sn => Object.assign(todos, sn.val() || {}));
+  return todos;
+}
 // Botão "voltar ao topo" do Contas a Receber: aparece só nessa aba e depois de rolar a página.
 // Fica dentro de #tab-financeiro, então some sozinho quando outra aba é aberta.
 window.addEventListener('scroll', () => {
@@ -4823,7 +4832,7 @@ async function renderPedidos(usarCache){
     // Os demais filtros (número, cliente, produto, situação, vendedor, data fim) são
     // resolvidos aqui no navegador e NÃO mudam o que precisa ser baixado. Por isso a
     // chave do cache considera apenas o que de fato altera a consulta ao Firebase.
-    const chaveConsulta = fTipoData==='faturamento' ? 'FAT' : ('DATA:'+(fDataIni||'TUDO'));
+    const chaveConsulta = fTipoData==='faturamento' ? ('FAT:'+(fDataIni||'TUDO')) : ('DATA:'+(fDataIni||'TUDO'));
     let todos;
     if(usarCache && PEDIDOS_FETCH_CACHE && PEDIDOS_FETCH_CACHE.chave === chaveConsulta){
       todos = PEDIDOS_FETCH_CACHE.dados;
@@ -4833,7 +4842,11 @@ async function renderPedidos(usarCache){
         // Filtrando por Data de Faturamento: usamos o índice por 'faturado' (só pedidos já
         // faturados) e filtramos o intervalo de datas no cliente — o Firebase RTDB só permite
         // ordenar/consultar por um campo por vez, então não dá pra combinar com orderByChild('data').
-        query = query.orderByChild('faturado').equalTo(true);
+        // Com "Faturado de" preenchido, busca só a partir dessa data pelo índice
+        // data_faturamento (antes baixava todos os faturados da história).
+        query = fDataIni
+          ? query.orderByChild('data_faturamento').startAt(fDataIni)
+          : query.orderByChild('faturado').equalTo(true);
       } else if(fDataIni){
         query = query.orderByChild('data').startAt(fDataIni+'T00:00:00');
       }
@@ -4843,7 +4856,9 @@ async function renderPedidos(usarCache){
     }
     // Quando a consulta acima JÁ é a dos faturados, o resumo "Faturado no mês" reaproveita
     // esses mesmos dados em vez de baixar a mesma coisa uma segunda vez.
-    if(fTipoData==='faturamento') fonteFaturados = todos;
+    // Só serve pro "Faturado no mês" se a consulta começou no início do mês ou antes
+    const _hj = agora(); const inicioMesFat = new Date(_hj.getFullYear(), _hj.getMonth(), 1).toISOString().split('T')[0];
+    if(fTipoData==='faturamento' && (!fDataIni || fDataIni <= inicioMesFat)) fonteFaturados = todos;
     for(const k in todos){
       const p = todos[k];
       if(!vejaTudoDoModulo('pedidos') && p.vendedor_id!==usuarioLogado.id) continue;
@@ -9953,9 +9968,9 @@ async function selecionarProdutoOP(codigo){
   document.getElementById('op-busca-produto').value = '';
   document.getElementById('op-lista-produtos').style.display = 'none';
 
-  // Buscar quantos pedidos AP/EX estão esperando esse item
-  const snap = await lerNoCache('pedidos');
-  const todos = snap.val() || {};
+  // Buscar quantos pedidos AP/EX estão esperando esse item — só AP e EX vêm do banco
+  // (antes baixava a base inteira de pedidos a cada produto escolhido na OP)
+  const todos = await buscarPedidosPorStatus(['AP','EX']);
   let totalPendente = 0, qtdPedidos = 0;
   const pedidosComItem = [];
   Object.values(todos).forEach(ped => {
@@ -11135,10 +11150,10 @@ async function abrirReservasItem(codigo){
     conteudo.innerHTML = `<div class="modal-title">🔒 Reservas — ${codigo}</div><div style="text-align:center;padding:24px;color:var(--muted)">Buscando pedidos...</div>`;
     abrirModal('modal-reservas-item');
 
-    const snap = await lerNoCache('pedidos');
-    const todos = snap.val() || {};
     // Considera reservado apenas em pedidos ainda não bipados/cancelados (AA, AP ou EX)
     const statusReservam = ['AA','EA','AP','EX'];
+    // Busca só esses status no banco, em vez da base inteira de pedidos
+    const todos = await buscarPedidosPorStatus(statusReservam);
     const linhas = [];
     for(const k in todos){
       const p = todos[k];
@@ -15171,6 +15186,7 @@ function imprimirRelatorioGarantias(){
 // ══ SEPARAÇÃO DE PEDIDOS ══
 // ══════════════════════════════════════════════
 let PEDIDOS_SEPARACAO_CACHE = [];
+let OPS_ATIVAS_SEPARACAO = [];
 
 async function renderSeparacao(){
   try {
@@ -15178,7 +15194,14 @@ async function renderSeparacao(){
     if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
     if(!INSUMOS_DB.length) await carregarInsumosFirebase();
     await carregarProdutosFirebase();
-    await carregarOPsFirebase();
+    // Só as OPs em aberto (pendente / em produção) — a tela só usa isso pra mostrar
+    // "OP ativa" no item. Antes baixava TODAS as OPs da história a cada abertura e a
+    // cada bipagem. Usa variável própria pra não deixar OPS_DB (tela Produção) incompleto.
+    const [snapOpPend, snapOpProd] = await Promise.all([
+      db.ref('ordens_producao').orderByChild('status').equalTo('pendente').once('value'),
+      db.ref('ordens_producao').orderByChild('status').equalTo('em_producao').once('value')
+    ]);
+    OPS_ATIVAS_SEPARACAO = Object.values({ ...(snapOpPend.val()||{}), ...(snapOpProd.val()||{}) });
 
     // Busca só os pedidos com status Aprovado ou Em Separação — é tudo que essa tela
     // usa, então não tem motivo pra baixar o histórico inteiro de pedidos toda vez
@@ -15296,7 +15319,7 @@ function renderModalSeparacao(){
     const produto = PRODUTOS_DB.find(x=>x.codigo===item.codigo);
     const estoqueDisponivel = produto ? Number(produto.quantidade||0) : 0;
     if(estoqueDisponivel >= item.qtd) return false; // tem estoque, não bloqueia
-    const temOPAtiva = OPS_DB.some(op => op.produto_codigo===item.codigo && op.pedido_origem==='#'+p.numero && op.status!=='concluida');
+    const temOPAtiva = OPS_ATIVAS_SEPARACAO.some(op => op.produto_codigo===item.codigo && op.pedido_origem==='#'+p.numero && op.status!=='concluida');
     return !temOPAtiva; // bloqueia se falta estoque e não há OP cobrindo
   });
 
