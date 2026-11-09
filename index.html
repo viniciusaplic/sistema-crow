@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 09/11/2026 10:30\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 09/11/2026 10:30</span>
+            onclick="alert('Versão desta build: 09/11/2026 10:45\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 09/11/2026 10:45</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -22291,13 +22291,43 @@ async function relClientesInativos(dataIni, dataFim, vendedorFiltro, el){
     const da = ultimaCompra[a.nome]?.data||'0', db2 = ultimaCompra[b.nome]?.data||'0';
     return db2.localeCompare(da);
   });
-  relatorioCache = { tipo:'clientes-inativos', lista: clientes.map(c=>({...c, ultima:ultimaCompra[c.nome]?.data, vendedor_ult:ultimaCompra[c.nome]?.vendedor})) };
-  el.innerHTML = `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${clientes.length} cliente(s) que NÃO compraram no período selecionado</div>`+tabelaRel(
-    ['Cliente','Vendedor','Última Compra',{label:'Dias sem comprar',align:'center'}],
-    clientes.map(c=>{
-      const ult = ultimaCompra[c.nome]?.data;
-      const dias = ult ? Math.floor((new Date(refFim)-new Date(ult+'T00:00'))/(1000*60*60*24)) : '—';
-      return [c.nome, c.vendedor_nome||'—', ult?new Date(ult+'T00:00').toLocaleDateString('pt-BR'):'Nunca comprou', dias];
+  // Base completa fica em memória: o filtro de cidade só refiltra, sem nova leitura no Firebase
+  window._relInativos = {
+    refFim,
+    lista: clientes.map(c=>({...c,
+      ultima: ultimaCompra[c.nome]?.data, vendedor_ult: ultimaCompra[c.nome]?.vendedor,
+      cidade_rel: (c.cidade||'').trim().toUpperCase() || '(SEM CIDADE)',
+      uf_rel: (c.uf||'').trim().toUpperCase()
+    }))
+  };
+  renderInativosCidade(el);
+}
+
+function renderInativosCidade(el){
+  el = el || document.getElementById('rel-inativos-wrap')?.parentElement;
+  const base = window._relInativos; if(!base || !el) return;
+  const sel = document.getElementById('rel-inativos-cidade');
+  const filtro = sel ? sel.value : '';
+  const chaveCid = c => c.uf_rel ? `${c.cidade_rel}/${c.uf_rel}` : c.cidade_rel;
+  // Contagem por cidade para o seletor (maiores primeiro)
+  const cont = {};
+  base.lista.forEach(c=>{ const k = chaveCid(c); cont[k] = (cont[k]||0)+1; });
+  const cidades = Object.keys(cont).sort((x,y)=> cont[y]-cont[x] || x.localeCompare(y));
+  const lista = filtro ? base.lista.filter(c=>chaveCid(c)===filtro) : base.lista;
+  relatorioCache = { tipo:'clientes-inativos', lista };
+  el.innerHTML = `<div id="rel-inativos-wrap" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px">
+      <label style="font-size:13px;font-weight:600">Cidade:</label>
+      <select id="rel-inativos-cidade" onchange="renderInativosCidade()" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;max-width:100%">
+        <option value="">Todas (${base.lista.length})</option>
+        ${cidades.map(k=>`<option value="${esc(k)}" ${k===filtro?'selected':''}>${esc(k)} (${cont[k]})</option>`).join('')}
+      </select>
+      <span style="font-size:12px;color:var(--muted)">${lista.length} cliente(s) que NÃO compraram no período selecionado</span>
+    </div>`+tabelaRel(
+    ['Cliente','Cidade','UF','Vendedor','Última Compra',{label:'Dias sem comprar',align:'center'}],
+    lista.map(c=>{
+      const ult = c.ultima;
+      const dias = ult ? Math.floor((new Date(base.refFim)-new Date(ult+'T00:00'))/(1000*60*60*24)) : '—';
+      return [esc(c.nome), esc(c.cidade_rel), esc(c.uf_rel||'—'), esc(c.vendedor_nome||'—'), ult?new Date(ult+'T00:00').toLocaleDateString('pt-BR'):'Nunca comprou', dias];
     })
   );
 }
@@ -25269,7 +25299,7 @@ function exportarRelatorioExcel(){
     case 'vendas-periodo': dados = lista.map(g=>({'Período':g.chave,'Pedidos':g.qtdPedidos,'Clientes Únicos':g.clientes,'Itens':g.itens,'Total':g.total})); break;
     case 'vendas-vendedor': dados = lista.map(g=>({'Vendedor':g.nome,'Pedidos':g.qtd,'Total':g.total})); break;
     case 'vendas-cliente': dados = lista.map(g=>({'Cliente':g.nome,'Pedidos':g.qtd,'Última Compra':g.ultima,'Total':g.total})); break;
-    case 'clientes-inativos': dados = lista.map(g=>({'Cliente':g.nome,'Vendedor':g.vendedor_nome,'Última Compra':g.ultima||'Nunca'})); break;
+    case 'clientes-inativos': dados = lista.map(g=>({'Cliente':g.nome,'Cidade':g.cidade_rel||g.cidade||'','UF':g.uf_rel||g.uf||'','Vendedor':g.vendedor_nome,'Última Compra':g.ultima||'Nunca'})); break;
     case 'vendas-produto': dados = lista.map(g=>g.tipo==='Insumo'
       ? ({'Tipo':'Insumo','Código':g.cod,'Produto/Insumo':g.nome,'Un':g.unidade,'Qtd':Number(g.qtd.toFixed(3)),'Consumo Produção':Number(g.producao.toFixed(3)),'OPs':g.nOps,'Consumo Garantia':Number(g.garantia.toFixed(3)),'Valor':Number(g.total.toFixed(2)),'Base do valor':'Custo atual'})
       : ({'Tipo':'Vendável','Código':g.cod,'Produto/Insumo':g.nome,'Un':'','Qtd':g.qtd,'Consumo Produção':'','OPs':'','Consumo Garantia':'','Valor':g.total,'Base do valor':'Faturamento'})); break;
