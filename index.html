@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 09/11/2026 10:45\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 09/11/2026 10:45</span>
+            onclick="alert('Versão desta build: 10/11/2026 15:00\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 10/11/2026 15:00</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -734,6 +734,7 @@ tbody td{padding:11px 16px;font-size:14px}
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('vendas-produto',this)">📦 Por Produto</button>
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('vendas-item',this)">🔎 Vendas por Item</button>
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('vendas-cidade',this)">🗺️ Por Cidade</button>
+          <button class="btn btn-outline btn-sm" id="btn-medidor-consumo" style="display:none" onclick="abrirMedidorConsumo()">📶 Consumo Firebase</button>
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('compras-fornecedor',this)">🚚 Compras por Fornecedor</button>
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('estoque-posicao',this)">📊 Posição de Estoque</button>
           <button class="btn btn-outline btn-sm rel-btn" onclick="mostrarRelatorio('sugestao-compra',this)">🛒 Sugestão de Compra</button>
@@ -2785,6 +2786,13 @@ tbody td{padding:11px 16px;font-size:14px}
 </div>
 
 <!-- MODAL ETIQUETA DE ENVIO -->
+<div class="modal-overlay" id="modal-medidor-consumo">
+  <div class="modal" style="max-width:960px">
+    <button class="modal-close" onclick="fecharModal('modal-medidor-consumo')">×</button>
+    <div class="modal-title">📶 Consumo do Firebase por função</div>
+    <div id="medidor-conteudo"></div>
+  </div>
+</div>
 <div class="modal-overlay" id="modal-reservas-item">
   <div class="modal" style="max-width:560px">
     <button class="modal-close" onclick="fecharModal('modal-reservas-item')">×</button>
@@ -3045,6 +3053,115 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
+
+// ── Medidor de consumo do Firebase ──────────────────────────────────────
+// Mede, no navegador de cada usuário, quantos dados cada função/tela baixa do banco
+// (tamanho aproximado do que veio em cada leitura). A cada 5 min manda só o resumo
+// (contagem + bytes por função) pra consumo_leituras/<dia>/<usuario>. Não baixa nada;
+// serve pra achar quem está pesando na conta do Firebase. Ver: Relatórios → 📶 Consumo Firebase.
+const MEDIDOR_LEITURAS = {};
+(function instalarMedidorConsumo(){
+  try {
+    const Q = firebase.database.Query.prototype;
+    const onceOriginal = Q.once;
+    const ignorar = ['lerNoCache','buscarPedidosPorStatus','Promise','Object','Array','Function'];
+    Q.once = function(evento, ...resto){
+      const prom = onceOriginal.call(this, evento, ...resto);
+      if(evento !== 'value' || !prom || typeof prom.then !== 'function') return prom;
+      let origem = '(sem nome)', caminho = '/';
+      try {
+        const linhas = (new Error().stack || '').split('\n').slice(2);
+        for(const l of linhas){
+          const m = l.match(/at\s+(?:async\s+)?([A-Za-z_$][\w$.]*)\s+\(/);
+          if(!m) continue;
+          const nome = m[1];
+          if(nome.includes('.') || ignorar.includes(nome)) continue;
+          origem = nome; break;
+        }
+        caminho = decodeURIComponent(new URL((this.ref || this).toString()).pathname) || '/';
+      } catch(_){}
+      prom.then(snap => {
+        try {
+          const v = snap && snap.val();
+          const bytes = v == null ? 0 : JSON.stringify(v).length;
+          const k = origem + ' | ' + caminho;
+          const r = MEDIDOR_LEITURAS[k] || (MEDIDOR_LEITURAS[k] = { origem, caminho, n:0, bytes:0 });
+          r.n++; r.bytes += bytes;
+        } catch(_){}
+      }).catch(() => {});
+      return prom;
+    };
+  } catch(e){ console.warn('[CROW] medidor de consumo não instalado:', e); }
+})();
+
+function enviarMedidorConsumo(){
+  try {
+    const chaves = Object.keys(MEDIDOR_LEITURAS);
+    if(!chaves.length || !usuarioLogado || !usuarioLogado.id) return;
+    const dia = ymdLocal(agora());
+    const inc = firebase.database.ServerValue.increment;
+    const base = `consumo_leituras/${dia}/${usuarioLogado.id}`;
+    const upd = {};
+    upd[base + '/_usuario'] = usuarioLogado.nome || '';
+    chaves.forEach(k => {
+      const r = MEDIDOR_LEITURAS[k];
+      const id = (r.origem + '__' + r.caminho).replace(/[.#$\[\]\/]/g, '_').slice(0, 180);
+      upd[`${base}/${id}/n`] = inc(r.n);
+      upd[`${base}/${id}/bytes`] = inc(r.bytes);
+      upd[`${base}/${id}/origem`] = r.origem;
+      upd[`${base}/${id}/caminho`] = r.caminho;
+      delete MEDIDOR_LEITURAS[k];
+    });
+    db.ref().update(upd).catch(e => console.warn('[CROW] medidor: envio falhou', e));
+  } catch(e){ console.warn('[CROW] medidor:', e); }
+}
+setInterval(enviarMedidorConsumo, 5 * 60 * 1000);
+window.addEventListener('pagehide', enviarMedidorConsumo);
+
+async function abrirMedidorConsumo(){
+  if(!usuarioLogado || !usuarioLogado.admin){ toast('Acesso restrito a administradores', 'error'); return; }
+  enviarMedidorConsumo();
+  const inp = document.getElementById('medidor-dia');
+  const dia = (inp && inp.value) || ymdLocal(agora());
+  const cont = document.getElementById('medidor-conteudo');
+  cont.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">Carregando...</div>';
+  abrirModal('modal-medidor-consumo');
+  const dados = (await db.ref('consumo_leituras/' + dia).once('value')).val() || {};
+  const porFuncao = {}, porUsuario = [];
+  let totalGeral = 0;
+  Object.keys(dados).forEach(uid => {
+    const u = dados[uid] || {};
+    let totU = 0, nU = 0;
+    Object.keys(u).forEach(k => {
+      if(k.startsWith('_')) return;
+      const r = u[k] || {};
+      const chave = (r.origem || '?') + ' | ' + (r.caminho || '?');
+      const g = porFuncao[chave] || (porFuncao[chave] = { origem:r.origem||'?', caminho:r.caminho||'?', n:0, bytes:0, usuarios:new Set() });
+      g.n += Number(r.n || 0); g.bytes += Number(r.bytes || 0); g.usuarios.add(u._usuario || uid);
+      totU += Number(r.bytes || 0); nU += Number(r.n || 0);
+    });
+    totalGeral += totU;
+    porUsuario.push({ nome: u._usuario || uid, bytes: totU, n: nU });
+  });
+  const mb = b => (b / 1048576).toLocaleString('pt-BR', { minimumFractionDigits:2, maximumFractionDigits:2 });
+  const lista = Object.values(porFuncao).sort((a, b) => b.bytes - a.bytes);
+  porUsuario.sort((a, b) => b.bytes - a.bytes);
+  cont.innerHTML = `
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px">
+      <label style="font-size:13px;font-weight:600">Dia:</label>
+      <input type="date" id="medidor-dia" value="${dia}" onchange="abrirMedidorConsumo()" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px">
+      <span style="font-size:13px">Total baixado: <strong>${mb(totalGeral)} MB</strong></span>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Tamanho aproximado dos dados baixados. Cada navegador envia o resumo a cada 5 min (ou ao fechar a aba).</div>
+    ${lista.length ? tabelaRel(
+      ['Função / tela', 'Caminho', { label:'Leituras', align:'center' }, { label:'MB total', align:'right' }, { label:'MB média', align:'right' }, 'Usuários'],
+      lista.map(g => [esc(g.origem), esc(g.caminho), g.n, mb(g.bytes), mb(g.n ? g.bytes / g.n : 0), esc([...g.usuarios].join(', '))])
+    ) : '<div style="padding:16px;color:var(--muted)">Nenhum dado registrado neste dia ainda.</div>'}
+    ${porUsuario.length ? '<div style="font-weight:700;margin:16px 0 8px">Por usuário</div>' + tabelaRel(
+      ['Usuário', { label:'Leituras', align:'center' }, { label:'MB total', align:'right' }],
+      porUsuario.map(u => [esc(u.nome), u.n, mb(u.bytes)])
+    ) : ''}`;
+}
 // ── Relógio do servidor ─────────────────────────────────────────────────
 // Todas as datas do sistema (criação de pedido e orçamento, histórico de edições,
 // movimentação de estoque) vinham do relógio do aparelho de quem estava usando.
@@ -3798,6 +3915,7 @@ async function iniciarApp(){
   await carregarProdutosFirebase();
   carregarCampanhasFirebase();
   if(usuarioLogado.admin) conferirReservasDoDia(); // 1x por dia, em segundo plano
+  if(usuarioLogado.admin){ const bm = document.getElementById('btn-medidor-consumo'); if(bm) bm.style.display = ''; }
   renderPainel(); // re-renderiza com dados atualizados do Firebase
 }
 
