@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 10/11/2026 15:00\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 10/11/2026 15:00</span>
+            onclick="alert('Versão desta build: 11/11/2026 10:30\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 11/11/2026 10:30</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -1316,9 +1316,17 @@ tbody td{padding:11px 16px;font-size:14px}
       <div class="section-header">
         <div class="section-title">📥 Recebimento de Mercadoria</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <input class="search-input" id="receb-busca" placeholder="Fornecedor, NF, pedido, produto…" oninput="filtrarRecebimento()">
           <button class="btn btn-outline btn-sm" onclick="renderRecebimento(true)">🔄 Atualizar</button>
         </div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;align-items:flex-end">
+        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Status</label>
+          <select class="search-input" id="receb-f-status" style="width:auto" onchange="filtrarRecebimento()"></select></div>
+        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Fornecedor</label>
+          <select class="search-input" id="receb-f-fornecedor" style="width:auto;max-width:260px" onchange="filtrarRecebimento()"></select></div>
+        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Busca</label>
+          <input class="search-input" id="receb-busca" style="width:220px" placeholder="NF, pedido, produto…" autocomplete="off" oninput="filtrarRecebimento()"></div>
+        <button class="btn btn-outline btn-sm" onclick="limparFiltrosRecebimento()">Limpar</button>
       </div>
       <div style="font-size:13px;color:var(--muted);margin:-4px 0 12px">Pedidos de compra a caminho. Clique no pedido que chegou, conte cada item e finalize a conferência — o Compras dá a entrada no estoque.</div>
       <div id="receb-lista"></div>
@@ -4038,7 +4046,7 @@ function showTab(tab, el){
   }
   if(tab==='separacao') renderSeparacao();
   if(tab==='coleta') renderColeta();
-  if(tab==='recebimento') renderRecebimento(false);
+  if(tab==='recebimento'){ RECEB_F_STATUS = 'transito'; RECEB_F_FORNEC = ''; renderRecebimento(false); }
   if(tab==='fretes') renderFretes(false);
   if(tab==='financeiro') renderFinanceiro();
   if(tab==='estoque'){
@@ -13267,6 +13275,34 @@ const STATUS_A_RECEBER = ['transito','importacao','separacao'];
 let RECEB_LISTA = [];
 let RECEB_CONFS = {};
 let recebAtual = null;      // { id, compra, conf }
+// Filtros da lista. Toda vez que a aba é aberta o Status volta para Em Trânsito (o que está pra chegar).
+let RECEB_F_STATUS = 'transito';
+let RECEB_F_FORNEC = '';
+
+// Monta os selects de Status e Fornecedor a partir da lista já carregada (sem leitura extra no Firebase).
+function montarFiltrosRecebimento(){
+  const selS = document.getElementById('receb-f-status');
+  const selF = document.getElementById('receb-f-fornecedor');
+  if(!selS || !selF) return;
+  const cont = {};
+  RECEB_LISTA.forEach(c => { cont[c.status] = (cont[c.status] || 0) + 1; });
+  const ordem = ['transito','importacao','separacao'];
+  selS.innerHTML = `<option value="">Todos a caminho (${RECEB_LISTA.length})</option>` +
+    ordem.map(k => `<option value="${k}">${esc(statusInfoCompra(k).label)} (${cont[k] || 0})</option>`).join('');
+  selS.value = ordem.includes(RECEB_F_STATUS) || RECEB_F_STATUS === '' ? RECEB_F_STATUS : 'transito';
+
+  const nomes = Array.from(new Set(RECEB_LISTA.map(c => String(c.fornecedor || '').trim()).filter(Boolean)))
+    .sort((a,b) => a.localeCompare(b, 'pt-BR'));
+  selF.innerHTML = '<option value="">Todos</option>' + nomes.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  selF.value = nomes.includes(RECEB_F_FORNEC) ? RECEB_F_FORNEC : '';
+}
+
+function limparFiltrosRecebimento(){
+  RECEB_F_STATUS = ''; RECEB_F_FORNEC = '';
+  const b = document.getElementById('receb-busca'); if(b) b.value = '';
+  montarFiltrosRecebimento();
+  filtrarRecebimento();
+}
 let salvandoReceb = false;
 
 async function lerConferenciaCompra(compraId){
@@ -13347,20 +13383,27 @@ async function renderRecebimento(forcar){
     toast('Erro ao carregar compras a receber: ' + e.message, 'error');
     return;
   }
+  montarFiltrosRecebimento();
   filtrarRecebimento();
 }
 
 function filtrarRecebimento(){
   const el = document.getElementById('receb-lista'); if(!el) return;
   const q = (document.getElementById('receb-busca')?.value || '').toLowerCase().trim();
+  const selS = document.getElementById('receb-f-status');
+  const selF = document.getElementById('receb-f-fornecedor');
+  if(selS) RECEB_F_STATUS = selS.value;
+  if(selF) RECEB_F_FORNEC = selF.value;
   const lista = RECEB_LISTA.filter(c => {
+    if(RECEB_F_STATUS && c.status !== RECEB_F_STATUS) return false;
+    if(RECEB_F_FORNEC && String(c.fornecedor || '').trim() !== RECEB_F_FORNEC) return false;
     if(!q) return true;
     const conf = RECEB_CONFS[c.id];
     if([c.fornecedor, c.nf, c.numero_origem, conf?.nf].some(v => String(v || '').toLowerCase().includes(q))) return true;
     return (c.itens || []).some(i => String(i.codigo || '').toLowerCase().includes(q) || String(i.nome || '').toLowerCase().includes(q));
   });
   if(!lista.length){
-    el.innerHTML = `<div style="text-align:center;color:var(--muted);padding:32px">${q ? 'Nenhum pedido encontrado para essa busca' : 'Nenhum pedido de compra a caminho'}</div>`;
+    el.innerHTML = `<div style="text-align:center;color:var(--muted);padding:32px">${(q || RECEB_F_STATUS || RECEB_F_FORNEC) ? 'Nenhum pedido com esses filtros' : 'Nenhum pedido de compra a caminho'}</div>`;
     return;
   }
   el.innerHTML = lista.map(c => {
