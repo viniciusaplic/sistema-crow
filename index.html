@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 11/11/2026 10:30\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 11/11/2026 10:30</span>
+            onclick="alert('Versão desta build: 11/11/2026 11:00\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 11/11/2026 11:00</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -1316,17 +1316,9 @@ tbody td{padding:11px 16px;font-size:14px}
       <div class="section-header">
         <div class="section-title">📥 Recebimento de Mercadoria</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input class="search-input" id="receb-busca" placeholder="Fornecedor, NF, pedido, produto…" oninput="filtrarRecebimento()">
           <button class="btn btn-outline btn-sm" onclick="renderRecebimento(true)">🔄 Atualizar</button>
         </div>
-      </div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;align-items:flex-end">
-        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Status</label>
-          <select class="search-input" id="receb-f-status" style="width:auto" onchange="filtrarRecebimento()"></select></div>
-        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Fornecedor</label>
-          <select class="search-input" id="receb-f-fornecedor" style="width:auto;max-width:260px" onchange="filtrarRecebimento()"></select></div>
-        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Busca</label>
-          <input class="search-input" id="receb-busca" style="width:220px" placeholder="NF, pedido, produto…" autocomplete="off" oninput="filtrarRecebimento()"></div>
-        <button class="btn btn-outline btn-sm" onclick="limparFiltrosRecebimento()">Limpar</button>
       </div>
       <div style="font-size:13px;color:var(--muted);margin:-4px 0 12px">Pedidos de compra a caminho. Clique no pedido que chegou, conte cada item e finalize a conferência — o Compras dá a entrada no estoque.</div>
       <div id="receb-lista"></div>
@@ -3072,7 +3064,7 @@ const MEDIDOR_LEITURAS = {};
   try {
     const Q = firebase.database.Query.prototype;
     const onceOriginal = Q.once;
-    const ignorar = ['lerNoCache','buscarPedidosPorStatus','Promise','Object','Array','Function'];
+    const ignorar = ['lerNoCache','buscarPedidosPorStatus','consultaNoCache','Promise','Object','Array','Function'];
     Q.once = function(evento, ...resto){
       const prom = onceOriginal.call(this, evento, ...resto);
       if(evento !== 'value' || !prom || typeof prom.then !== 'function') return prom;
@@ -3585,7 +3577,51 @@ let VENDEDORES_SELECT_CACHE = null; // cache da lista de vendedores para o selet
 // renderPedidos() sem cache, então a tela nunca exibe dado velho depois de salvar.
 let PEDIDOS_FETCH_CACHE = null; // { chave, dados }
 let PEDIDOS_FAT_CACHE = null;   // { totalFaturadoMes, qtdFaturadosMes }
-function invalidarCachePedidos(){ PEDIDOS_FETCH_CACHE = null; PEDIDOS_FAT_CACHE = null; invalidarCacheNo('pedidos'); }
+function invalidarCachePedidos(){ PEDIDOS_FETCH_CACHE = null; PEDIDOS_FAT_CACHE = null; invalidarCacheNo('pedidos'); limparConsultasCache('pedidos'); }
+
+// ── Cache curto de consultas (economia de banda do Firebase) ────────────
+// Painel, Meta do Mês, Orçamentos e o card "Faturado no mês" refaziam a MESMA consulta
+// grande a cada vez que a pessoa voltava na tela. Agora o resultado fica guardado por
+// 3 min neste navegador. Qualquer gravação em pedidos feita por este navegador limpa o
+// cache na hora (gancho abaixo), então quem salvou vê o dado novo; alteração feita por
+// OUTRA pessoa aparece em até 3 min (ou no F5).
+const CACHE_CONSULTAS = {};
+const CACHE_CONSULTAS_TTL = 3 * 60 * 1000;
+async function consultaNoCache(chave, query){
+  const c = CACHE_CONSULTAS[chave];
+  if(c && Date.now() - c.t < CACHE_CONSULTAS_TTL) return { val: () => c.v };
+  const snap = await query.once('value');
+  const v = snap.val();
+  CACHE_CONSULTAS[chave] = { t: Date.now(), v };
+  return { val: () => v };
+}
+function limparConsultasCache(prefixo){
+  Object.keys(CACHE_CONSULTAS).forEach(k => { if(!prefixo || k.startsWith(prefixo + ':')) delete CACHE_CONSULTAS[k]; });
+}
+let OPS_CARREGADAS_EM = 0;
+// Gancho: toda gravação (set/update/push/remove/transaction) que toca pedidos ou
+// ordens_producao zera os caches correspondentes antes de gravar.
+(function instalarGanchoEscrita(){
+  try {
+    const R = firebase.database.Reference.prototype;
+    const raiz = () => decodeURIComponent(new URL(db.ref().toString()).pathname);
+    const marcar = (ref, upd) => {
+      let base = decodeURIComponent(new URL(ref.toString()).pathname);
+      if(base.length > 1 && base.endsWith('/')) base = base.slice(0, -1);
+      const caminhos = [base];
+      if(upd && typeof upd === 'object') Object.keys(upd).forEach(k => caminhos.push((base === '/' ? '' : base) + '/' + String(k).replace(/^\/+/, '')));
+      let ped = false, op = false;
+      caminhos.forEach(c => { if(c === '/' ) return; if(c.startsWith('/pedidos')) ped = true; if(c.startsWith('/ordens_producao')) op = true; });
+      if(base === '/' && !upd){ ped = true; op = true; }
+      if(ped) invalidarCachePedidos();
+      if(op) OPS_CARREGADAS_EM = 0;
+    };
+    ['set','update','push','remove','transaction','setWithPriority'].forEach(m => {
+      const orig = R[m]; if(typeof orig !== 'function') return;
+      R[m] = function(...a){ try { marcar(this, m === 'update' ? a[0] : null); } catch(_){} return orig.apply(this, a); };
+    });
+  } catch(e){ console.warn('[CROW] gancho de escrita não instalado:', e); }
+})();
 // Espera a pessoa parar de digitar antes de consultar o banco, em vez de consultar a cada tecla.
 let _debouncePedidos = null;
 function renderPedidosDebounced(){
@@ -4008,7 +4044,7 @@ function showTab(tab, el){
     if(grupo) grupo.classList.add('has-active');
   }
   if(tab==='painel') renderPainel();
-  if(tab==='pedidos'){ limparFiltrosPedidos(); renderPedidos(); }
+  if(tab==='pedidos'){ limparFiltrosPedidos(); renderPedidos('ttl'); }
   if(tab==='orcamentos'){
     if(!filtroOrcamentosJaAplicado){
       document.getElementById('fo-data-ini').value = primeiroDiaMesAtual();
@@ -4046,7 +4082,7 @@ function showTab(tab, el){
   }
   if(tab==='separacao') renderSeparacao();
   if(tab==='coleta') renderColeta();
-  if(tab==='recebimento'){ RECEB_F_STATUS = 'transito'; RECEB_F_FORNEC = ''; renderRecebimento(false); }
+  if(tab==='recebimento') renderRecebimento(false);
   if(tab==='fretes') renderFretes(false);
   if(tab==='financeiro') renderFinanceiro();
   if(tab==='estoque'){
@@ -4139,7 +4175,7 @@ async function renderPainel(){
     // e é a maior causa do consumo de banda do Firebase, já que o Painel abre a
     // cada login. Pedidos ativos de meses anteriores (raro, mas possível) não
     // aparecem na lista de "ativos" mais abaixo — só os deste mês.
-    const snap = await db.ref('pedidos').orderByChild('data').startAt(mesInicio.toISOString()).once('value');
+    const snap = await consultaNoCache('pedidos:dataDesde:'+mesInicio.toISOString(), db.ref('pedidos').orderByChild('data').startAt(mesInicio.toISOString()));
     const todos = snap.val()||{};
     for(const k in todos){
       const p = todos[k];
@@ -4168,7 +4204,7 @@ async function renderPainel(){
       // Antes baixava TODO faturado ja existente so pra somar o mes corrente. Agora usa o
       // indice de data_faturamento e traz so do inicio do mes pra frente. O filtro cliente
       // abaixo continua igual, entao o resultado exibido nao muda.
-      const snapFat = await db.ref('pedidos').orderByChild('data_faturamento').startAt(ymdLocal(mesInicio)).once('value');
+      const snapFat = await consultaNoCache('pedidos:fatDesde:'+ymdLocal(mesInicio), db.ref('pedidos').orderByChild('data_faturamento').startAt(ymdLocal(mesInicio)));
       const todosFat = snapFat.val() || {};
       Object.values(todosFat).forEach(p => {
         if(p.vendedor_id !== usuarioLogado.id) return;
@@ -4381,7 +4417,7 @@ async function renderMetaMes(mesInicio, pedidosDoMes){
   let realizadoMes = 0, realizadoMesAnterior = 0, fatEsteMesDePedidoAntigo = 0, vendidoNaoFaturadoMes = 0;
   try{
     // Precisa do mes anterior (pedido antigo que faturou agora) — busca a partir dele.
-    const snapFat = await db.ref('pedidos').orderByChild('data_faturamento').startAt(ymdLocal(mesAnteriorInicio)).once('value');
+    const snapFat = await consultaNoCache('pedidos:fatDesde:'+ymdLocal(mesAnteriorInicio), db.ref('pedidos').orderByChild('data_faturamento').startAt(ymdLocal(mesAnteriorInicio)));
     Object.values(snapFat.val()||{}).forEach(p=>{
       // Pedido faturado e DEPOIS cancelado continua com faturado=true no banco. Sem esta
       // guarda ele seguia somando em Realizado, em Soma Faturados + A Faturar e no Total
@@ -4411,7 +4447,16 @@ async function renderMetaMes(mesInicio, pedidosDoMes){
   // meses pra nao baixar o historico inteiro de pedidos a cada abertura do Painel (este
   // painel e so do admin, entao o custo fica restrito a esses logins).
   let carteiraVirouMesAnterior = 0;
-  try{
+  // Esse valor é da virada do mês (histórico) e quase não muda durante o mês, mas a
+  // consulta de 6 meses é a mais pesada do sistema (~18 MB a cada abertura do Painel).
+  // Agora é calculado no máximo 1x por dia e guardado em resumos_painel/carteira_virou/<mês>.
+  const chaveCarteira = ymdLocal(mesInicio).slice(0,7);
+  const hojeCarteira = ymdLocal(agora());
+  let carteiraSalva = null;
+  try { carteiraSalva = (await db.ref('resumos_painel/carteira_virou/'+chaveCarteira).once('value')).val(); } catch(_){}
+  if(carteiraSalva && carteiraSalva.dia === hojeCarteira && typeof carteiraSalva.valor === 'number'){
+    carteiraVirouMesAnterior = carteiraSalva.valor;
+  } else try{
     const janelaInicio = new Date(mesInicio.getFullYear(), mesInicio.getMonth()-6, 1);
     const snapAnt = await db.ref('pedidos').orderByChild('data')
       .startAt(janelaInicio.toISOString()).endAt(mesInicio.toISOString()).once('value');
@@ -4426,6 +4471,8 @@ async function renderMetaMes(mesInicio, pedidosDoMes){
       if(p.data_faturamento && parseDataLocal(p.data_faturamento) < mesInicio) return;
       carteiraVirouMesAnterior += Number(p.total||0);
     });
+    db.ref('resumos_painel/carteira_virou/'+chaveCarteira).set({ valor: carteiraVirouMesAnterior, dia: hojeCarteira })
+      .catch(e => console.warn('[CROW] resumo carteira não salvo:', e));
   } catch(e){ console.warn('[CROW] falha silenciosa ignorada:', e); }
 
   const somaFaturadosMaisAFaturar = realizadoMes + vendidoNaoFaturadoMes;
@@ -4960,7 +5007,10 @@ async function renderPedidos(usarCache){
     // chave do cache considera apenas o que de fato altera a consulta ao Firebase.
     const chaveConsulta = fTipoData==='faturamento' ? ('FAT:'+(fDataIni||'TUDO')) : ('DATA:'+(fDataIni||'TUDO'));
     let todos;
-    if(usarCache && PEDIDOS_FETCH_CACHE && PEDIDOS_FETCH_CACHE.chave === chaveConsulta){
+    // usarCache === 'ttl' (abrir a aba): reaproveita só se a busca tem menos de 3 min.
+    // Gravações deste navegador em pedidos já limpam o cache (gancho de escrita).
+    if(usarCache && PEDIDOS_FETCH_CACHE && PEDIDOS_FETCH_CACHE.chave === chaveConsulta
+       && (usarCache !== 'ttl' || Date.now() - (PEDIDOS_FETCH_CACHE.t||0) < CACHE_CONSULTAS_TTL)){
       todos = PEDIDOS_FETCH_CACHE.dados;
     } else {
       let query = db.ref('pedidos');
@@ -4978,7 +5028,7 @@ async function renderPedidos(usarCache){
       }
       const snap = await query.once('value');
       todos = snap.val()||{};
-      PEDIDOS_FETCH_CACHE = { chave: chaveConsulta, dados: todos };
+      PEDIDOS_FETCH_CACHE = { chave: chaveConsulta, dados: todos, t: Date.now() };
     }
     // Quando a consulta acima JÁ é a dos faturados, o resumo "Faturado no mês" reaproveita
     // esses mesmos dados em vez de baixar a mesma coisa uma segunda vez.
@@ -5078,7 +5128,7 @@ async function renderPedidos(usarCache){
       const mesInicioStr = new Date(anoAtual, mesAtual, 1).toISOString().split('T')[0];
       // Se a consulta principal já trouxe os faturados, usa aqueles dados; só vai ao banco
       // quando realmente não tem de onde tirar.
-      const todosFat = fonteFaturados || ((await db.ref('pedidos').orderByChild('data_faturamento').startAt(mesInicioStr).once('value')).val() || {});
+      const todosFat = fonteFaturados || ((await consultaNoCache('pedidos:fatDesde:'+mesInicioStr, db.ref('pedidos').orderByChild('data_faturamento').startAt(mesInicioStr))).val() || {});
       Object.values(todosFat).forEach(p => {
         if(!vejaTudoDoModulo('pedidos') && p.vendedor_id!==usuarioLogado.id) return;
         if(!p.data_faturamento) return;
@@ -9078,12 +9128,24 @@ async function renderOrcamentos(){
   // separadas porque o Firebase só filtra por um campo indexado de cada vez.
   let mapaOrc = {};
   try {
-    const snap1 = await db.ref('pedidos').orderByChild('status').equalTo('Orçamento').once('value');
+    const snap1 = await consultaNoCache('pedidos:statusOrcamento', db.ref('pedidos').orderByChild('status').equalTo('Orçamento'));
     Object.assign(mapaOrc, snap1.val()||{});
-    const snap2 = await db.ref('pedidos').orderByChild('veio_de_orcamento').equalTo(true).once('value');
-    Object.assign(mapaOrc, snap2.val()||{});
-    const snap3 = await db.ref('pedidos').orderByChild('status_antes_cancelamento').equalTo('Orçamento').once('value');
-    Object.assign(mapaOrc, snap3.val()||{});
+    if(fDataIni){
+      // Com "Data de" preenchida (padrão: dia 1 do mês), aprovados e cancelados vêm de uma
+      // busca por data e são separados aqui — antes baixava TODOS os orçamentos aprovados
+      // da história a cada abertura da tela. O filtro de data abaixo já descartava os antigos.
+      const snapD = await consultaNoCache('pedidos:dataDesde:'+fDataIni+'T00:00:00', db.ref('pedidos').orderByChild('data').startAt(fDataIni+'T00:00:00'));
+      const vD = snapD.val()||{};
+      for(const k in vD){
+        const p = vD[k];
+        if(p && (p.veio_de_orcamento === true || p.status_antes_cancelamento === 'Orçamento')) mapaOrc[k] = p;
+      }
+    } else {
+      const snap2 = await db.ref('pedidos').orderByChild('veio_de_orcamento').equalTo(true).once('value');
+      Object.assign(mapaOrc, snap2.val()||{});
+      const snap3 = await db.ref('pedidos').orderByChild('status_antes_cancelamento').equalTo('Orçamento').once('value');
+      Object.assign(mapaOrc, snap3.val()||{});
+    }
   } catch(e){ console.warn('[CROW] falha silenciosa ignorada:', e); }
 
   let orcamentos=[];
@@ -9780,7 +9842,8 @@ async function carregarOPsFirebase(){
     const snap = await db.ref('ordens_producao').once('value');
     const data = snap.val() || {};
     OPS_DB = Object.keys(data).map(k => ({ key:k, ...data[k] })).sort((a,b)=>(b.ts_criacao||0)-(a.ts_criacao||0));
-  } catch(e){ OPS_DB = []; }
+    OPS_CARREGADAS_EM = Date.now();
+  } catch(e){ OPS_DB = []; OPS_CARREGADAS_EM = 0; }
 }
 
 // recarregar=true (padrão): busca as OPs no Firebase — usado ao abrir a aba e depois de salvar/alterar OP.
@@ -9788,6 +9851,8 @@ async function carregarOPsFirebase(){
 async function renderProducao(recarregar = true){
   if(!temPermissaoEditar('producao')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
+  // Reabrir a aba em menos de 2 min sem ter gravado OP neste navegador: usa o que já tem.
+  if(recarregar && OPS_DB.length && OPS_CARREGADAS_EM && Date.now() - OPS_CARREGADAS_EM < 2*60*1000) recarregar = false;
   if(recarregar || !OPS_DB.length) await carregarOPsFirebase();
   if(!INSUMOS_DB.length) await carregarInsumosFirebase();
 
@@ -13275,34 +13340,6 @@ const STATUS_A_RECEBER = ['transito','importacao','separacao'];
 let RECEB_LISTA = [];
 let RECEB_CONFS = {};
 let recebAtual = null;      // { id, compra, conf }
-// Filtros da lista. Toda vez que a aba é aberta o Status volta para Em Trânsito (o que está pra chegar).
-let RECEB_F_STATUS = 'transito';
-let RECEB_F_FORNEC = '';
-
-// Monta os selects de Status e Fornecedor a partir da lista já carregada (sem leitura extra no Firebase).
-function montarFiltrosRecebimento(){
-  const selS = document.getElementById('receb-f-status');
-  const selF = document.getElementById('receb-f-fornecedor');
-  if(!selS || !selF) return;
-  const cont = {};
-  RECEB_LISTA.forEach(c => { cont[c.status] = (cont[c.status] || 0) + 1; });
-  const ordem = ['transito','importacao','separacao'];
-  selS.innerHTML = `<option value="">Todos a caminho (${RECEB_LISTA.length})</option>` +
-    ordem.map(k => `<option value="${k}">${esc(statusInfoCompra(k).label)} (${cont[k] || 0})</option>`).join('');
-  selS.value = ordem.includes(RECEB_F_STATUS) || RECEB_F_STATUS === '' ? RECEB_F_STATUS : 'transito';
-
-  const nomes = Array.from(new Set(RECEB_LISTA.map(c => String(c.fornecedor || '').trim()).filter(Boolean)))
-    .sort((a,b) => a.localeCompare(b, 'pt-BR'));
-  selF.innerHTML = '<option value="">Todos</option>' + nomes.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
-  selF.value = nomes.includes(RECEB_F_FORNEC) ? RECEB_F_FORNEC : '';
-}
-
-function limparFiltrosRecebimento(){
-  RECEB_F_STATUS = ''; RECEB_F_FORNEC = '';
-  const b = document.getElementById('receb-busca'); if(b) b.value = '';
-  montarFiltrosRecebimento();
-  filtrarRecebimento();
-}
 let salvandoReceb = false;
 
 async function lerConferenciaCompra(compraId){
@@ -13383,27 +13420,20 @@ async function renderRecebimento(forcar){
     toast('Erro ao carregar compras a receber: ' + e.message, 'error');
     return;
   }
-  montarFiltrosRecebimento();
   filtrarRecebimento();
 }
 
 function filtrarRecebimento(){
   const el = document.getElementById('receb-lista'); if(!el) return;
   const q = (document.getElementById('receb-busca')?.value || '').toLowerCase().trim();
-  const selS = document.getElementById('receb-f-status');
-  const selF = document.getElementById('receb-f-fornecedor');
-  if(selS) RECEB_F_STATUS = selS.value;
-  if(selF) RECEB_F_FORNEC = selF.value;
   const lista = RECEB_LISTA.filter(c => {
-    if(RECEB_F_STATUS && c.status !== RECEB_F_STATUS) return false;
-    if(RECEB_F_FORNEC && String(c.fornecedor || '').trim() !== RECEB_F_FORNEC) return false;
     if(!q) return true;
     const conf = RECEB_CONFS[c.id];
     if([c.fornecedor, c.nf, c.numero_origem, conf?.nf].some(v => String(v || '').toLowerCase().includes(q))) return true;
     return (c.itens || []).some(i => String(i.codigo || '').toLowerCase().includes(q) || String(i.nome || '').toLowerCase().includes(q));
   });
   if(!lista.length){
-    el.innerHTML = `<div style="text-align:center;color:var(--muted);padding:32px">${(q || RECEB_F_STATUS || RECEB_F_FORNEC) ? 'Nenhum pedido com esses filtros' : 'Nenhum pedido de compra a caminho'}</div>`;
+    el.innerHTML = `<div style="text-align:center;color:var(--muted);padding:32px">${q ? 'Nenhum pedido encontrado para essa busca' : 'Nenhum pedido de compra a caminho'}</div>`;
     return;
   }
   el.innerHTML = lista.map(c => {
