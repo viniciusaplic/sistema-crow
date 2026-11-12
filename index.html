@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 12/11/2026 16:00\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 12/11/2026 16:00</span>
+            onclick="alert('Versão desta build: 12/11/2026 16:20\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 12/11/2026 16:20</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -374,6 +374,7 @@ tbody td{padding:11px 16px;font-size:14px}
         <div class="nav-tab" data-tab="orcamentos" onclick="showTab('orcamentos',this)">Orçamentos</div>
         <div class="nav-tab" data-tab="clientes" onclick="showTab('clientes',this)">Clientes</div>
         <div class="nav-tab" data-tab="garantias_clientes" onclick="showTab('garantias_clientes',this)">🤝 Garantias de Clientes</div>
+        <div class="nav-tab" data-tab="reativacao" onclick="showTab('reativacao',this)">💬 Reativação WhatsApp</div>
       </div>
     </div>
 
@@ -1316,9 +1317,17 @@ tbody td{padding:11px 16px;font-size:14px}
       <div class="section-header">
         <div class="section-title">📥 Recebimento de Mercadoria</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <input class="search-input" id="receb-busca" placeholder="Fornecedor, NF, pedido, produto…" oninput="filtrarRecebimento()">
           <button class="btn btn-outline btn-sm" onclick="renderRecebimento(true)">🔄 Atualizar</button>
         </div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;align-items:flex-end">
+        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Status</label>
+          <select class="search-input" id="receb-f-status" style="width:auto" onchange="filtrarRecebimento()"></select></div>
+        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Fornecedor</label>
+          <select class="search-input" id="receb-f-fornecedor" style="width:auto;max-width:260px" onchange="filtrarRecebimento()"></select></div>
+        <div class="filtro-group"><label style="font-size:12px;color:var(--muted)">Busca</label>
+          <input class="search-input" id="receb-busca" style="width:220px" placeholder="NF, pedido, produto…" autocomplete="off" oninput="filtrarRecebimento()"></div>
+        <button class="btn btn-outline btn-sm" onclick="limparFiltrosRecebimento()">Limpar</button>
       </div>
       <div style="font-size:13px;color:var(--muted);margin:-4px 0 12px">Pedidos de compra a caminho. Clique no pedido que chegou, conte cada item e finalize a conferência — o Compras dá a entrada no estoque.</div>
       <div id="receb-lista"></div>
@@ -1530,6 +1539,65 @@ tbody td{padding:11px 16px;font-size:14px}
     </div>
 
     <!-- GARANTIAS -->
+    <div id="tab-reativacao" style="display:none">
+      <div class="section-header">
+        <div class="section-title">💬 Reativação de Clientes</div>
+        <button class="btn btn-outline btn-sm" id="reat-btn-recalcular" style="display:none" onclick="reatRecalcularUltimaCompra()">🔄 Recalcular última compra</button>
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin:-4px 0 12px">Clientes sem comprar há algum tempo. O botão WhatsApp abre o <strong>seu</strong> WhatsApp com a mensagem pronta — confira e envie. Quando o cliente responder, marque se ele aceita receber mensagens da empresa.</div>
+      <div id="reat-aviso"></div>
+      <div class="filtros-bar">
+        <div class="filtros-inner open">
+          <div class="filtro-group">
+            <label>Sem comprar há</label>
+            <select id="reat-f-dias" onchange="reatPagina=1;renderReativacao(false)">
+              <option value="60">60+ dias</option>
+              <option value="90" selected>90+ dias</option>
+              <option value="120">120+ dias</option>
+              <option value="180">180+ dias</option>
+              <option value="365">1 ano+</option>
+            </select>
+          </div>
+          <div class="filtro-group">
+            <label>Mostrar</label>
+            <select id="reat-f-status" onchange="reatPagina=1;renderReativacao(false)">
+              <option value="inativos">Inativos (com compra registrada)</option>
+              <option value="sem_registro">Sem compra registrada no sistema</option>
+              <option value="contatados">Já contatados</option>
+              <option value="aceitaram">Aceitaram receber</option>
+              <option value="recusaram">Não querem receber</option>
+            </select>
+          </div>
+          <div class="filtro-group">
+            <label>Cliente / cidade / bairro</label>
+            <input type="text" id="reat-f-busca" placeholder="Buscar..." oninput="reatPagina=1;renderReativacao(false)">
+          </div>
+          <div class="filtro-group" id="reat-f-vendedor-wrap" style="display:none">
+            <label>Vendedor</label>
+            <select id="reat-f-vendedor" onchange="reatPagina=1;renderReativacao(false)"></select>
+          </div>
+          <div class="filtro-group" style="justify-content:flex-end">
+            <label style="display:flex;align-items:center;gap:6px;font-weight:400;cursor:pointer"><input type="checkbox" id="reat-f-ocultar" checked onchange="reatPagina=1;renderReativacao(false)"> Ocultar contatados nos últimos 30 dias</label>
+          </div>
+        </div>
+      </div>
+      <details style="margin:0 0 12px;font-size:13px">
+        <summary style="cursor:pointer;color:var(--accent)">✏️ Mensagem padrão</summary>
+        <textarea id="reat-msg" rows="3" style="width:100%;box-sizing:border-box;margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:8px;font:inherit" oninput="reatSalvarMensagem()"></textarea>
+        <div style="font-size:11px;color:var(--muted)">Use {vendedor} para o seu primeiro nome. A mensagem fica salva neste navegador. <a href="#" onclick="reatRestaurarMensagem();return false">Restaurar padrão</a></div>
+      </details>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:13px;margin-bottom:10px">
+        <label style="font-weight:600">Abrir em:</label>
+        <select id="reat-abrir-em" onchange="reatSalvarAbrirEm()" style="padding:5px 8px;border:1px solid var(--border);border-radius:8px">
+          <option value="app">Aplicativo WhatsApp do computador (rápido)</option>
+          <option value="web">WhatsApp Web (mesma aba sempre)</option>
+        </select>
+        <span style="font-size:11px;color:var(--muted)">No aplicativo a conversa abre na hora. Precisa do WhatsApp instalado no computador (whatsapp.com/download).</span>
+      </div>
+      <div id="reat-contador" style="font-size:13px;margin-bottom:10px"></div>
+      <div id="reat-lista"></div>
+    </div>
+
     <div id="tab-garantias_clientes" style="display:none">
       <div class="section-header">
         <div class="section-title">🤝 Garantias de Clientes</div>
@@ -1990,6 +2058,12 @@ tbody td{padding:11px 16px;font-size:14px}
       <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer">
         <input type="checkbox" id="vend-acesso-fretes" style="margin-top:3px">
         <span><strong>Controla fretes e entregas</strong><br><span style="color:var(--muted);font-size:12px">Vê e edita a tela 🚚 Fretes e Entregas (valores de frete, CT-e, boletos, reversos). Admin já tem isso.</span></span>
+      </label>
+    </div>
+    <div class="form-row single" id="vend-reativacao-row">
+      <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="vend-acesso-reativacao" style="margin-top:3px">
+        <span><strong>Usa a Reativação WhatsApp</strong><br><span style="color:var(--muted);font-size:12px">Vê a tela 💬 Reativação WhatsApp com os próprios clientes inativos. Admin já tem isso.</span></span>
       </label>
     </div>
     <div class="form-row single" id="vend-clientesw3-row">
@@ -3312,6 +3386,8 @@ function podeVer(modulo){
   // Fretes e Entregas: só admin e quem tem "Controla fretes e entregas" no cadastro,
   // qualquer que seja o tipo do usuário. Vendedor vê só a previsão dentro do pedido.
   if(modulo==='fretes') return usuarioLogado.acesso_fretes === true;
+  // Reativação WhatsApp: em teste — só admin e quem tem a opção marcada no cadastro do usuário.
+  if(modulo==='reativacao') return usuarioLogado.acesso_reativacao === true;
   if(ehExpedicao()) return MODULOS_EXPEDICAO_VER.includes(modulo);
   if(usuarioLogado.tipo==='personalizado'){
     // Manutenção Preventiva anda junto com Produção: quem já vê o módulo de Produção
@@ -4108,6 +4184,7 @@ function showTab(tab, el){
     renderOrcamentos();
   }
   if(tab==='clientes') renderClientes();
+  if(tab==='reativacao'){ reatPagina = 1; renderReativacao(false); }
   if(tab==='garantias_clientes'){
     const btnNovaG = document.getElementById('btn-nova-gcli');
     if(btnNovaG) btnNovaG.style.display = podeLancarGarantiaCliente() ? '' : 'none';
@@ -4134,7 +4211,7 @@ function showTab(tab, el){
   }
   if(tab==='separacao') renderSeparacao();
   if(tab==='coleta') renderColeta();
-  if(tab==='recebimento') renderRecebimento(false);
+  if(tab==='recebimento'){ RECEB_F_STATUS = 'transito'; RECEB_F_FORNEC = ''; renderRecebimento(false); }
   if(tab==='fretes') renderFretes(false);
   if(tab==='financeiro') renderFinanceiro();
   if(tab==='estoque'){
@@ -5399,6 +5476,7 @@ async function aplicarFaturarRetroativo(){
         alteracoes: [`💰 Faturado retroativamente, usando a data do próprio pedido (${fmtData(dataFaturamento)})`]
       });
       await db.ref('pedidos/'+p.id).update({ faturado: true, data_faturamento: dataFaturamento, historico_edicoes: historico });
+      registrarUltimaCompraCliente(pedidoAtualDb.cliente_nome, dataFaturamento);
       count++;
     } catch(e){ /* segue pros próximos mesmo se um falhar */ }
   }
@@ -6024,6 +6102,7 @@ async function confirmarFaturamentoPedido(){
             : `💰 Pedido marcado como Faturado em lote, em ${fmtData(dataEscolhida)}`]
         });
         await db.ref('pedidos/'+id).update({ faturado: true, data_faturamento: dataEscolhida, historico_edicoes: historico });
+        registrarUltimaCompraCliente(p.cliente_nome, dataEscolhida);
         count++;
         if(!jaEstavaFaturado && !crTemTitulos(p)) paraContasReceber.push({ id, p: { ...p, faturado: true, data_faturamento: dataEscolhida } });
       } catch(e){ /* segue pros próximos mesmo se um falhar */ }
@@ -6055,6 +6134,7 @@ async function confirmarFaturamentoPedido(){
         : `💰 Pedido marcado como Faturado em ${fmtData(dataEscolhida)}`]
     });
     await db.ref('pedidos/'+id).update({ faturado: true, data_faturamento: dataEscolhida, historico_edicoes: historico });
+    registrarUltimaCompraCliente(p.cliente_nome, dataEscolhida);
     fecharModal('modal-faturar-pedido');
     let msgFrete = '';
     if(freteDigitado){
@@ -13406,6 +13486,34 @@ const STATUS_A_RECEBER = ['transito','importacao','separacao'];
 let RECEB_LISTA = [];
 let RECEB_CONFS = {};
 let recebAtual = null;      // { id, compra, conf }
+// Filtros da lista. Toda vez que a aba é aberta o Status volta para Em Trânsito (o que está pra chegar).
+let RECEB_F_STATUS = 'transito';
+let RECEB_F_FORNEC = '';
+
+// Monta os selects de Status e Fornecedor a partir da lista já carregada (sem leitura extra no Firebase).
+function montarFiltrosRecebimento(){
+  const selS = document.getElementById('receb-f-status');
+  const selF = document.getElementById('receb-f-fornecedor');
+  if(!selS || !selF) return;
+  const cont = {};
+  RECEB_LISTA.forEach(c => { cont[c.status] = (cont[c.status] || 0) + 1; });
+  const ordem = ['transito','importacao','separacao'];
+  selS.innerHTML = `<option value="">Todos a caminho (${RECEB_LISTA.length})</option>` +
+    ordem.map(k => `<option value="${k}">${esc(statusInfoCompra(k).label)} (${cont[k] || 0})</option>`).join('');
+  selS.value = ordem.includes(RECEB_F_STATUS) || RECEB_F_STATUS === '' ? RECEB_F_STATUS : 'transito';
+
+  const nomes = Array.from(new Set(RECEB_LISTA.map(c => String(c.fornecedor || '').trim()).filter(Boolean)))
+    .sort((a,b) => a.localeCompare(b, 'pt-BR'));
+  selF.innerHTML = '<option value="">Todos</option>' + nomes.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  selF.value = nomes.includes(RECEB_F_FORNEC) ? RECEB_F_FORNEC : '';
+}
+
+function limparFiltrosRecebimento(){
+  RECEB_F_STATUS = ''; RECEB_F_FORNEC = '';
+  const b = document.getElementById('receb-busca'); if(b) b.value = '';
+  montarFiltrosRecebimento();
+  filtrarRecebimento();
+}
 let salvandoReceb = false;
 
 async function lerConferenciaCompra(compraId){
@@ -13486,20 +13594,27 @@ async function renderRecebimento(forcar){
     toast('Erro ao carregar compras a receber: ' + e.message, 'error');
     return;
   }
+  montarFiltrosRecebimento();
   filtrarRecebimento();
 }
 
 function filtrarRecebimento(){
   const el = document.getElementById('receb-lista'); if(!el) return;
   const q = (document.getElementById('receb-busca')?.value || '').toLowerCase().trim();
+  const selS = document.getElementById('receb-f-status');
+  const selF = document.getElementById('receb-f-fornecedor');
+  if(selS) RECEB_F_STATUS = selS.value;
+  if(selF) RECEB_F_FORNEC = selF.value;
   const lista = RECEB_LISTA.filter(c => {
+    if(RECEB_F_STATUS && c.status !== RECEB_F_STATUS) return false;
+    if(RECEB_F_FORNEC && String(c.fornecedor || '').trim() !== RECEB_F_FORNEC) return false;
     if(!q) return true;
     const conf = RECEB_CONFS[c.id];
     if([c.fornecedor, c.nf, c.numero_origem, conf?.nf].some(v => String(v || '').toLowerCase().includes(q))) return true;
     return (c.itens || []).some(i => String(i.codigo || '').toLowerCase().includes(q) || String(i.nome || '').toLowerCase().includes(q));
   });
   if(!lista.length){
-    el.innerHTML = `<div style="text-align:center;color:var(--muted);padding:32px">${q ? 'Nenhum pedido encontrado para essa busca' : 'Nenhum pedido de compra a caminho'}</div>`;
+    el.innerHTML = `<div style="text-align:center;color:var(--muted);padding:32px">${(q || RECEB_F_STATUS || RECEB_F_FORNEC) ? 'Nenhum pedido com esses filtros' : 'Nenhum pedido de compra a caminho'}</div>`;
     return;
   }
   el.innerHTML = lista.map(c => {
@@ -20967,6 +21082,7 @@ function abrirModalVendedor(){
   document.getElementById('vend-sem-trava-preco').checked = false;
   document.getElementById('vend-acesso-fretes').checked = false;
   document.getElementById('vend-acesso-clientes-w3').checked = false;
+  document.getElementById('vend-acesso-reativacao').checked = false;
   montarPermissoesTabela({});
   atualizarVisibilidadePermissoes();
   document.getElementById('modal-vendedor-titulo').textContent = 'Cadastrar Usuário';
@@ -20991,6 +21107,7 @@ async function editarVendedor(id){
   document.getElementById('vend-sem-trava-preco').checked = v.sem_trava_preco === true;
   document.getElementById('vend-acesso-fretes').checked = v.acesso_fretes === true;
   document.getElementById('vend-acesso-clientes-w3').checked = v.acesso_clientes_w3 === true;
+  document.getElementById('vend-acesso-reativacao').checked = v.acesso_reativacao === true;
   montarPermissoesTabela(v.permissoes || {});
   atualizarVisibilidadePermissoes();
   document.getElementById('modal-vendedor-titulo').textContent = 'Editar Usuário';
@@ -21012,6 +21129,7 @@ async function salvarVendedor(){
   const semTrava = !admin && document.getElementById('vend-sem-trava-preco').checked;
   const acessoFretes = !admin && document.getElementById('vend-acesso-fretes').checked;
   const acessoClientesW3 = !admin && document.getElementById('vend-acesso-clientes-w3').checked;
+  const acessoReativacao = !admin && document.getElementById('vend-acesso-reativacao').checked;
   if(!nome||!user){ toast('Nome e usuário são obrigatórios','error'); return; }
 
   if(id){
@@ -21022,7 +21140,8 @@ async function salvarVendedor(){
       permissoes: permissoes || null, comissao_pct: comissaoPct,
       sem_trava_preco: semTrava || null,
       acesso_fretes: acessoFretes || null,
-      acesso_clientes_w3: acessoClientesW3 || null
+      acesso_clientes_w3: acessoClientesW3 || null,
+      acesso_reativacao: acessoReativacao || null
     };
     if(pass) dados.senha = pass; // só atualiza a senha se foi digitada uma nova
     await db.ref('usuarios/'+id).update(dados);
@@ -21040,7 +21159,8 @@ async function salvarVendedor(){
       permissoes: permissoes || null, comissao_pct: comissaoPct, ativo:true,
       sem_trava_preco: semTrava || null,
       acesso_fretes: acessoFretes || null,
-      acesso_clientes_w3: acessoClientesW3 || null });
+      acesso_clientes_w3: acessoClientesW3 || null,
+      acesso_reativacao: acessoReativacao || null });
     fecharModal('modal-vendedor'); renderVendedores();
     toast(`✓ Usuário ${nome} cadastrado!`,'success');
   }
@@ -22524,6 +22644,255 @@ function relVendasCliente(pedidos, el){
   );
 }
 
+// ══════════════════════════════════════════════
+// ══ REATIVAÇÃO WHATSAPP (teste — fase 1, envio manual pelo WhatsApp do vendedor) ══
+// Economia de Firebase: a tela NÃO varre os pedidos. A data da última compra de cada cliente
+// fica num nó pequeno (clientes_ultima_compra/{chaveCliente} = 'AAAA-MM-DD'), atualizado a cada
+// faturamento e recalculado pelo admin uma única vez (botão Recalcular). Contato e consentimento
+// ficam no próprio cadastro do cliente (whats_*), que já está em memória (CLIENTES_DB).
+const REAT_NO = 'clientes_ultima_compra';
+const REAT_LIMITE_DIA = 25;
+const REAT_POR_PAGINA = 40;
+const REAT_MSG_PADRAO = 'Oi, tudo bem? Aqui é o {vendedor} da Aplic. Faz um tempo que não falamos! Chegaram novidades e condições especiais, posso te mandar?';
+let reatPagina = 1;
+let reatUltimaCompra = null; // { chaveCliente: 'AAAA-MM-DD' }
+
+function reatNormNome(n){ return String(n||'').trim().toUpperCase().replace(/\s+/g,' '); }
+function reatHojeLocal(){ const d = agora(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function reatDataLocal(iso){ if(!iso) return ''; const d = new Date(iso); if(isNaN(d)) return String(iso).slice(0,10); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function reatDiasDesde(dataStr){ if(!dataStr) return null; const a = new Date(dataStr.slice(0,10)+'T00:00'), b = new Date(reatHojeLocal()+'T00:00'); return Math.round((b-a)/86400000); }
+
+// Chamada depois de marcar um pedido como faturado. Não trava o faturamento se falhar.
+// Liga pedido→cliente pelo nome (mesmo critério do relatório de Clientes Inativos).
+function registrarUltimaCompraCliente(clienteNome, dataFat){
+  try {
+    const data = String(dataFat||'').slice(0,10);
+    const alvo = reatNormNome(clienteNome);
+    if(!data || !alvo || !CLIENTES_DB.length) return;
+    CLIENTES_DB.filter(c => reatNormNome(c.nome) === alvo && c._key).forEach(c => {
+      db.ref(REAT_NO+'/'+c._key).transaction(atual => (!atual || data > atual) ? data : undefined)
+        .then(() => { if(reatUltimaCompra && (!reatUltimaCompra[c._key] || data > reatUltimaCompra[c._key])) reatUltimaCompra[c._key] = data; })
+        .catch(e => console.warn('[CROW] última compra não registrada:', e.message));
+    });
+  } catch(e){ console.warn('[CROW] registrarUltimaCompraCliente:', e); }
+}
+
+// Telefone → número de WhatsApp (55 + DDD + celular). Fixo não tem WhatsApp: devolve tipo 'fixo'.
+function reatNumeroWhats(tel){
+  const partes = String(tel||'').split(/[\/,;|]| e /i).map(t => t.replace(/\D/g,'')).filter(Boolean);
+  let fixo = null;
+  for(let d of partes){
+    d = d.replace(/^0+/,'');
+    if((d.length===12 || d.length===13) && d.startsWith('55')) d = d.slice(2);
+    if(d.length===11 && d[2]==='9') return { tipo:'cel', num:'55'+d };
+    if(d.length===10){
+      if('6789'.includes(d[2])) return { tipo:'cel', num:'55'+d.slice(0,2)+'9'+d.slice(2) };
+      fixo = fixo || d;
+    }
+  }
+  return fixo ? { tipo:'fixo' } : { tipo:'nenhum' };
+}
+
+function reatMensagem(){
+  let m = '';
+  try { m = localStorage.getItem('crow_reat_msg') || ''; } catch(e){}
+  return m || REAT_MSG_PADRAO;
+}
+function reatSalvarMensagem(){
+  const v = document.getElementById('reat-msg').value;
+  try { if(v.trim()) localStorage.setItem('crow_reat_msg', v); else localStorage.removeItem('crow_reat_msg'); } catch(e){}
+}
+function reatRestaurarMensagem(){
+  try { localStorage.removeItem('crow_reat_msg'); } catch(e){}
+  document.getElementById('reat-msg').value = REAT_MSG_PADRAO;
+}
+
+// Onde abrir a conversa. "app": aplicativo do WhatsApp instalado (abre na hora, sem recarregar).
+// "web": WhatsApp Web sempre na MESMA aba (não empilha abas novas). Celular/tablet: sempre o app.
+function reatAbrirEm(){
+  let v = '';
+  try { v = localStorage.getItem('crow_reat_abrir') || ''; } catch(e){}
+  return v === 'web' ? 'web' : 'app';
+}
+function reatSalvarAbrirEm(){
+  const v = document.getElementById('reat-abrir-em').value;
+  try { localStorage.setItem('crow_reat_abrir', v); } catch(e){}
+}
+function reatAbrirConversa(num, texto){
+  const t = encodeURIComponent(texto);
+  const celular = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  if(celular){ window.location.href = 'https://wa.me/'+num+'?text='+t; return; }
+  if(reatAbrirEm() === 'app'){
+    // Link de protocolo: o navegador repassa ao aplicativo e a página do sistema continua aberta
+    const a = document.createElement('a');
+    a.href = 'whatsapp://send?phone='+num+'&text='+t;
+    document.body.appendChild(a); a.click(); a.remove();
+  } else {
+    window.open('https://web.whatsapp.com/send?phone='+num+'&text='+t, 'crow_whatsapp');
+  }
+}
+
+function reatBaseClientes(){
+  let base = CLIENTES_DB.filter(c => c && c.nome && !c.inativo);
+  if(!usuarioLogado.admin && !vejaTudoDoModulo('clientes')) base = base.filter(c => c.vendedor_id === usuarioLogado.id);
+  return base;
+}
+function reatEnviosHoje(){
+  const hoje = reatHojeLocal();
+  return CLIENTES_DB.filter(c => c.whats_envio_por === usuarioLogado.id && reatDataLocal(c.whats_ultimo_envio) === hoje).length;
+}
+
+async function renderReativacao(forcarLeitura){
+  const lista = document.getElementById('reat-lista');
+  if(!lista) return;
+  try {
+    if(!CLIENTES_DB.length){ lista.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">⏳ Carregando clientes...</div>'; await carregarClientesFirebase(); }
+    if(reatUltimaCompra === null || forcarLeitura){
+      if(forcarLeitura) invalidarCacheNo(REAT_NO);
+      const snap = await lerNoCache(REAT_NO);
+      reatUltimaCompra = snap.val() || {};
+    }
+    const admin = !!usuarioLogado.admin;
+    document.getElementById('reat-btn-recalcular').style.display = admin ? 'inline-flex' : 'none';
+    const msgEl = document.getElementById('reat-msg');
+    if(msgEl && !msgEl.value) msgEl.value = reatMensagem();
+    const abrirEl = document.getElementById('reat-abrir-em');
+    if(abrirEl) abrirEl.value = reatAbrirEm();
+
+    const base = reatBaseClientes();
+    // Filtro de vendedor (admin / quem vê todos os clientes)
+    const wrapV = document.getElementById('reat-f-vendedor-wrap');
+    const selV = document.getElementById('reat-f-vendedor');
+    const veTodos = admin || vejaTudoDoModulo('clientes');
+    wrapV.style.display = veTodos ? 'flex' : 'none';
+    if(veTodos && !selV.options.length){
+      const nomes = [...new Set(base.map(c => c.vendedor_nome).filter(Boolean))].sort();
+      selV.innerHTML = '<option value="">Todos</option>' + nomes.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+    }
+
+    const semBase = !Object.keys(reatUltimaCompra).length;
+    document.getElementById('reat-aviso').innerHTML = semBase
+      ? `<div style="padding:10px 12px;background:#fef3c7;border:1px solid #fde68a;border-radius:8px;color:#92400e;font-size:13px;margin-bottom:12px">⚠️ A data da última compra ainda não foi calculada. ${admin ? 'Clique em <strong>🔄 Recalcular última compra</strong> (só precisa uma vez).' : 'Peça a um administrador para fazer o cálculo inicial.'}</div>`
+      : '';
+
+    const dias = Number(document.getElementById('reat-f-dias').value) || 90;
+    const status = document.getElementById('reat-f-status').value;
+    const busca = (document.getElementById('reat-f-busca').value || '').toLowerCase().trim();
+    const fVend = veTodos ? selV.value : '';
+    const ocultar = document.getElementById('reat-f-ocultar').checked;
+
+    let itens = base.map(c => {
+      const ult = reatUltimaCompra[c._key] || null;
+      return { c, ult, diasSem: reatDiasDesde(ult), diasContato: reatDiasDesde(reatDataLocal(c.whats_ultimo_envio)) };
+    });
+    if(fVend) itens = itens.filter(i => i.c.vendedor_nome === fVend);
+    if(busca) itens = itens.filter(i => (i.c.nome||'').toLowerCase().includes(busca) || (i.c.cidade||'').toLowerCase().includes(busca) || bairroDoCliente(i.c).toLowerCase().includes(busca));
+    if(status === 'inativos') itens = itens.filter(i => i.ult && i.diasSem >= dias && i.c.whats_aceite !== 'nao');
+    else if(status === 'sem_registro') itens = itens.filter(i => !i.ult && i.c.whats_aceite !== 'nao');
+    else if(status === 'contatados') itens = itens.filter(i => i.c.whats_ultimo_envio);
+    else if(status === 'aceitaram') itens = itens.filter(i => i.c.whats_aceite === 'sim');
+    else if(status === 'recusaram') itens = itens.filter(i => i.c.whats_aceite === 'nao');
+    if(ocultar && (status === 'inativos' || status === 'sem_registro')) itens = itens.filter(i => i.diasContato === null || i.diasContato > 30);
+    // Mais recentes primeiro: quem parou de comprar há menos tempo costuma voltar mais fácil
+    if(status === 'contatados') itens.sort((a,b) => String(b.c.whats_ultimo_envio).localeCompare(String(a.c.whats_ultimo_envio)));
+    else itens.sort((a,b) => String(b.ult||'').localeCompare(String(a.ult||'')) || (a.c.nome||'').localeCompare(b.c.nome||''));
+
+    const envHoje = reatEnviosHoje();
+    const corCont = envHoje >= REAT_LIMITE_DIA ? '#dc2626' : (envHoje >= REAT_LIMITE_DIA-5 ? '#d97706' : 'var(--muted)');
+    document.getElementById('reat-contador').innerHTML =
+      `<strong>${itens.length}</strong> cliente(s) · <span style="color:${corCont}">Você enviou <strong>${envHoje}</strong> de ${REAT_LIMITE_DIA} hoje</span>`;
+
+    const pagina = itens.slice(0, reatPagina * REAT_POR_PAGINA);
+    if(!pagina.length){ lista.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">Nenhum cliente neste filtro.</div>'; return; }
+    lista.innerHTML = pagina.map(i => {
+      const c = i.c, w = reatNumeroWhats(c.telefone), k = esc(c._key);
+      const ultTxt = i.ult ? `${fmtData(i.ult)} <span style="color:var(--muted)">(${i.diasSem} dias)</span>` : '<span style="color:var(--muted)">sem compra registrada no sistema</span>';
+      const contatoTxt = c.whats_ultimo_envio ? `<div class="cliente-card-info">💬 Último contato: <span>${fmtData(reatDataLocal(c.whats_ultimo_envio))}${c.whats_envio_por_nome ? ' por '+esc(c.whats_envio_por_nome.split(' ')[0]) : ''}</span></div>` : '';
+      const aceite = c.whats_aceite === 'sim' ? '<span class="badge" style="background:#dcfce7;color:#166534">✓ Aceita WhatsApp</span>'
+                   : c.whats_aceite === 'nao' ? '<span class="badge" style="background:#fee2e2;color:#991b1b">✗ Não quer WhatsApp</span>' : '';
+      let btnWhats;
+      if(w.tipo === 'cel') btnWhats = `<button class="btn btn-primary btn-sm" style="background:#16a34a;border-color:#16a34a" onclick="reatEnviar('${k}')">💬 WhatsApp</button>`;
+      else if(w.tipo === 'fixo') btnWhats = `<span class="badge badge-gray" title="${esc(c.telefone)}">☎️ Só telefone fixo</span>`;
+      else btnWhats = '<span class="badge badge-gray">Sem telefone</span>';
+      return `<div class="cliente-card">
+        <div class="cliente-card-nome">${esc(c.nome)} ${aceite}</div>
+        <div class="cliente-card-info">📍 <span>${esc([bairroDoCliente(c), [c.cidade, c.uf].filter(Boolean).join('/')].filter(Boolean).join(' · ') || '—')}</span>${veTodos ? ` · 👤 <span>${esc(c.vendedor_nome||'Sem vendedor')}</span>` : ''}</div>
+        <div class="cliente-card-info">📞 <span>${esc(c.telefone||'—')}</span></div>
+        <div class="cliente-card-info">🛒 Última compra: <span>${ultTxt}</span></div>
+        ${contatoTxt}
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;align-items:center">
+          ${btnWhats}
+          <button class="btn btn-outline btn-sm" onclick="reatMarcarAceite('${k}','sim')" ${c.whats_aceite==='sim'?'disabled':''}>👍 Aceitou</button>
+          <button class="btn btn-outline btn-sm" onclick="reatMarcarAceite('${k}','nao')" ${c.whats_aceite==='nao'?'disabled':''}>👎 Não quer</button>
+        </div>
+      </div>`;
+    }).join('') + (itens.length > pagina.length
+      ? `<div style="text-align:center;margin:12px 0"><button class="btn btn-outline" onclick="reatPagina++;renderReativacao(false)">Mostrar mais (${itens.length - pagina.length})</button></div>` : '');
+  } catch(e){
+    lista.innerHTML = `<div style="color:#dc2626;padding:12px">Erro: ${esc(e.message)}</div>`;
+  }
+}
+
+async function reatEnviar(chave){
+  const c = CLIENTES_DB.find(x => x._key === chave); if(!c) return;
+  const w = reatNumeroWhats(c.telefone);
+  if(w.tipo !== 'cel'){ toast('Cliente sem celular cadastrado','error'); return; }
+  const envHoje = reatEnviosHoje();
+  if(envHoje >= REAT_LIMITE_DIA){
+    const ok = await confirmCustom(`Você já enviou ${envHoje} mensagens hoje.\n\nPassar de ${REAT_LIMITE_DIA} por dia aumenta o risco de o WhatsApp bloquear o seu número. Enviar mesmo assim?`, 'Enviar mesmo assim');
+    if(!ok) return;
+  }
+  const primeiroNome = String(usuarioLogado.nome||'').trim().split(' ')[0];
+  const texto = (document.getElementById('reat-msg')?.value || reatMensagem()).replace(/\{vendedor\}/g, primeiroNome);
+  // Abre primeiro (o navegador só permite abrir janela direto no clique), grava depois
+  reatAbrirConversa(w.num, texto);
+  const dados = { whats_ultimo_envio: agora().toISOString(), whats_envio_por: usuarioLogado.id, whats_envio_por_nome: usuarioLogado.nome || '' };
+  try {
+    await db.ref('clientes/'+chave).update(dados);
+    Object.assign(c, dados);
+    renderReativacao(false);
+  } catch(e){ toast('Mensagem aberta, mas o contato não foi registrado: '+e.message,'error'); }
+}
+
+async function reatMarcarAceite(chave, valor){
+  const c = CLIENTES_DB.find(x => x._key === chave); if(!c) return;
+  const dados = { whats_aceite: valor, whats_aceite_data: agora().toISOString(), whats_aceite_por: usuarioLogado.nome || '' };
+  try {
+    await db.ref('clientes/'+chave).update(dados);
+    Object.assign(c, dados);
+    toast(valor === 'sim' ? '✓ Cliente aceita receber WhatsApp' : '✓ Marcado: não quer receber', 'success');
+    renderReativacao(false);
+  } catch(e){ toast('Erro ao salvar: '+e.message,'error'); }
+}
+
+// Admin, uma vez: lê os pedidos faturados (mesma consulta do relatório de Inativos) e grava
+// a última compra de cada cliente. Depois disso, o faturamento mantém o nó atualizado sozinho.
+async function reatRecalcularUltimaCompra(){
+  if(!usuarioLogado?.admin){ toast('Acesso restrito — só administradores','error'); return; }
+  const ok = await confirmCustom('Recalcular a data da última compra de todos os clientes?\n\nLê todos os pedidos faturados uma vez. Só é preciso fazer na primeira vez (ou se algo parecer errado).', 'Recalcular');
+  if(!ok) return;
+  const lista = document.getElementById('reat-lista');
+  lista.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">⏳ Calculando...</div>';
+  try {
+    if(!CLIENTES_DB.length) await carregarClientesFirebase();
+    const snap = await db.ref('pedidos').orderByChild('faturado').equalTo(true).once('value');
+    const porNome = {};
+    Object.values(snap.val()||{}).forEach(p => {
+      if(!p || !p.data_faturamento) return;
+      const n = reatNormNome(p.cliente_nome), d = String(p.data_faturamento).slice(0,10);
+      if(n && (!porNome[n] || d > porNome[n])) porNome[n] = d;
+    });
+    const mapa = {};
+    CLIENTES_DB.forEach(c => { const d = porNome[reatNormNome(c.nome)]; if(d && c._key) mapa[c._key] = d; });
+    await db.ref(REAT_NO).update(mapa);
+    reatUltimaCompra = null;
+    toast(`✓ Última compra calculada para ${Object.keys(mapa).length} cliente(s)`,'success');
+    await renderReativacao(true);
+  } catch(e){
+    lista.innerHTML = `<div style="color:#dc2626;padding:12px">Erro: ${esc(e.message)}</div>`;
+  }
+}
+
 // ── Clientes Inativos ──
 async function relClientesInativos(dataIni, dataFim, vendedorFiltro, el){
   const snap = await db.ref('pedidos').orderByChild('faturado').equalTo(true).once('value');
@@ -22554,10 +22923,18 @@ async function relClientesInativos(dataIni, dataFim, vendedorFiltro, el){
     lista: clientes.map(c=>({...c,
       ultima: ultimaCompra[c.nome]?.data, vendedor_ult: ultimaCompra[c.nome]?.vendedor,
       cidade_rel: (c.cidade||'').trim().toUpperCase() || '(SEM CIDADE)',
-      uf_rel: (c.uf||'').trim().toUpperCase()
+      uf_rel: (c.uf||'').trim().toUpperCase(),
+      bairro_rel: bairroDoCliente(c).toUpperCase() || '(SEM BAIRRO)'
     }))
   };
   renderInativosCidade(el);
+}
+
+// Bairro do cadastro; se o cliente ainda está no formato antigo, tira do texto do endereço
+function bairroDoCliente(c){
+  if(!c) return '';
+  if(c.logradouro || c.numero || c.bairro) return String(c.bairro||'').trim();
+  return String(separarEnderecoCliente(c.endereco || c.end || '').bairro || '').trim();
 }
 
 function renderInativosCidade(el){
@@ -22565,26 +22942,40 @@ function renderInativosCidade(el){
   const base = window._relInativos; if(!base || !el) return;
   const sel = document.getElementById('rel-inativos-cidade');
   const filtro = sel ? sel.value : '';
+  const selB = document.getElementById('rel-inativos-bairro');
   const chaveCid = c => c.uf_rel ? `${c.cidade_rel}/${c.uf_rel}` : c.cidade_rel;
   // Contagem por cidade para o seletor (maiores primeiro)
   const cont = {};
   base.lista.forEach(c=>{ const k = chaveCid(c); cont[k] = (cont[k]||0)+1; });
   const cidades = Object.keys(cont).sort((x,y)=> cont[y]-cont[x] || x.localeCompare(y));
-  const lista = filtro ? base.lista.filter(c=>chaveCid(c)===filtro) : base.lista;
+  const listaCid = filtro ? base.lista.filter(c=>chaveCid(c)===filtro) : base.lista;
+  // Bairros da cidade escolhida (ou de todas); se o bairro marcado não existe mais na lista, volta para "Todos"
+  const contB = {};
+  listaCid.forEach(c=>{ contB[c.bairro_rel] = (contB[c.bairro_rel]||0)+1; });
+  const bairros = Object.keys(contB).sort((x,y)=> contB[y]-contB[x] || x.localeCompare(y));
+  let filtroB = selB ? selB.value : '';
+  if(filtroB && !contB[filtroB]) filtroB = '';
+  const lista = filtroB ? listaCid.filter(c=>c.bairro_rel===filtroB) : listaCid;
   relatorioCache = { tipo:'clientes-inativos', lista };
+  const estSel = 'padding:6px 10px;border:1px solid var(--border);border-radius:8px;max-width:100%';
   el.innerHTML = `<div id="rel-inativos-wrap" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px">
       <label style="font-size:13px;font-weight:600">Cidade:</label>
-      <select id="rel-inativos-cidade" onchange="renderInativosCidade()" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;max-width:100%">
+      <select id="rel-inativos-cidade" onchange="renderInativosCidade()" style="${estSel}">
         <option value="">Todas (${base.lista.length})</option>
         ${cidades.map(k=>`<option value="${esc(k)}" ${k===filtro?'selected':''}>${esc(k)} (${cont[k]})</option>`).join('')}
       </select>
+      <label style="font-size:13px;font-weight:600">Bairro:</label>
+      <select id="rel-inativos-bairro" onchange="renderInativosCidade()" style="${estSel}">
+        <option value="">Todos (${listaCid.length})</option>
+        ${bairros.map(k=>`<option value="${esc(k)}" ${k===filtroB?'selected':''}>${esc(k)} (${contB[k]})</option>`).join('')}
+      </select>
       <span style="font-size:12px;color:var(--muted)">${lista.length} cliente(s) que NÃO compraram no período selecionado</span>
     </div>`+tabelaRel(
-    ['Cliente','Cidade','UF','Vendedor','Última Compra',{label:'Dias sem comprar',align:'center'}],
+    ['Cliente','Bairro','Cidade','UF','Vendedor','Última Compra',{label:'Dias sem comprar',align:'center'}],
     lista.map(c=>{
       const ult = c.ultima;
       const dias = ult ? Math.floor((new Date(base.refFim)-new Date(ult+'T00:00'))/(1000*60*60*24)) : '—';
-      return [esc(c.nome), esc(c.cidade_rel), esc(c.uf_rel||'—'), esc(c.vendedor_nome||'—'), ult?new Date(ult+'T00:00').toLocaleDateString('pt-BR'):'Nunca comprou', dias];
+      return [esc(c.nome), esc(c.bairro_rel), esc(c.cidade_rel), esc(c.uf_rel||'—'), esc(c.vendedor_nome||'—'), ult?new Date(ult+'T00:00').toLocaleDateString('pt-BR'):'Nunca comprou', dias];
     })
   );
 }
@@ -25556,7 +25947,16 @@ function exportarRelatorioExcel(){
     case 'vendas-periodo': dados = lista.map(g=>({'Período':g.chave,'Pedidos':g.qtdPedidos,'Clientes Únicos':g.clientes,'Itens':g.itens,'Total':g.total})); break;
     case 'vendas-vendedor': dados = lista.map(g=>({'Vendedor':g.nome,'Pedidos':g.qtd,'Total':g.total})); break;
     case 'vendas-cliente': dados = lista.map(g=>({'Cliente':g.nome,'Pedidos':g.qtd,'Última Compra':g.ultima,'Total':g.total})); break;
-    case 'clientes-inativos': dados = lista.map(g=>({'Cliente':g.nome,'Cidade':g.cidade_rel||g.cidade||'','UF':g.uf_rel||g.uf||'','Vendedor':g.vendedor_nome,'Última Compra':g.ultima||'Nunca'})); break;
+    case 'clientes-inativos': dados = lista.map(g=>{
+      // Endereço do cadastro novo; se o cliente está no formato antigo, separa o texto do endereço
+      const e = (g.logradouro || g.numero || g.bairro)
+        ? { logradouro:g.logradouro||'', numero:g.numero||'', complemento:g.complemento||'', bairro:g.bairro||'' }
+        : separarEnderecoCliente(g.endereco || g.end || '');
+      const cid = (g.cidade||'').trim(), uf = (g.uf||'').trim(), cep = String(g.cep||'').trim();
+      const rua = montarEnderecoCliente(e.logradouro, e.numero, e.complemento, '');
+      const completo = [montarEnderecoCliente(e.logradouro, e.numero, e.complemento, e.bairro), [cid, uf].filter(Boolean).join('/'), cep ? 'CEP '+cep : ''].filter(Boolean).join(' - ');
+      return {'Cliente':g.nome,'Endereço':rua,'Bairro':e.bairro||'','Cidade':cid,'UF':uf,'CEP':cep,'Endereço completo':completo,'Vendedor':g.vendedor_nome,'Última Compra':g.ultima||'Nunca'};
+    }); break;
     case 'vendas-produto': dados = lista.map(g=>g.tipo==='Insumo'
       ? ({'Tipo':'Insumo','Código':g.cod,'Produto/Insumo':g.nome,'Un':g.unidade,'Qtd':Number(g.qtd.toFixed(3)),'Consumo Produção':Number(g.producao.toFixed(3)),'OPs':g.nOps,'Consumo Garantia':Number(g.garantia.toFixed(3)),'Valor':Number(g.total.toFixed(2)),'Base do valor':'Custo atual'})
       : ({'Tipo':'Vendável','Código':g.cod,'Produto/Insumo':g.nome,'Un':'','Qtd':g.qtd,'Consumo Produção':'','OPs':'','Consumo Garantia':'','Valor':g.total,'Base do valor':'Faturamento'})); break;
