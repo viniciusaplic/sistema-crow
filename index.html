@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 12/11/2026 09:30\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 12/11/2026 09:30</span>
+            onclick="alert('Versão desta build: 12/11/2026 10:30\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 12/11/2026 10:30</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -1569,7 +1569,7 @@ tbody td{padding:11px 16px;font-size:14px}
             </select>
           </div>
           <div class="filtro-group">
-            <label>Cliente / cidade</label>
+            <label>Cliente / cidade / bairro</label>
             <input type="text" id="reat-f-busca" placeholder="Buscar..." oninput="reatPagina=1;renderReativacao(false)">
           </div>
           <div class="filtro-group" id="reat-f-vendedor-wrap" style="display:none">
@@ -22685,7 +22685,7 @@ async function renderReativacao(forcarLeitura){
       return { c, ult, diasSem: reatDiasDesde(ult), diasContato: reatDiasDesde(reatDataLocal(c.whats_ultimo_envio)) };
     });
     if(fVend) itens = itens.filter(i => i.c.vendedor_nome === fVend);
-    if(busca) itens = itens.filter(i => (i.c.nome||'').toLowerCase().includes(busca) || (i.c.cidade||'').toLowerCase().includes(busca));
+    if(busca) itens = itens.filter(i => (i.c.nome||'').toLowerCase().includes(busca) || (i.c.cidade||'').toLowerCase().includes(busca) || bairroDoCliente(i.c).toLowerCase().includes(busca));
     if(status === 'inativos') itens = itens.filter(i => i.ult && i.diasSem >= dias && i.c.whats_aceite !== 'nao');
     else if(status === 'sem_registro') itens = itens.filter(i => !i.ult && i.c.whats_aceite !== 'nao');
     else if(status === 'contatados') itens = itens.filter(i => i.c.whats_ultimo_envio);
@@ -22715,7 +22715,7 @@ async function renderReativacao(forcarLeitura){
       else btnWhats = '<span class="badge badge-gray">Sem telefone</span>';
       return `<div class="cliente-card">
         <div class="cliente-card-nome">${esc(c.nome)} ${aceite}</div>
-        <div class="cliente-card-info">📍 <span>${esc([c.cidade, c.uf].filter(Boolean).join('/') || '—')}</span>${veTodos ? ` · 👤 <span>${esc(c.vendedor_nome||'Sem vendedor')}</span>` : ''}</div>
+        <div class="cliente-card-info">📍 <span>${esc([bairroDoCliente(c), [c.cidade, c.uf].filter(Boolean).join('/')].filter(Boolean).join(' · ') || '—')}</span>${veTodos ? ` · 👤 <span>${esc(c.vendedor_nome||'Sem vendedor')}</span>` : ''}</div>
         <div class="cliente-card-info">📞 <span>${esc(c.telefone||'—')}</span></div>
         <div class="cliente-card-info">🛒 Última compra: <span>${ultTxt}</span></div>
         ${contatoTxt}
@@ -22822,10 +22822,18 @@ async function relClientesInativos(dataIni, dataFim, vendedorFiltro, el){
     lista: clientes.map(c=>({...c,
       ultima: ultimaCompra[c.nome]?.data, vendedor_ult: ultimaCompra[c.nome]?.vendedor,
       cidade_rel: (c.cidade||'').trim().toUpperCase() || '(SEM CIDADE)',
-      uf_rel: (c.uf||'').trim().toUpperCase()
+      uf_rel: (c.uf||'').trim().toUpperCase(),
+      bairro_rel: bairroDoCliente(c).toUpperCase() || '(SEM BAIRRO)'
     }))
   };
   renderInativosCidade(el);
+}
+
+// Bairro do cadastro; se o cliente ainda está no formato antigo, tira do texto do endereço
+function bairroDoCliente(c){
+  if(!c) return '';
+  if(c.logradouro || c.numero || c.bairro) return String(c.bairro||'').trim();
+  return String(separarEnderecoCliente(c.endereco || c.end || '').bairro || '').trim();
 }
 
 function renderInativosCidade(el){
@@ -22833,26 +22841,40 @@ function renderInativosCidade(el){
   const base = window._relInativos; if(!base || !el) return;
   const sel = document.getElementById('rel-inativos-cidade');
   const filtro = sel ? sel.value : '';
+  const selB = document.getElementById('rel-inativos-bairro');
   const chaveCid = c => c.uf_rel ? `${c.cidade_rel}/${c.uf_rel}` : c.cidade_rel;
   // Contagem por cidade para o seletor (maiores primeiro)
   const cont = {};
   base.lista.forEach(c=>{ const k = chaveCid(c); cont[k] = (cont[k]||0)+1; });
   const cidades = Object.keys(cont).sort((x,y)=> cont[y]-cont[x] || x.localeCompare(y));
-  const lista = filtro ? base.lista.filter(c=>chaveCid(c)===filtro) : base.lista;
+  const listaCid = filtro ? base.lista.filter(c=>chaveCid(c)===filtro) : base.lista;
+  // Bairros da cidade escolhida (ou de todas); se o bairro marcado não existe mais na lista, volta para "Todos"
+  const contB = {};
+  listaCid.forEach(c=>{ contB[c.bairro_rel] = (contB[c.bairro_rel]||0)+1; });
+  const bairros = Object.keys(contB).sort((x,y)=> contB[y]-contB[x] || x.localeCompare(y));
+  let filtroB = selB ? selB.value : '';
+  if(filtroB && !contB[filtroB]) filtroB = '';
+  const lista = filtroB ? listaCid.filter(c=>c.bairro_rel===filtroB) : listaCid;
   relatorioCache = { tipo:'clientes-inativos', lista };
+  const estSel = 'padding:6px 10px;border:1px solid var(--border);border-radius:8px;max-width:100%';
   el.innerHTML = `<div id="rel-inativos-wrap" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px">
       <label style="font-size:13px;font-weight:600">Cidade:</label>
-      <select id="rel-inativos-cidade" onchange="renderInativosCidade()" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;max-width:100%">
+      <select id="rel-inativos-cidade" onchange="renderInativosCidade()" style="${estSel}">
         <option value="">Todas (${base.lista.length})</option>
         ${cidades.map(k=>`<option value="${esc(k)}" ${k===filtro?'selected':''}>${esc(k)} (${cont[k]})</option>`).join('')}
       </select>
+      <label style="font-size:13px;font-weight:600">Bairro:</label>
+      <select id="rel-inativos-bairro" onchange="renderInativosCidade()" style="${estSel}">
+        <option value="">Todos (${listaCid.length})</option>
+        ${bairros.map(k=>`<option value="${esc(k)}" ${k===filtroB?'selected':''}>${esc(k)} (${contB[k]})</option>`).join('')}
+      </select>
       <span style="font-size:12px;color:var(--muted)">${lista.length} cliente(s) que NÃO compraram no período selecionado</span>
     </div>`+tabelaRel(
-    ['Cliente','Cidade','UF','Vendedor','Última Compra',{label:'Dias sem comprar',align:'center'}],
+    ['Cliente','Bairro','Cidade','UF','Vendedor','Última Compra',{label:'Dias sem comprar',align:'center'}],
     lista.map(c=>{
       const ult = c.ultima;
       const dias = ult ? Math.floor((new Date(base.refFim)-new Date(ult+'T00:00'))/(1000*60*60*24)) : '—';
-      return [esc(c.nome), esc(c.cidade_rel), esc(c.uf_rel||'—'), esc(c.vendedor_nome||'—'), ult?new Date(ult+'T00:00').toLocaleDateString('pt-BR'):'Nunca comprou', dias];
+      return [esc(c.nome), esc(c.bairro_rel), esc(c.cidade_rel), esc(c.uf_rel||'—'), esc(c.vendedor_nome||'—'), ult?new Date(ult+'T00:00').toLocaleDateString('pt-BR'):'Nunca comprou', dias];
     })
   );
 }
@@ -25824,7 +25846,16 @@ function exportarRelatorioExcel(){
     case 'vendas-periodo': dados = lista.map(g=>({'Período':g.chave,'Pedidos':g.qtdPedidos,'Clientes Únicos':g.clientes,'Itens':g.itens,'Total':g.total})); break;
     case 'vendas-vendedor': dados = lista.map(g=>({'Vendedor':g.nome,'Pedidos':g.qtd,'Total':g.total})); break;
     case 'vendas-cliente': dados = lista.map(g=>({'Cliente':g.nome,'Pedidos':g.qtd,'Última Compra':g.ultima,'Total':g.total})); break;
-    case 'clientes-inativos': dados = lista.map(g=>({'Cliente':g.nome,'Cidade':g.cidade_rel||g.cidade||'','UF':g.uf_rel||g.uf||'','Vendedor':g.vendedor_nome,'Última Compra':g.ultima||'Nunca'})); break;
+    case 'clientes-inativos': dados = lista.map(g=>{
+      // Endereço do cadastro novo; se o cliente está no formato antigo, separa o texto do endereço
+      const e = (g.logradouro || g.numero || g.bairro)
+        ? { logradouro:g.logradouro||'', numero:g.numero||'', complemento:g.complemento||'', bairro:g.bairro||'' }
+        : separarEnderecoCliente(g.endereco || g.end || '');
+      const cid = (g.cidade||'').trim(), uf = (g.uf||'').trim(), cep = String(g.cep||'').trim();
+      const rua = montarEnderecoCliente(e.logradouro, e.numero, e.complemento, '');
+      const completo = [montarEnderecoCliente(e.logradouro, e.numero, e.complemento, e.bairro), [cid, uf].filter(Boolean).join('/'), cep ? 'CEP '+cep : ''].filter(Boolean).join(' - ');
+      return {'Cliente':g.nome,'Endereço':rua,'Bairro':e.bairro||'','Cidade':cid,'UF':uf,'CEP':cep,'Endereço completo':completo,'Vendedor':g.vendedor_nome,'Última Compra':g.ultima||'Nunca'};
+    }); break;
     case 'vendas-produto': dados = lista.map(g=>g.tipo==='Insumo'
       ? ({'Tipo':'Insumo','Código':g.cod,'Produto/Insumo':g.nome,'Un':g.unidade,'Qtd':Number(g.qtd.toFixed(3)),'Consumo Produção':Number(g.producao.toFixed(3)),'OPs':g.nOps,'Consumo Garantia':Number(g.garantia.toFixed(3)),'Valor':Number(g.total.toFixed(2)),'Base do valor':'Custo atual'})
       : ({'Tipo':'Vendável','Código':g.cod,'Produto/Insumo':g.nome,'Un':'','Qtd':g.qtd,'Consumo Produção':'','OPs':'','Consumo Garantia':'','Valor':g.total,'Base do valor':'Faturamento'})); break;
