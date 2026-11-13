@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 12/11/2026 16:20\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 12/11/2026 16:20</span>
+            onclick="alert('Versão desta build: 13/11/2026 15:55\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 13/11/2026 15:55</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -673,6 +673,7 @@ tbody td{padding:11px 16px;font-size:14px}
         <div class="section-title">Produtos &amp; Insumos</div>
         <div class="search-box" style="align-items:center;gap:8px;flex-wrap:wrap">
           <div id="btn-tabela-prod-wrap"></div>
+          <button class="btn btn-outline btn-sm" onclick="exportarTabelaPrecosExcel()" title="Baixa Excel com código, nome, preço à prazo e preço à vista dos produtos vendáveis ativos">💰 Exportar Tabela de Preços</button>
           <button class="btn btn-outline btn-sm" onclick="forcarAtualizacaoFotos()" title="Força recarregar todas as fotos, útil após trocar imagens no Cloudinary">🔄 Atualizar Fotos</button>
           <input type="text" class="search-input" id="search-produtos" placeholder="Buscar produto..." oninput="paginaProdutos=1;renderProdutos()">
           <select id="filter-estoque" onchange="paginaProdutos=1;renderProdutos()" class="search-input" style="width:auto">
@@ -11374,6 +11375,35 @@ async function renderMovimentosEstoque(){
 }
 
 // ── Exporta o estoque atual (produtos + insumos) para Excel ──
+// Tabela de preços: Preço à Prazo = preco_venda, Preço à Vista = preco_minimo.
+// Só vendáveis ativos com preço válido (itens travados p/ venda — venda abaixo do mínimo — ficam de fora).
+// Usa PRODUTOS_DB já em memória: só lê o Firebase se ainda não tiver carregado.
+async function exportarTabelaPrecosExcel(){
+  if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
+  const r2 = v => Math.round((Number(v)||0)*100)/100;
+  const dados = PRODUTOS_DB
+    .filter(p => p && p.codigo && !p.inativo)
+    .filter(p => r2(p.preco_venda) > 0 && r2(p.preco_venda) >= r2(p.preco_minimo))
+    .sort((a,b) => String(a.codigo).localeCompare(String(b.codigo), 'pt-BR', {numeric:true}))
+    .map(p => ({
+      'Código': p.codigo,
+      'Nome': (p.nome||'').replace(/\s+/g,' ').trim(),
+      'Preço à Prazo': r2(p.preco_venda),
+      'Preço à Vista': r2(p.preco_minimo) > 0 ? r2(p.preco_minimo) : r2(p.preco_venda)
+    }));
+  if(!dados.length){ toast('Nenhum produto com preço para exportar','error'); return; }
+  const ws = XLSX.utils.json_to_sheet(dados);
+  ws['!cols'] = [{wch:10},{wch:90},{wch:15},{wch:15}];
+  for(let i=2;i<=dados.length+1;i++){
+    ['C','D'].forEach(c=>{ const cel = ws[c+i]; if(cel) cel.z = '"R$" #,##0.00'; });
+  }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Tabela de Preços');
+  const dataHoje = agora().toISOString().split('T')[0];
+  XLSX.writeFile(wb, `tabela_precos_crow_${dataHoje}.xlsx`);
+  toast(`✓ Tabela de preços gerada com ${dados.length} produtos`,'success');
+}
+
 async function exportarEstoqueExcel(){
   if(!podeVer('estoque')){ toast('Acesso restrito — sem permissão nesta área','error'); return; }
   if(!INSUMOS_DB.length) await carregarInsumosFirebase();
