@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 13/11/2026 15:55\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 13/11/2026 15:55</span>
+            onclick="alert('Versão desta build: 16/11/2026 11:15\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 16/11/2026 11:15</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -3193,6 +3193,47 @@ function enviarMedidorConsumo(){
 setInterval(enviarMedidorConsumo, 5 * 60 * 1000);
 window.addEventListener('pagehide', enviarMedidorConsumo);
 
+// Move o log_bipagem que está DENTRO dos pedidos para log_bipagem/<pedido>.
+// Por pedido, numa gravação atômica: copia cada linha do log pro lugar novo e apaga só o
+// campo log_bipagem do pedido. Itens, qtd_bipada, baixa_itens, status: nada disso é tocado.
+// Pode rodar de novo sem problema (pedido sem log é pulado). Lê os pedidos em lotes de 100.
+async function migrarLogBipagem(){
+  if(!usuarioLogado || !usuarioLogado.admin){ toast('Acesso restrito a administradores', 'error'); return; }
+  if(!confirm('Mover o log de bipagem de todos os pedidos para fora do pedido?\n\nFaça o BACKUP do banco antes (console do Firebase → Realtime Database → ⋮ → Exportar JSON).\n\nNão mexe em itens, quantidades, baixa nem status. Pode levar alguns minutos — não feche a aba.')) return;
+  const st = document.getElementById('medidor-migracao-status');
+  const mostrar = t => { if(st) st.textContent = t; };
+  let ultimaChave = null, lidos = 0, migrados = 0, linhas = 0;
+  try {
+    while(true){
+      let q = db.ref('pedidos').orderByKey();
+      q = ultimaChave ? q.startAt(ultimaChave).limitToFirst(101) : q.limitToFirst(100);
+      const v = (await q.once('value')).val() || {};
+      let chaves = Object.keys(v).sort();
+      if(ultimaChave) chaves = chaves.filter(k => k !== ultimaChave);
+      if(!chaves.length) break;
+      const upd = {};
+      chaves.forEach(id => {
+        const log = v[id] && v[id].log_bipagem;
+        if(log && typeof log === 'object'){
+          Object.keys(log).forEach(k => { upd['log_bipagem/'+id+'/'+k] = log[k]; linhas++; });
+          upd['pedidos/'+id+'/log_bipagem'] = null;
+          migrados++;
+        }
+      });
+      if(Object.keys(upd).length) await db.ref().update(upd);
+      lidos += chaves.length;
+      ultimaChave = chaves[chaves.length-1];
+      mostrar(`Processando... ${lidos} pedidos lidos, ${migrados} com log movido.`);
+    }
+    mostrar(`✅ Concluído: ${lidos} pedidos lidos, ${migrados} pedidos com log movido (${linhas} bips).`);
+    toast('Log de bipagem movido com sucesso', 'success');
+  } catch(e){
+    console.error(e);
+    mostrar(`⚠️ Parou com erro depois de ${lidos} pedidos (${migrados} movidos). Pode clicar de novo para continuar.`);
+    toast('Erro na migração: ' + e.message, 'error');
+  }
+}
+
 async function abrirMedidorConsumo(){
   if(!usuarioLogado || !usuarioLogado.admin){ toast('Acesso restrito a administradores', 'error'); return; }
   enviarMedidorConsumo();
@@ -3226,7 +3267,9 @@ async function abrirMedidorConsumo(){
       <label style="font-size:13px;font-weight:600">Dia:</label>
       <input type="date" id="medidor-dia" value="${dia}" onchange="abrirMedidorConsumo()" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px">
       <span style="font-size:13px">Total baixado: <strong>${mb(totalGeral)} MB</strong></span>
+      <button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="migrarLogBipagem()">🧹 Mover log de bipagem</button>
     </div>
+    <div id="medidor-migracao-status" style="font-size:12px;font-weight:600;margin-bottom:8px"></div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Tamanho aproximado dos dados baixados. Cada navegador envia o resumo a cada 5 min (ou ao fechar a aba).</div>
     ${lista.length ? tabelaRel(
       ['Função / tela', 'Caminho', { label:'Leituras', align:'center' }, { label:'MB total', align:'right' }, { label:'MB média', align:'right' }, 'Usuários'],
@@ -5945,8 +5988,12 @@ async function verPedido(id){
 }
 
 async function abrirLogBipagem(pedidoId){
-  const snap = await db.ref('pedidos/'+pedidoId+'/log_bipagem').once('value');
-  const dados = snap.val() || {};
+  // Log novo fica em log_bipagem/<pedido>; pedidos antigos ainda não migrados têm dentro do pedido
+  const [snapNovo, snapAntigo] = await Promise.all([
+    db.ref('log_bipagem/'+pedidoId).once('value'),
+    db.ref('pedidos/'+pedidoId+'/log_bipagem').once('value')
+  ]);
+  const dados = { ...(snapAntigo.val() || {}), ...(snapNovo.val() || {}) };
   const log = Object.values(dados).sort((a,b)=>a.ts-b.ts);
 
   const snapPedido = await db.ref('pedidos/'+pedidoId).once('value');
@@ -16164,7 +16211,15 @@ function _atualizarIndicadorSyncBip(){
 }
 function gravarBipagemEmSegundoPlano(pedidoId, upd){
   _bipGravandoQtd++; _atualizarIndicadorSyncBip();
-  const w = db.ref('pedidos/'+pedidoId).update(upd)
+  // O log de bipagem fica FORA do pedido (log_bipagem/<pedido>/...): ele era 2/3 do tamanho
+  // dos pedidos e todas as telas baixavam junto. Contagem (no pedido) e log continuam numa
+  // ÚNICA gravação atômica na raiz — ou grava os dois, ou nenhum.
+  const updRaiz = {};
+  Object.keys(upd).forEach(k => {
+    if(k.startsWith('log_bipagem/')) updRaiz['log_bipagem/'+pedidoId+'/'+k.slice('log_bipagem/'.length)] = upd[k];
+    else updRaiz['pedidos/'+pedidoId+'/'+k] = upd[k];
+  });
+  const w = db.ref().update(updRaiz)
     .catch(async e => {
       console.error(e);
       toast('⚠️ Falha ao salvar um bipe — a tela foi recarregada, confira a contagem','error');
@@ -16281,7 +16336,7 @@ async function _processarBipagemAgora(codigoLido, jaRecarregou){
     p._itensContiguos = true;
   }
   // Registra o timestamp exato dessa unidade bipada — usado para localizar a gravação da câmera
-  const logKey = db.ref('pedidos/'+p.id+'/log_bipagem').push().key;
+  const logKey = db.ref('log_bipagem/'+p.id).push().key;
   upd['log_bipagem/'+logKey] = {
     codigo: itemAtual.codigo,
     nome: itemAtual.nome,
