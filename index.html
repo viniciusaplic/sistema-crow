@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 16/11/2026 11:15\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 16/11/2026 11:15</span>
+            onclick="alert('Versão desta build: 16/11/2026 11:15\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 17/11/2026 09:56</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -7925,6 +7925,52 @@ function pisoItem(item){
   return pm;
 }
 
+// Trava contra erro de digitação no preço (ex.: 493,00 no lugar de 4,93).
+// Preço acima de 2x o Preço de Venda do cadastro pede confirmação. Não lê nada do
+// Firebase: usa o cadastro que já está em memória (PRODUTOS_DB).
+const LIMITE_PRECO_ALTO = 2;
+function precoTabelaItem(item){
+  if(!item) return 0;
+  const p = PRODUTOS_DB.find(x => x.codigo === item.codigo);
+  return Number(p && p.preco_venda) || 0;
+}
+function precoAcimaDoLimite(item, preco){
+  const tab = precoTabelaItem(item);
+  return tab > 0 && Number(preco) > tab * LIMITE_PRECO_ALTO + 0.001;
+}
+// Retorna true se pode seguir. Guarda no item o valor confirmado, pra não perguntar
+// de novo pelo mesmo preço (e pra ficar registrado no pedido).
+function confirmarPrecoAlto(item, preco){
+  if(!precoAcimaDoLimite(item, preco)) return true;
+  if(item.preco_alto_confirmado != null && Math.abs(Number(item.preco_alto_confirmado) - Number(preco)) < 0.001) return true;
+  const tab = precoTabelaItem(item);
+  const ok = confirm(`⚠️ PREÇO MUITO ACIMA DA TABELA\n\n"${item.nome}" (${item.codigo})\nPreço digitado: ${fmtMoeda(preco)}\nPreço de tabela: ${fmtMoeda(tab)}\n\nConfira se não digitou a vírgula no lugar errado.\n\nOK = o preço está certo, manter\nCancelar = voltar e corrigir`);
+  if(ok) item.preco_alto_confirmado = Number(preco);
+  return ok;
+}
+function confirmarPrecosAltosPedido(){
+  for(const it of pedidoAtual.itens){
+    if(!confirmarPrecoAlto(it, it.preco)) return false;
+  }
+  return true;
+}
+// Linhas pro histórico: itens com preço acima da tabela que são novos ou tiveram o
+// preço mudado (itensAntigos vazio = pedido/orçamento novo).
+function linhasPrecoAcimaTabela(itens, itensAntigos){
+  const mapAnt = {}; (itensAntigos||[]).forEach(i => { mapAnt[i.codigo||i.nome] = i; });
+  const linhas = [];
+  (itens||[]).forEach(i => {
+    const tab = precoTabelaItem(i);
+    const preco = Number(i.preco)||0;
+    if(!(tab > 0) || preco <= tab + 0.001) return;
+    const ant = mapAnt[i.codigo||i.nome];
+    if(ant && Math.abs((Number(ant.preco)||0) - preco) < 0.001) return;
+    if(precoAcimaDoLimite(i, preco)) linhas.push(`⚠️ ${esc(i.nome)}: preço ${fmtMoeda(preco)} — mais de ${LIMITE_PRECO_ALTO}x a tabela (${fmtMoeda(tab)}), confirmado no aviso`);
+    else if(!ant) linhas.push(`${esc(i.nome)}: preço digitado acima da tabela — ${fmtMoeda(preco)} (tabela ${fmtMoeda(tab)})`);
+  });
+  return linhas;
+}
+
 // Faixas de quantidade do item, da menor para a maior.
 // Um mesmo código pode ter várias linhas na campanha: 6 un. a R$ 10,00 e
 // 12 un. a R$ 8,50, por exemplo. Vale sempre a maior faixa já atingida.
@@ -8502,6 +8548,11 @@ function toggleModoDescStaging(){
 function incluirItemEstagiado(){
   if(!itemEmEstagio) return;
   atualizarItemStaging(); // garante que o último valor digitado foi capturado
+  if(!confirmarPrecoAlto(itemEmEstagio, itemEmEstagio.preco)){
+    const inp = document.getElementById('staging-preco');
+    if(inp){ inp.focus(); inp.select(); }
+    return;
+  }
   pedidoAtual.itens.push({ ...itemEmEstagio });
   itemEmEstagio = null;
   renderItemStaging();
@@ -8643,6 +8694,7 @@ function atualizarPreco(idx,val){
     renderItens();
     return;
   }
+  if(!confirmarPrecoAlto(item, v)){ renderItens(); return; }
   // Preço digitado à mão em item de campanha: a campanha para de mandar nesse item,
   // senão o recálculo automático sobrescreveria o valor que acabou de ser digitado.
   if(item.promo_ativa && Math.abs(v - (Number(item.promo_preco)||0)) > 0.001){
@@ -8839,9 +8891,14 @@ function gerarResumoAlteracoesPedido(original, itensNovos, formaNova, condicaoNo
     const chave = i.codigo||i.nome;
     const antigo = mapAntigo[chave];
     if(!antigo){
-      mudancas.push(`+ Item adicionado: ${esc(i.nome)} (qtd ${i.qtd})`);
-    } else if(Number(antigo.qtd) !== Number(i.qtd)){
-      mudancas.push(`± ${esc(i.nome)}: quantidade ${antigo.qtd} → ${i.qtd}`);
+      mudancas.push(`+ Item adicionado: ${esc(i.nome)} (qtd ${i.qtd} · ${fmtMoeda(i.preco)})`);
+    } else {
+      if(Number(antigo.qtd) !== Number(i.qtd))
+        mudancas.push(`± ${esc(i.nome)}: quantidade ${antigo.qtd} → ${i.qtd}`);
+      if(Math.abs((Number(antigo.preco)||0) - (Number(i.preco)||0)) > 0.001)
+        mudancas.push(`± ${esc(i.nome)}: preço ${fmtMoeda(antigo.preco)} → ${fmtMoeda(i.preco)}`);
+      if(Math.abs((Number(antigo.desconto_item)||0) - (Number(i.desconto_item)||0)) > 0.001)
+        mudancas.push(`± ${esc(i.nome)}: desconto do item ${(Number(antigo.desconto_item)||0).toFixed(1)}% → ${(Number(i.desconto_item)||0).toFixed(1)}%`);
     }
   });
   itensAntigos.forEach(i=>{
@@ -8873,6 +8930,7 @@ async function confirmarPedido(){
     alert(`🚫 Não é possível salvar: "${violacao.item.nome}" ficaria em ${fmtMoeda(violacao.precoFinal)}, abaixo do preço mínimo de ${fmtMoeda(violacao.piso != null ? violacao.piso : violacao.item.preco_minimo)}.\n\nAjuste o preço/desconto ou fale com o admin.`);
     return;
   }
+  if(!confirmarPrecosAltosPedido()) return;
 
   const forma = document.getElementById('pedido-forma').value;
   const condicao = document.getElementById('pedido-condicao').value;
@@ -9045,6 +9103,7 @@ async function confirmarPedido(){
       const obsAtual = document.getElementById('pedido-obs').value;
       const mudancas = gerarResumoAlteracoesPedido(pedidoOriginal, pedidoAtual.itens, forma, condicao, obsAtual, dg, pedidoAtual.credito_aplicado);
       if(clienteTrocado) mudancas.unshift(`👤 Cliente: ${esc(pedidoOriginal.cliente_nome||'—')} → ${esc(c.nome)}`);
+      mudancas.push(...linhasPrecoAcimaTabela(pedidoAtual.itens, pedidoOriginal.itens).filter(l => l.startsWith('⚠️')));
       if((pedidoOriginal.vendedor_id||null) !== (vendedorIdFinal||null)) mudancas.push(`Vendedor: ${esc(pedidoOriginal.vendedor_nome||'—')} → ${esc(vendedorNomeFinal||'—')}`);
       if(mudancas.length){
         historicoEdicoes = [...historicoEdicoes, {
@@ -9067,7 +9126,7 @@ async function confirmarPedido(){
       historicoEdicoes = [{
         ts: agoraTs(), usuario_nome: usuarioLogado.nome,
         usuario_tipo: usuarioLogado.admin ? 'admin' : (usuarioLogado.tipo || 'vendedor'),
-        alteracoes: ['Pedido criado']
+        alteracoes: ['Pedido criado', ...linhasPrecoAcimaTabela(pedidoAtual.itens, [])]
       }];
     }
 
@@ -9195,6 +9254,7 @@ async function salvarComoOrcamento(){
     alert(`🚫 Não é possível salvar: "${violacao.item.nome}" ficaria em ${fmtMoeda(violacao.precoFinal)}, abaixo do preço mínimo de ${fmtMoeda(violacao.piso != null ? violacao.piso : violacao.item.preco_minimo)}.\n\nAjuste o preço/desconto ou fale com o admin.`);
     return;
   }
+  if(!confirmarPrecosAltosPedido()) return;
 
   // Trava final: o crédito aplicado não pode passar do valor real do orçamento
   if(pedidoAtual.credito_aplicado > 0){
@@ -9246,7 +9306,7 @@ async function salvarComoOrcamento(){
       ? (dadosOriginais.historico_edicoes || [])
       : [{ ts: agoraTs(), usuario_nome: usuarioLogado.nome,
            usuario_tipo: usuarioLogado.admin ? 'admin' : (usuarioLogado.tipo || 'vendedor'),
-           alteracoes: ['Orçamento criado'] }];
+           alteracoes: ['Orçamento criado', ...linhasPrecoAcimaTabela(pedidoAtual.itens, [])] }];
 
     const orcamento = {
       ...dadosOriginais,
