@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 24/11/2026 14:15\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 24/11/2026 14:15</span>
+            onclick="alert('Versão desta build: 24/11/2026 17:45\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 24/11/2026 17:45</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -406,6 +406,7 @@ tbody td{padding:11px 16px;font-size:14px}
         <div class="nav-tab" data-tab="compras" onclick="showTab('compras',this)">🛒 Pedidos de Compra</div>
         <div class="nav-tab" data-tab="fornecedores" onclick="showTab('fornecedores',this)">🚚 Fornecedores</div>
         <div class="nav-tab" data-tab="estoque" onclick="showTab('estoque',this)">📊 Estoque</div>
+        <div class="nav-tab" data-tab="importacoes" onclick="showTab('importacoes',this)">🌏 Importações</div>
       </div>
     </div>
 
@@ -1710,6 +1711,78 @@ tbody td{padding:11px 16px;font-size:14px}
     </div>
 
     <!-- ESTOQUE -->
+    <!-- IMPORTAÇÕES (só admin) — Mapa de SKUs importados, alertas, chegadas e pedidos de importação -->
+    <div id="tab-importacoes" style="display:none">
+      <style>
+        #tab-importacoes .im-linha, #imp-modal .im-linha{background:var(--card);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden}
+        #tab-importacoes .im-topo{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:10px 14px;cursor:pointer}
+        #tab-importacoes .im-topo:hover{background:var(--bg)}
+        #tab-importacoes .im-topo > div{min-width:0}
+        #tab-importacoes .im-topo span:not(.im-badge){display:block;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis}
+        #tab-importacoes .im-cab{display:flex;gap:6px 14px;padding:0 14px 6px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+        #tab-importacoes .im-cab > div{font-size:11px}
+        #tab-importacoes .im-topo span.im-mlbl{display:none}
+        #tab-importacoes .im-c-sku{flex:0 0 96px}
+        #tab-importacoes .im-c-desc{flex:1 1 220px}
+        #tab-importacoes .im-c-cob{flex:0 0 84px;text-align:center}
+        #tab-importacoes .im-c-cheg{flex:0 0 150px;font-size:13px}
+        #tab-importacoes .im-c-ped{flex:0 0 150px;text-align:center}
+        #tab-importacoes .im-c-sug{flex:0 0 170px;text-align:right}
+        #tab-importacoes .im-seta{flex:0 0 auto;margin-left:auto;color:var(--muted);transition:transform .15s}
+        #tab-importacoes .im-linha.aberta .im-seta{transform:rotate(180deg)}
+        #tab-importacoes .im-det{display:none;border-top:1px solid var(--border);padding:12px 14px;background:var(--bg)}
+        #tab-importacoes .im-linha.aberta .im-det{display:block}
+        #tab-importacoes .im-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px 18px}
+        #tab-importacoes .im-rot{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+        #tab-importacoes .im-val{font-size:14px;margin-top:2px;word-break:break-word}
+        #tab-importacoes .im-obs{margin-top:10px;padding:6px 10px;background:#fffbeb;border-left:3px solid #fde68a;border-radius:0 4px 4px 0;font-size:13px}
+        #tab-importacoes .im-acoes{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+        .im-resumo{display:flex;gap:18px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--muted);margin-bottom:10px}
+        .im-resumo strong{color:var(--text)}
+        .im-vazio{text-align:center;color:var(--muted);padding:28px;background:var(--card);border:1px solid var(--border);border-radius:10px}
+        .im-sec{font-family:'Syne',sans-serif;font-weight:700;font-size:15px;margin:18px 0 8px}
+        .im-badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:12px;font-weight:700;white-space:nowrap}
+        .im-aviso{padding:10px 14px;border:1px solid #fde68a;background:#fffbeb;border-radius:8px;font-size:13px;margin-bottom:10px}
+        .im-tab-wrap{overflow-x:auto}
+        .im-tab{width:100%;border-collapse:collapse;font-size:12px}
+        .im-tab th{background:var(--primary);color:rgba(255,255,255,.85);padding:6px;font-weight:600}
+        .im-tab td{padding:6px;text-align:center;border-bottom:1px solid var(--border)}
+        @media (max-width:700px){
+          #tab-importacoes .im-cab{display:none}
+          #tab-importacoes .im-c-desc{flex-basis:100%;order:2}
+          #tab-importacoes .im-c-sku{order:1}
+          #tab-importacoes .im-c-cob,#tab-importacoes .im-c-cheg,#tab-importacoes .im-c-ped,#tab-importacoes .im-c-sug{order:3;flex-basis:auto}
+          #tab-importacoes .im-seta{order:1}
+          #tab-importacoes .im-topo span.im-mlbl{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px}
+          #tab-importacoes .im-c-cob,#tab-importacoes .im-c-ped{text-align:left}
+        }
+      </style>
+      <div class="section-header">
+        <div class="section-title">🌏 Importações</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="renderImportacoes(true)">🔄 Atualizar</button>
+          <button class="btn btn-outline btn-sm" onclick="impRecalcularCmm()">🔄 Recalcular CMM</button>
+          <button class="btn btn-primary btn-sm" onclick="impAbrirImportarPlanilha()">📥 Importar pedido do fornecedor</button>
+        </div>
+      </div>
+      <div class="dashboard-cards" id="imp-cards" style="margin-bottom:14px"></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+        <button class="btn btn-sm btn-secondary" id="imp-subaba-mapa" onclick="impTrocarSubaba('mapa')">📊 Mapa de SKUs</button>
+        <button class="btn btn-sm btn-outline" id="imp-subaba-alertas" onclick="impTrocarSubaba('alertas')">🚨 Alertas de Reposição</button>
+        <button class="btn btn-sm btn-outline" id="imp-subaba-chegadas" onclick="impTrocarSubaba('chegadas')">📅 Chegadas Previstas</button>
+        <button class="btn btn-sm btn-outline" id="imp-subaba-pedidos" onclick="impTrocarSubaba('pedidos')">🚢 Pedidos de Importação</button>
+        <button class="btn btn-sm btn-outline" id="imp-subaba-skus" onclick="impTrocarSubaba('skus')">⚙️ SKUs da Análise</button>
+      </div>
+      <div class="filtros-bar" id="imp-filtros">
+        <div class="filtros-inner open">
+          <div class="filtro-group"><label>Buscar</label><input type="text" id="imp-f-busca" placeholder="SKU, descrição ou cód. fornecedor" oninput="impDesenhar()"></div>
+          <div class="filtro-group"><label>Tipo</label><select id="imp-f-tipo" onchange="impDesenhar()"><option value="">Todos</option><option value="insumo">Insumo</option><option value="acabado">Acabado</option><option value="ambos">Ambos</option></select></div>
+          <div class="filtro-group"><label>Situação</label><select id="imp-f-sit" onchange="impDesenhar()"><option value="">Todas</option><option value="alerta">Em alerta (cob. proj. &lt; 5m)</option><option value="critico">Cob. atual &lt; 2m</option><option value="transito">Com pedido em trânsito</option><option value="semcmm">Sem CMM</option></select></div>
+        </div>
+      </div>
+      <div id="imp-conteudo"></div>
+    </div>
+
     <div id="tab-estoque" style="display:none">
       <div class="section-header">
         <div class="section-title">📊 Movimentação de Estoque</div>
@@ -2690,6 +2763,13 @@ tbody td{padding:11px 16px;font-size:14px}
   </div>
 </div>
 
+<div class="modal-overlay" id="imp-modal">
+  <div class="modal" style="max-width:900px">
+    <button class="modal-close" onclick="fecharModal('imp-modal')">×</button>
+    <div id="imp-modal-conteudo"></div>
+  </div>
+</div>
+
 <!-- MODAL REGISTRAR DEFEITO (GARANTIA) -->
 <div class="modal-overlay" id="modal-defeito">
   <div class="modal" style="max-width:560px">
@@ -3444,6 +3524,8 @@ function podeLancarOP(){
 function podeVer(modulo){
   if(!usuarioLogado) return false;
   if(usuarioLogado.admin) return true;
+  // Importações: só admin, sempre.
+  if(modulo==='importacoes') return false;
   // Fretes e Entregas: só admin e quem tem "Controla fretes e entregas" no cadastro,
   // qualquer que seja o tipo do usuário. Vendedor vê só a previsão dentro do pedido.
   if(modulo==='fretes') return usuarioLogado.acesso_fretes === true;
@@ -4274,6 +4356,7 @@ function showTab(tab, el){
   if(tab==='coleta') renderColeta();
   if(tab==='recebimento'){ RECEB_F_STATUS = 'transito'; RECEB_F_FORNEC = ''; renderRecebimento(false); }
   if(tab==='fretes') renderFretes(false);
+  if(tab==='importacoes' && typeof renderImportacoes === 'function') renderImportacoes(false);
   if(tab==='financeiro') renderFinanceiro();
   if(tab==='estoque'){
     const btnLancar = document.getElementById('btn-lancar-movimento');
@@ -12483,6 +12566,13 @@ async function cancelarPedidoCompra(id){
     toast('Não é possível cancelar um pedido já recebido/concluído (o estoque já foi movimentado). Edite o status manualmente se necessário.', 'error');
     return;
   }
+  if(c.status === 'importacao'){
+    const regImp = (await db.ref('importacoes/'+id).once('value')).val();
+    if(regImp && (regImp.chegadas || regImp.retiradas)){
+      toast('Este pedido de importação já tem chegada no fornecedor ou retirada registrada (Compras ▸ Importações) — não dá para cancelar.', 'error');
+      return;
+    }
+  }
 
   if(!confirm(`Cancelar o pedido de compra de "${c.fornecedor}"?\n\nEsta ação não pode ser desfeita.`)) return;
 
@@ -12757,6 +12847,8 @@ async function _salvarPedidoCompraInterno(){
 
   const statusAnterior = compraAtual.status;
   const novoStatus = document.getElementById('compra-status').value;
+  const bloqImp = bloqueioStatusImportacao(statusAnterior, novoStatus);
+  if(bloqImp){ toast(bloqImp,'error'); return; }
   // Concluído só depois de Recebido — é no Recebido que o estoque entra. Pular direto
   // pra Concluído deixaria a mercadoria fora do estoque.
   if(novoStatus === 'concluido' && !['recebido','concluido'].includes(statusAnterior)){
@@ -13052,6 +13144,16 @@ const STATUS_COMPRA = {
   concluido:  {label:'Concluído',     cor:'#15803d', bg:'#d1fae5'},
 };
 function statusInfoCompra(status){ return STATUS_COMPRA[status] || STATUS_COMPRA.negociacao; }
+// Pedido de importação nunca chega inteiro no nosso estoque: chega no fornecedor no Brasil e
+// vem aos poucos, pelos pedidos de retirada (Compras ▸ Importações). Por isso não pode ir para
+// Recebido — nem para Em Trânsito/Em Separação, que levariam ao Recebido com a quantidade cheia.
+// Concluído é feito pelo módulo Importações quando o saldo zera. Em Negociação continua liberado
+// (correção de status lançado errado).
+function bloqueioStatusImportacao(statusAnterior, novoStatus){
+  if(statusAnterior !== 'importacao') return null;
+  if(!['recebido','transito','separacao','concluido'].includes(novoStatus)) return null;
+  return `Pedido de importação não pode ir para "${statusInfoCompra(novoStatus).label}". A mercadoria entra no estoque pelos pedidos de retirada (Compras ▸ 🌏 Importações), e o pedido de importação é concluído sozinho quando o saldo zera.`;
+}
 
 async function exportarComprasExcel(){
   if(!temPermissaoEditar('compras')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
@@ -13347,8 +13449,9 @@ async function abrirDetalheCompra(id){
   const idxAtual = ordem.indexOf(c.status);
   // "Em Importação (China)" não faz parte do fluxo doméstico (sem separação/trânsito local) —
   // ao avançar, vai direto para Recebido
-  const proximoStatus = c.status === 'importacao' ? 'recebido'
+  const proximoStatus = c.status === 'importacao' ? null
     : (idxAtual >= 0 && idxAtual < ordem.length-1 ? ordem[idxAtual+1] : null);
+  const painelImportacao = (typeof impHtmlPainelCompra === 'function') ? await impHtmlPainelCompra({ ...c, id }) : '';
 
   let botaoAvancar = '';
   if(proximoStatus === 'recebido'){
@@ -13393,13 +13496,14 @@ async function abrirDetalheCompra(id){
       <select id="compra-detalhe-status-select" onchange="alterarStatusManualCompra('${c.id}', this.value)" style="border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:12px">
         <option value="">Alterar status...</option>
         <option value="negociacao" ${c.status==='negociacao'?'disabled':''}>Em Negociação</option>
-        <option value="separacao" ${c.status==='separacao'?'disabled':''}>Em Separação</option>
+        <option value="separacao" ${c.status==='separacao'||c.status==='importacao'?'disabled':''}>Em Separação</option>
         <option value="importacao" ${c.status==='importacao'?'disabled':''}>Importação</option>
-        <option value="transito" ${c.status==='transito'?'disabled':''}>Em Trânsito</option>
-        <option value="recebido" ${c.status==='recebido'?'disabled':''}>Recebido</option>
+        <option value="transito" ${c.status==='transito'||c.status==='importacao'?'disabled':''}>Em Trânsito</option>
+        <option value="recebido" ${c.status==='recebido'||c.status==='importacao'?'disabled':''}>Recebido${c.status==='importacao'?' (importação: pelas retiradas)':''}</option>
         <option value="concluido" ${c.status!=='recebido'?'disabled':''}>Concluído${c.status!=='recebido'&&c.status!=='concluido'?' (só após Recebido)':''}</option>
       </select>
     </div>
+    ${painelImportacao}
     <div class="dashboard-cards" style="margin-bottom:16px">
       <div class="dash-card"><div class="dash-card-label">Data do Pedido</div><div class="dash-card-value" style="font-size:15px">${c.data?new Date(c.data+'T00:00').toLocaleDateString('pt-BR'):'—'}</div></div>
       <div class="dash-card"><div class="dash-card-label">Condição de Pagamento</div><div class="dash-card-value" style="font-size:15px">${c.condicao_pagamento || '—'}</div></div>
@@ -13467,6 +13571,12 @@ async function _alterarStatusManualCompraInterno(id, novoStatus){
   if(!temPermissaoEditar('compras')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const c = COMPRAS_CACHE.find(x=>x.id===id);
   const statusAnterior = c?.status;
+  const bloqImp = bloqueioStatusImportacao(statusAnterior, novoStatus);
+  if(bloqImp){
+    toast(bloqImp,'error');
+    const sel = document.getElementById('compra-detalhe-status-select'); if(sel) sel.value = '';
+    return;
+  }
   if(novoStatus === 'concluido' && statusAnterior !== 'recebido'){
     toast('Só é possível concluir um pedido de compra que já foi marcado como Recebido. Marque como Recebido primeiro.','error');
     const sel = document.getElementById('compra-detalhe-status-select'); if(sel) sel.value = '';
@@ -13508,6 +13618,8 @@ async function avancarStatusCompra(id, novoStatus){
   if(!temPermissaoEditar('compras')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const c = COMPRAS_CACHE.find(x=>x.id===id);
   const statusAnterior = c?.status;
+  const bloqImp = bloqueioStatusImportacao(statusAnterior, novoStatus);
+  if(bloqImp){ toast(bloqImp,'error'); return; }
   if(novoStatus === 'concluido' && statusAnterior !== 'recebido'){
     toast('Só é possível concluir um pedido de compra que já foi marcado como Recebido. Marque como Recebido primeiro.','error'); return;
   }
@@ -13528,6 +13640,9 @@ async function _marcarCompraRecebidaInterno(id){
   if(!temPermissaoEditar('compras')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const c = COMPRAS_CACHE.find(x=>x.id===id);
   if(!c) return;
+  const stBanco = (await db.ref('pedidos_compra/'+id+'/status').once('value')).val();
+  const bloqImp = bloqueioStatusImportacao(stBanco || c.status, 'recebido');
+  if(bloqImp){ toast(bloqImp,'error'); return; }
   const confRec = await lerConferenciaCompra(id);
   if(!confirm(`Compra de "${c.fornecedor}"\n\n` + textoConfirmRecebimentoCompra(c, confRec))) return;
 
@@ -13641,7 +13756,8 @@ async function abrirConferenciaPendentePainel(id){
 // Leituras: a lista usa lerNoCache('pedidos_compra') (mesmo cache dos relatórios) e só a
 // conferência de cada pedido listado; abrir um pedido lê só aquele pedido.
 // ══════════════════════════════════════════════
-const STATUS_A_RECEBER = ['transito','importacao','separacao'];
+// Importação não entra: a mercadoria vem pelos pedidos de retirada (Compras ▸ Importações).
+const STATUS_A_RECEBER = ['transito','separacao'];
 let RECEB_LISTA = [];
 let RECEB_CONFS = {};
 let recebAtual = null;      // { id, compra, conf }
@@ -13656,7 +13772,7 @@ function montarFiltrosRecebimento(){
   if(!selS || !selF) return;
   const cont = {};
   RECEB_LISTA.forEach(c => { cont[c.status] = (cont[c.status] || 0) + 1; });
-  const ordem = ['transito','importacao','separacao'];
+  const ordem = ['transito','separacao'];
   selS.innerHTML = `<option value="">Todos a caminho (${RECEB_LISTA.length})</option>` +
     ordem.map(k => `<option value="${k}">${esc(statusInfoCompra(k).label)} (${cont[k] || 0})</option>`).join('');
   selS.value = ordem.includes(RECEB_F_STATUS) || RECEB_F_STATUS === '' ? RECEB_F_STATUS : 'transito';
@@ -28499,6 +28615,1129 @@ function compartilharWhatsApp(url){
 }
 
 
+
+</script>
+<script>
+// ══════════════════════════════════════════════════════════════════════════════
+// ══ IMPORTAÇÕES (só admin) ══
+// Substitui a planilha mensal "Gestão de Importações": Mapa de SKUs importados, Alertas de
+// reposição, Chegadas previstas e o controle dos pedidos de importação (chegada no fornecedor
+// no Brasil, saldo que fica lá e retiradas).
+//
+// INDEPENDENTE DE COMPRAS: os dados próprios ficam em nós separados do Firebase —
+//   importacao_skus/{chave}   → SKUs da análise (cód. fornecedor, MOQ, tipo, CMM salvo…)
+//   importacoes/{compraId}    → dados da importação de cada pedido de compra com status
+//                               "Importação" (US$, cotação, previsão, chegadas, retiradas)
+//   importacao_config         → data/período do último cálculo de CMM
+//   importacao_mapa_fornecedor/{codFornecedor} → vínculo de códigos do fornecedor
+// O pedido de compra continua sendo o de Compras. Este módulo só:
+//   • cria pedidos de compra (importação via planilha e pedidos de retirada);
+//   • atualiza os preços em R$ do pedido de importação quando a cotação muda;
+//   • marca o pedido de importação como Concluído quando o saldo zera.
+// O estoque NUNCA entra por aqui: entra pelos pedidos de retirada, no fluxo normal de
+// Recebimento/conferência. Pedido com status Importação não pode ser marcado como Recebido.
+//
+// Contas (por item de cada pedido de importação):
+//   Encomendado (E) = qtd do item no pedido de compra
+//   Chegou (C)      = soma das chegadas no fornecedor registradas
+//   Cancelado (X)   = diferença que o fornecedor não vai mandar
+//   Em trânsito     = E − C − X
+//   Retirado (R)    = soma dos pedidos de retirada que ainda existem (excluiu → volta pro saldo)
+//   No fornecedor   = C − R
+// Leituras: só quando um admin abre a aba. pedidos_compra vem do mesmo cache de 2 min dos
+// relatórios; o CMM só é recalculado no botão (lê 6 meses de movimentações uma vez e salva).
+// ══════════════════════════════════════════════════════════════════════════════
+
+const IMP_LEAD_TIME = 4;          // meses
+const IMP_COBERTURA_ALVO = 5;     // lead time + 1 mês de segurança
+const IMP_PEDIDO_MINIMO_USD = 10000;
+const IMP_MESES_CMM = 6;
+const IMP_MESES_NOME = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+const IMP_MESES_NOME_LONGO = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+let IMP = { skus:{}, regs:{}, compras:[], config:{}, mapaForn:{}, carregado:false };
+let IMP_SUBABA = 'mapa';
+let IMP_ABERTOS = new Set();      // linhas abertas no Mapa
+let IMP_DET_ID = null;            // pedido de importação aberto no detalhe
+let IMP_PLANILHA = null;          // dados lidos da planilha do fornecedor
+
+// Carga inicial: SKUs da planilha "Gestão de Importações" de 10/11/2026 (cód. fornecedor, tipo,
+// MOQ, observações). O Estoque Fornecedor NÃO vem da planilha: sai dos pedidos de importação
+// com a chegada registrada (os pedidos antigos já estão com o saldo atual em Compras).
+const IMP_CARGA_INICIAL = [{"cod_fornecedor": "FTUB011", "codigo": "M0140", "descricao": "BICA CONICA CROMADA 3/4", "tipo_uso": "ambos", "moq": 500, "obs": ""}, {"cod_fornecedor": "FTUB012", "codigo": "M0141", "descricao": "BICA CONICA PRETA 3/4", "tipo_uso": "ambos", "moq": 500, "obs": ""}, {"cod_fornecedor": "FTUB005", "codigo": "M0145", "descricao": "BICA PRETA AREJADOR CROMADO 3/4", "tipo_uso": "ambos", "moq": 500, "obs": ""}, {"cod_fornecedor": "FTUB013-E", "codigo": "M0220", "descricao": "BICA REDONDA 3/4'' FLEXÍVEL CROMADA", "tipo_uso": "ambos", "moq": 500, "obs": ""}, {"cod_fornecedor": "FCOR003", "codigo": "M0101", "descricao": "CORPO BANCADA 5/8 VAZIO E S/ ACABAMENTO", "tipo_uso": "insumo", "moq": 2000, "obs": ""}, {"cod_fornecedor": "FCOR008-I", "codigo": "M0103", "descricao": "CORPO BANCADA 3/4 VAZIO E S/ ACABAMENTO", "tipo_uso": "insumo", "moq": 2000, "obs": ""}, {"cod_fornecedor": "FCOR002", "codigo": "M0106", "descricao": "CORPO DE REGISTRO PARA DUCHA METAL", "tipo_uso": "insumo", "moq": 5000, "obs": ""}, {"cod_fornecedor": "FCOR001", "codigo": "M0100", "descricao": "CORPO PAREDE 5/8 VAZIO E S/ ACABAMENTO", "tipo_uso": "insumo", "moq": 2000, "obs": ""}, {"cod_fornecedor": "FEFT002", "codigo": "142", "descricao": "ENGATE FLEXIVEL 40CM", "tipo_uso": "acabado", "moq": 2000, "obs": ""}, {"cod_fornecedor": "FEFT003", "codigo": "143", "descricao": "ENGATE FLEXIVEL 60 CM", "tipo_uso": "acabado", "moq": 2000, "obs": ""}, {"cod_fornecedor": "FGHT006-C", "codigo": "M0149", "descricao": "GATILHO DE ABS CROMADO PARA DUCHA HIGIÊNICA", "tipo_uso": "ambos", "moq": 2000, "obs": "2000 un jun/26 + 2000 un jul/26"}, {"cod_fornecedor": "FGHT003", "codigo": "M0150", "descricao": "GATILHO DE METAL PARA DUCHA HIGIÊNICA", "tipo_uso": "ambos", "moq": 2000, "obs": ""}, {"cod_fornecedor": "FGHT023-CS", "codigo": "M0189", "descricao": "KIT ENGATE SEM GATILHO PARA DUCHA SOFT CROMADA", "tipo_uso": "insumo", "moq": 0, "obs": ""}, {"cod_fornecedor": "FMEC018", "codigo": "1514", "descricao": "KIT SALVA REGISTRO 10 EM 1 LATÃO", "tipo_uso": "acabado", "moq": 500, "obs": ""}, {"cod_fornecedor": "FEPD001", "codigo": "M0156", "descricao": "LIGAÇÃO METAL 1,20 CM", "tipo_uso": "ambos", "moq": 2040, "obs": "4020 un jun/26 + 2040 un jul/26"}, {"cod_fornecedor": "FMEC003", "codigo": "M0110", "descricao": "MECANISMO ESQUERDO 1/4\" DE VOLTA M18 DECA", "tipo_uso": "ambos", "moq": 5000, "obs": "5000 un jun/26 + 5000 un jul/26"}, {"cod_fornecedor": "FMEC005-C", "codigo": "M0246", "descricao": "MECANISMO SOBE DESCE CROMADO - ESTRIA", "tipo_uso": "ambos", "moq": 5000, "obs": ""}, {"cod_fornecedor": "FMEC005", "codigo": "M0225", "descricao": "MECANISMO SOBE DESCE DOURADO - ESTRIA", "tipo_uso": "ambos", "moq": 5000, "obs": ""}, {"cod_fornecedor": "DIC017-E", "codigo": "7423", "descricao": "REBOLO PORCELANATO TURBO 110X08X20MM", "tipo_uso": "acabado", "moq": 0, "obs": ""}, {"cod_fornecedor": "DIC033", "codigo": "290", "descricao": "REBOLO TUNGSTÊNIO 4.4'' 110 X 20MM", "tipo_uso": "acabado", "moq": 0, "obs": ""}, {"cod_fornecedor": "FREG037", "codigo": "M0108", "descricao": "REGISTRO 1/2\" ABS CROMADO PARA DUCHA HIGIÊNICA C-72", "tipo_uso": "insumo", "moq": 2000, "obs": ""}, {"cod_fornecedor": "FREG034-Z", "codigo": "146", "descricao": "REGISTRO MAQ. DE LAVAR 1/2'' - 3/4'' ZAMAC", "tipo_uso": "acabado", "moq": 4000, "obs": ""}, {"cod_fornecedor": "SWM001-N", "codigo": "103", "descricao": "SERRA DE VIDEA 4'''' 110 X 20 X 24D", "tipo_uso": "acabado", "moq": 2000, "obs": ""}, {"cod_fornecedor": "SWM005", "codigo": "104", "descricao": "SERRA DE VIDEA 7 1/4 '''' 185 X 20 X 24D", "tipo_uso": "acabado", "moq": 300, "obs": ""}, {"cod_fornecedor": "SMW007-E", "codigo": "105", "descricao": "SERRA DE VIDEA 7 1/4'''' 185 X 20 X 36D", "tipo_uso": "acabado", "moq": 300, "obs": ""}, {"cod_fornecedor": "SMW009-E", "codigo": "106", "descricao": "SERRA DE VIDEA 9 1/4'''' 235 X 25 X 24D", "tipo_uso": "acabado", "moq": 200, "obs": ""}, {"cod_fornecedor": "SWM010-E", "codigo": "107", "descricao": "SERRA DE VIDEA 9 1/4'''' 235 X 25 X 36D", "tipo_uso": "acabado", "moq": 200, "obs": ""}, {"cod_fornecedor": "FTOR005", "codigo": "M0260", "descricao": "TORNEIRA ESFERA 1/2'X3/4\"' JARDIM CABO VERMELHO - montagem", "tipo_uso": "acabado", "moq": 2000, "obs": ""}, {"cod_fornecedor": "FTOR009", "codigo": "M0265", "descricao": "TORNEIRA ESFERA MAQUINA DE LAVAR 1/2\" X 3/4\" CABO VERMELHO - montagem", "tipo_uso": "acabado", "moq": 2000, "obs": ""}, {"cod_fornecedor": "FTOR010", "codigo": "1411", "descricao": "TORNEIRA GOLD ESFERA JARDIM 1/2'' CABO PRETO", "tipo_uso": "acabado", "moq": 4000, "obs": ""}, {"cod_fornecedor": "FTUB004", "codigo": "M0313", "descricao": "TUBO 3/4 AÇO INOX BICA BAIXA PORCA LATÃO - LAVATÓRIO", "tipo_uso": "insumo", "moq": 2000, "obs": "item sem histórico de saída pois entrou em linha em abril/2026"}, {"cod_fornecedor": "FTUB002", "codigo": "M0315", "descricao": "TUBO 3/4 AÇO INOX BICA ALTA PORCA LATÃO - COZINHA", "tipo_uso": "insumo", "moq": 2000, "obs": "item sem histórico de saída pois entrou em linha em abril/2026"}, {"cod_fornecedor": "FTUB001", "codigo": "M0134", "descricao": "TUBO 5/8 AÇO INOX BICA ALTA PORCA LATÃO  - COZINHA", "tipo_uso": "insumo", "moq": 2000, "obs": ""}, {"cod_fornecedor": "FTUB003", "codigo": "M0136", "descricao": "TUBO 5/8 AÇO INOX BICA BAIXA PORCA LATÃO - LAVATÓRIO", "tipo_uso": "insumo", "moq": 2000, "obs": ""}, {"cod_fornecedor": "FVAC005", "codigo": "1512", "descricao": "VALVULA AMERICANA 3 1/2 CORPO ABS CESTO INOX", "tipo_uso": "acabado", "moq": 3000, "obs": ""}, {"cod_fornecedor": "FVAC001", "codigo": "797", "descricao": "VALVULA PIA AMERICANA 3 1/2''", "tipo_uso": "acabado", "moq": 5000, "obs": ""}, {"cod_fornecedor": "FVAC002", "codigo": "803", "descricao": "VÁLVULA LAVATÓRIO SEM LADRÃO 7/8''", "tipo_uso": "acabado", "moq": 5000, "obs": ""}, {"cod_fornecedor": "", "codigo": "M0259", "descricao": "MECANISMO DECA COMPLETO COM CROMO - ROSCA 25", "tipo_uso": "acabado", "moq": 2000, "obs": "Item novo (Pedido 9) - sem histórico de saída, CMM a definir"}, {"cod_fornecedor": "", "codigo": "M0331", "descricao": "MECANISMO DECA COMPLETO COM CROMO - ROSCA 21", "tipo_uso": "acabado", "moq": 2000, "obs": "Item novo (Pedido 9) - sem histórico de saída, CMM a definir"}, {"cod_fornecedor": "FMEC003-A", "codigo": "M0174", "descricao": "MECANISMO DIREITA 1/4'' DE VOLTA M18 DECA", "tipo_uso": "insumo", "moq": 5000, "obs": "Item novo - CMM a definir (já tem vendas; aguardando levantamento de saídas)"}, {"cod_fornecedor": "FMEC006", "codigo": "M0190", "descricao": "MECANISMO / REPARO ESQUERDA 1/4 DE VOLTA M22 DOCOL", "tipo_uso": "insumo", "moq": 5000, "obs": "Item novo - CMM a definir (já tem vendas; aguardando levantamento de saídas)"}, {"cod_fornecedor": "FMEC001", "codigo": "M0186", "descricao": "MECANISMO / REPARO ESQUERDA 1/4 DE VOLTA M22 DECA", "tipo_uso": "insumo", "moq": 5000, "obs": "Item novo - CMM a definir (já tem vendas; aguardando levantamento de saídas)"}, {"cod_fornecedor": "FMEC016-3", "codigo": "M0223", "descricao": "MECANISMO MVS -1416 PARADO", "tipo_uso": "insumo", "moq": 2000, "obs": "Item novo - CMM a definir (já tem vendas; aguardando levantamento de saídas)"}, {"cod_fornecedor": "FGHT023-PS", "codigo": "M0237", "descricao": "KIT ENGATE SEM GATILHO PARA DUCHA SOFT PRETO", "tipo_uso": "insumo", "moq": 500, "obs": "Item novo - CMM a definir (já tem vendas; aguardando levantamento de saídas)"}];
+
+function impEhAdmin(){ return !!usuarioLogado?.admin; }
+function impChave(cod){ return String(cod||'').trim().replace(/[.#$\[\]\/]/g,'-'); }
+function impNorm(s){ return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/\s+/g,' ').trim(); }
+function impNum(v){ const n = Number(v); return isFinite(n) ? n : 0; }
+function impFmtQtd(n){ return Number(n||0).toLocaleString('pt-BR', { maximumFractionDigits: 1 }); }
+function impFmtUsd(v){ return 'US$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function impHojeISO(){ const d = agora(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function impMesAtual(){ const d = agora(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+function impSomarMeses(ym, n){
+  const [a, m] = String(ym).split('-').map(Number);
+  const t = a*12 + (m-1) + n;
+  return Math.floor(t/12) + '-' + String((t%12)+1).padStart(2,'0');
+}
+function impDifMeses(ymA, ymB){ // B − A em meses
+  const [a1,m1] = String(ymA).split('-').map(Number); const [a2,m2] = String(ymB).split('-').map(Number);
+  return (a2*12+m2) - (a1*12+m1);
+}
+function impFmtMes(ym, longo){
+  if(!/^\d{4}-\d{2}$/.test(String(ym||''))) return '—';
+  const [a, m] = ym.split('-').map(Number);
+  return longo ? IMP_MESES_NOME_LONGO[m-1]+'/'+a : IMP_MESES_NOME[m-1]+'/'+String(a).slice(2);
+}
+function impFmtData(iso){ return iso ? new Date(iso+'T00:00').toLocaleDateString('pt-BR') : '—'; }
+
+// ── Cadastro / estoque ────────────────────────────────────────────────────────
+function impCadastro(cod){
+  const ins = INSUMOS_DB.find(x => x.codigo === cod);
+  if(ins) return { tipo:'insumo', item:ins, estoque: impNum(ins.estoque_atual), nome: ins.nome || '' };
+  const prod = PRODUTOS_DB.find(x => x.codigo === cod);
+  if(prod) return { tipo:'vendavel', item:prod, estoque: impNum(prod.quantidade), nome: prod.nome || '' };
+  return null;
+}
+// Vendável sem o M (M7455 → 7455). Tenta com e sem zeros à esquerda.
+function impContrapartida(cod){
+  if(!/^M/i.test(cod)) return null;
+  const resto = cod.slice(1);
+  const cands = [resto, String(parseInt(resto, 10))];
+  for(const c of cands){ const p = PRODUTOS_DB.find(x => x.codigo === c); if(p) return p; }
+  return null;
+}
+
+// ── Carregamento ──────────────────────────────────────────────────────────────
+async function impCarregar(forcar){
+  if(forcar) invalidarCacheNo('pedidos_compra');
+  const tarefas = [
+    db.ref('importacao_skus').once('value'),
+    db.ref('importacoes').once('value'),
+    lerNoCache('pedidos_compra'),
+    db.ref('importacao_config').once('value'),
+    db.ref('importacao_mapa_fornecedor').once('value')
+  ];
+  if(forcar || !INSUMOS_DB.length) tarefas.push(carregarInsumosFirebase());
+  if(forcar || !PRODUTOS_DB.length) tarefas.push(carregarProdutosFirebase());
+  const [sSkus, sRegs, sCompras, sCfg, sMapa] = await Promise.all(tarefas);
+  IMP.skus = sSkus.val() || {};
+  IMP.regs = sRegs.val() || {};
+  const compras = sCompras.val() || {};
+  IMP.compras = Object.keys(compras).map(id => ({ id, ...compras[id] }));
+  IMP.config = sCfg.val() || {};
+  IMP.mapaForn = sMapa.val() || {};
+  IMP.carregado = true;
+  await impReabrirConcluidosComSaldo();
+}
+
+// Pedido concluído por este módulo que voltou a ter saldo (ex.: um pedido de retirada foi
+// excluído) volta para "Importação" — senão o saldo ficaria escondido.
+async function impReabrirConcluidosComSaldo(){
+  for(const c of IMP.compras){
+    const reg = IMP.regs[c.id];
+    if(c.status !== 'concluido' || !reg?.concluido_em) continue;
+    const r = impResumoPedido(c);
+    if(r.totTransito > 0 || r.totFornecedor > 0){
+      try {
+        await db.ref('pedidos_compra/'+c.id+'/status').set('importacao');
+        await registrarHistoricoStatusCompra(c.id, 'concluido', 'importacao');
+        await db.ref('importacoes/'+c.id+'/concluido_em').remove();
+        c.status = 'importacao'; delete reg.concluido_em;
+        invalidarCacheNo('pedidos_compra');
+      } catch(e){ console.warn('[IMP] falha ao reabrir pedido', c.id, e); }
+    }
+  }
+}
+
+// ── Cálculos por pedido de importação ─────────────────────────────────────────
+function impPedidosImportacao(incluirConcluidos){
+  return IMP.compras.filter(c => {
+    const reg = IMP.regs[c.id];
+    if(c.status === 'importacao') return true;
+    return !!incluirConcluidos && c.status === 'concluido' && !!reg?.concluido_em;
+  });
+}
+function impRetiradasDo(compraId){
+  const reg = IMP.regs[compraId] || {};
+  const ids = new Set(Object.keys(reg.retiradas || {}));
+  IMP.compras.forEach(c => { if(c.importacao_origem === compraId) ids.add(c.id); });
+  return IMP.compras.filter(c => ids.has(c.id));
+}
+function impResumoPedido(c){
+  const reg = IMP.regs[c.id] || {};
+  // Map (e não objeto) para manter a ordem do pedido — objeto põe códigos numéricos na frente
+  const itensMap = new Map();
+  (c.itens || []).forEach(i => {
+    if(!i.codigo) return;
+    const k = impChave(i.codigo);
+    if(!itensMap.has(k)) itensMap.set(k, { k, codigo:i.codigo, nome:i.nome||'', tipo:i.tipo, codigo_fornecedor:i.codigo_fornecedor||'', E:0, C:0, X:0, R:0 });
+    itensMap.get(k).E += impNum(i.qtd);
+  });
+  const itens = Object.fromEntries([]);
+  itensMap.forEach((v, k) => { itens[k] = v; });
+  Object.values(reg.chegadas || {}).forEach(ch => {
+    Object.entries(ch.itens || {}).forEach(([k,q]) => { if(itens[k]) itens[k].C += impNum(q); });
+    Object.entries(ch.cancelado || {}).forEach(([k,q]) => { if(itens[k]) itens[k].X += impNum(q); });
+  });
+  const retiradas = impRetiradasDo(c.id);
+  retiradas.forEach(rc => (rc.itens || []).forEach(i => { const k = impChave(i.codigo); if(itens[k]) itens[k].R += impNum(i.qtd); }));
+  const lista = Array.from(itensMap.values()).map(it => {
+    it.T = Math.max(0, it.E - it.C - it.X);
+    it.S = Math.max(0, it.C - it.R);
+    it.usd = impNum((reg.precos_usd || {})[it.k]);
+    return it;
+  });
+  const temChegada = Object.keys(reg.chegadas || {}).length > 0;
+  const totTransito = lista.reduce((s,i)=>s+i.T,0);
+  const totFornecedor = lista.reduce((s,i)=>s+i.S,0);
+  const usdItens = lista.reduce((s,i)=>s+i.usd*i.E,0);
+  const valorUsd = usdItens > 0 ? usdItens : impNum(reg.valor_usd_manual);
+  let situacao;
+  if(c.status === 'concluido') situacao = { t:'Concluído', cor:'#15803d', bg:'#d1fae5' };
+  else if(!temChegada) situacao = { t:'Em trânsito', cor:'#1565c0', bg:'#dbeafe' };
+  else if(totTransito > 0) situacao = { t:'Chegada parcial', cor:'#b45309', bg:'#fef3c7' };
+  else situacao = { t:'No fornecedor', cor:'#7c3aed', bg:'#ede9fe' };
+  const previsao = reg.previsao || '';
+  const atrasado = totTransito > 0 && /^\d{4}-\d{2}$/.test(previsao) && previsao < impMesAtual();
+  return { c, reg, itens:lista, retiradas, temChegada, totTransito, totFornecedor, valorUsd, situacao, previsao, atrasado };
+}
+
+// Último preço US$ conhecido de cada código (pedido de importação mais recente que tem preço)
+function impUltimosPrecosUsd(){
+  const precos = {};
+  IMP.compras.filter(c => IMP.regs[c.id]?.precos_usd)
+    .sort((a,b) => String(a.data||'').localeCompare(String(b.data||'')) || (impNum(a.ts_criacao)-impNum(b.ts_criacao)))
+    .forEach(c => Object.entries(IMP.regs[c.id].precos_usd).forEach(([k,v]) => { if(impNum(v) > 0) precos[k] = impNum(v); }));
+  return precos;
+}
+
+// ── Cálculos por SKU (Mapa / Alertas) ─────────────────────────────────────────
+function impLinhasMapa(){
+  const resumos = impPedidosImportacao(false).map(impResumoPedido);
+  const mesRef = impMesAtual();
+  const precosUsd = impUltimosPrecosUsd();
+  return Object.entries(IMP.skus).filter(([,s]) => s && s.ativo !== false).map(([k, s]) => {
+    const cod = s.codigo;
+    const cad = impCadastro(cod);
+    let estProprio = cad ? cad.estoque : 0;
+    let estContra = 0, contra = null;
+    if(s.tipo_uso === 'ambos'){ contra = impContrapartida(cod); if(contra) estContra = impNum(contra.quantidade); }
+    const estPropTotal = estProprio + estContra;
+    const fornPedidos = [], transito = [];
+    resumos.forEach(r => {
+      const it = r.itens.find(i => i.k === k);
+      if(!it) return;
+      if(it.S > 0) fornPedidos.push({ id:r.c.id, numero:r.c.numero_origem, numForn:r.reg.numero_fornecedor||'', qtd:it.S });
+      if(it.T > 0) transito.push({ id:r.c.id, numero:r.c.numero_origem, numForn:r.reg.numero_fornecedor||'', qtd:it.T, previsao:r.previsao, atrasado:r.atrasado });
+    });
+    transito.sort((a,b) => String(a.previsao||'9999').localeCompare(String(b.previsao||'9999')));
+    const estForn = fornPedidos.reduce((t,x)=>t+x.qtd,0);
+    const enc = transito.reduce((t,x)=>t+x.qtd,0);
+    const total = estPropTotal + estForn;
+    const cmm = impNum(s.cmm);
+    const proj = total + enc;
+    const cobAtual = cmm > 0 ? total/cmm : null;
+    const cobProj = cmm > 0 ? proj/cmm : null;
+    let pedirAte = null, pedirN = null;
+    if(cobProj !== null){ pedirN = Math.floor(cobProj - IMP_LEAD_TIME + 1e-9); pedirAte = impSomarMeses(mesRef, Math.max(0, pedirN)); }
+    const moq = impNum(s.moq);
+    let sugestao = 0;
+    if(cobProj !== null && cobProj < IMP_COBERTURA_ALVO){
+      const falta = cmm*IMP_COBERTURA_ALVO - proj;
+      sugestao = falta <= 0 ? 0 : (moq > 0 ? Math.ceil(falta/moq)*moq : Math.ceil(falta));
+    }
+    const usd = precosUsd[k] || 0;
+    return { k, s, cod, nome: cad?.nome || s.descricao || '', semCadastro: !cad, tipoItem: cad?.tipo || '',
+      estProprio, estContra, contraCod: contra?.codigo || '', estPropTotal, fornPedidos, estForn,
+      transito, enc, total, cmm, proj, cobAtual, cobProj, pedirAte, pedirN, moq, sugestao, usd, sugUsd: sugestao*usd };
+  }).sort((a,b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
+}
+
+function impCorCobertura(cob){
+  if(cob === null) return { bg:'#f1f5f9', cor:'#64748b' };
+  if(cob < 2) return { bg:'#FF4C4C', cor:'#fff' };
+  if(cob < 4) return { bg:'#FFD966', cor:'#5b4400' };
+  return { bg:'#C6EFCE', cor:'#14532d' };
+}
+function impBadgeCob(cob){
+  const c = impCorCobertura(cob);
+  return `<span class="im-badge" style="background:${c.bg};color:${c.cor}">${cob===null?'sem CMM':impFmtQtd(cob)+' m'}</span>`;
+}
+function impBadgePedirAte(l){
+  if(l.pedirAte === null) return '<span class="im-badge" style="background:#f1f5f9;color:#64748b">—</span>';
+  let bg='#C6EFCE', cor='#14532d', txt=impFmtMes(l.pedirAte);
+  if(l.pedirN <= 0){ bg='#FF4C4C'; cor='#fff'; txt = l.pedirN < 0 ? 'ATRASADO' : 'Este mês'; }
+  else if(l.pedirN === 1){ bg='#FFD966'; cor='#5b4400'; }
+  return `<span class="im-badge" style="background:${bg};color:${cor}">${txt}</span>`;
+}
+
+// ── Tela ──────────────────────────────────────────────────────────────────────
+async function renderImportacoes(forcar){
+  const el = document.getElementById('imp-conteudo');
+  if(!impEhAdmin()){ if(el) el.innerHTML = '<div class="im-vazio">Acesso restrito ao administrador.</div>'; return; }
+  if(el && (forcar || !IMP.carregado)) el.innerHTML = '<div class="im-vazio">Carregando…</div>';
+  try { if(forcar || !IMP.carregado) await impCarregar(forcar); }
+  catch(e){ if(el) el.innerHTML = `<div class="im-vazio">Erro ao carregar: ${esc(e.message)}</div>`; return; }
+  impDesenhar();
+}
+function impTrocarSubaba(sub){ IMP_SUBABA = sub; impDesenhar(); }
+
+function impDesenhar(){
+  ['mapa','alertas','chegadas','pedidos','skus'].forEach(k => {
+    const b = document.getElementById('imp-subaba-'+k);
+    if(b) b.className = 'btn btn-sm ' + (k === IMP_SUBABA ? 'btn-secondary' : 'btn-outline');
+  });
+  const filtros = document.getElementById('imp-filtros');
+  if(filtros) filtros.style.display = (IMP_SUBABA === 'mapa' || IMP_SUBABA === 'skus') ? '' : 'none';
+  const el = document.getElementById('imp-conteudo');
+  if(!el) return;
+  const temSkus = Object.values(IMP.skus).some(s => s && s.ativo !== false);
+  if(!temSkus && IMP_SUBABA !== 'pedidos'){
+    el.innerHTML = `<div class="im-vazio">Nenhum SKU na análise ainda.<br><br>
+      <button class="btn btn-primary btn-sm" onclick="impCargaInicial()">📥 Carregar os ${IMP_CARGA_INICIAL.length} SKUs da planilha de 10/11/2026</button>
+      <button class="btn btn-outline btn-sm" onclick="impAbrirIncluirSku()">+ Incluir item</button></div>`;
+    impDesenharCards([]);
+    return;
+  }
+  const linhas = impLinhasMapa();
+  impDesenharCards(linhas);
+  if(IMP_SUBABA === 'mapa') el.innerHTML = impHtmlMapa(linhas);
+  else if(IMP_SUBABA === 'alertas') el.innerHTML = impHtmlAlertas(linhas);
+  else if(IMP_SUBABA === 'chegadas') el.innerHTML = impHtmlChegadas();
+  else if(IMP_SUBABA === 'pedidos') el.innerHTML = impHtmlPedidos();
+  else if(IMP_SUBABA === 'skus') el.innerHTML = impHtmlSkus(linhas);
+}
+
+function impDesenharCards(linhas){
+  const el = document.getElementById('imp-cards'); if(!el) return;
+  const alertas = linhas.filter(l => l.cobProj !== null && l.cobProj < IMP_COBERTURA_ALVO);
+  const criticos = linhas.filter(l => l.cobAtual !== null && l.cobAtual < 2).length;
+  const resumos = impPedidosImportacao(false).map(impResumoPedido);
+  const emTransito = resumos.filter(r => r.totTransito > 0);
+  const usdTransito = emTransito.reduce((s,r)=>s+r.valorUsd,0);
+  const atrasados = resumos.filter(r => r.atrasado).length;
+  const cfg = IMP.config?.cmm;
+  el.innerHTML = `
+    <div class="dash-card" style="cursor:pointer" onclick="impTrocarSubaba('alertas')"><div class="dash-card-label">Itens em alerta</div><div class="dash-card-value ${alertas.length?'accent':''}">${alertas.length}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">cobertura projetada &lt; ${IMP_COBERTURA_ALVO} meses</div></div>
+    <div class="dash-card" style="cursor:pointer" onclick="impTrocarSubaba('mapa')"><div class="dash-card-label">Cobertura atual crítica</div><div class="dash-card-value" style="color:#dc2626">${criticos}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">menos de 2 meses</div></div>
+    <div class="dash-card" style="cursor:pointer" onclick="impTrocarSubaba('chegadas')"><div class="dash-card-label">Pedidos em trânsito</div><div class="dash-card-value">${emTransito.length}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">${usdTransito>0?impFmtUsd(usdTransito):'valor US$ não informado'}${atrasados?` · <strong style="color:#dc2626">${atrasados} atrasado(s)</strong>`:''}</div></div>
+    <div class="dash-card"><div class="dash-card-label">CMM</div><div class="dash-card-value" style="font-size:15px">${cfg?.calc_em ? new Date(cfg.calc_em).toLocaleDateString('pt-BR') : 'não calculado'}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">${cfg?.ini ? `saídas de ${impFmtData(cfg.ini)} a ${impFmtData(cfg.fim)} (${impFmtQtd(cfg.meses)} meses)` : 'clique em 🔄 Recalcular CMM'}</div></div>`;
+}
+
+function impFiltrar(lista){
+  const q = impNorm(document.getElementById('imp-f-busca')?.value || '');
+  const tipo = document.getElementById('imp-f-tipo')?.value || '';
+  const sit = document.getElementById('imp-f-sit')?.value || '';
+  return lista.filter(l => {
+    if(q && !impNorm(`${l.cod} ${l.nome} ${l.s.cod_fornecedor||''}`).includes(q)) return false;
+    if(tipo && (l.s.tipo_uso||'') !== tipo) return false;
+    if(sit === 'alerta' && !(l.cobProj !== null && l.cobProj < IMP_COBERTURA_ALVO)) return false;
+    if(sit === 'critico' && !(l.cobAtual !== null && l.cobAtual < 2)) return false;
+    if(sit === 'transito' && !l.enc) return false;
+    if(sit === 'semcmm' && l.cmm > 0) return false;
+    return true;
+  });
+}
+
+function impHtmlProxChegada(l){
+  if(!l.transito.length) return '<span style="color:var(--muted)">—</span>';
+  const p = l.transito[0];
+  return `<span style="${p.atrasado?'color:#dc2626;font-weight:700':''}">${p.atrasado?'⚠️ ':''}${p.previsao?impFmtMes(p.previsao):'sem previsão'}</span><span>${impFmtQtd(p.qtd)} un${l.transito.length>1?` · +${l.transito.length-1} pedido(s)`:''}</span>`;
+}
+
+function impHtmlMapa(linhasTodas){
+  const linhas = impFiltrar(linhasTodas);
+  if(!linhas.length) return '<div class="im-vazio">Nenhum SKU para os filtros escolhidos.</div>';
+  return `<div class="im-resumo"><span><strong>${linhas.length}</strong> SKU(s)</span><span>Mês de referência: <strong>${impFmtMes(impMesAtual(), true)}</strong></span><span>Clique na linha para ver tudo</span></div>
+  <div class="im-cab"><div class="im-c-sku">SKU</div><div class="im-c-desc">Descrição</div><div class="im-c-cob">Cob. atual</div><div class="im-c-cheg">Próx. chegada</div><div class="im-c-cob">Cob. proj.</div><div class="im-c-ped">Pedir até</div></div>
+  ${linhas.map(l => {
+    const aberta = IMP_ABERTOS.has(l.k);
+    return `<div class="im-linha ${aberta?'aberta':''}" id="imp-l-${l.k}">
+      <div class="im-topo" onclick="impToggleLinha('${l.k}')">
+        <div class="im-c-sku"><strong>${esc(l.cod)}</strong><span>${esc(l.s.cod_fornecedor||'')}</span></div>
+        <div class="im-c-desc">${esc(l.nome)}${l.semCadastro?' <span class="im-badge" style="background:#fef2f2;color:#dc2626">SEM CADASTRO</span>':''}<span>${esc(l.s.tipo_uso||'')} · CMM ${l.cmm>0?impFmtQtd(l.cmm):'—'}</span></div>
+        <div class="im-c-cob"><span class="im-mlbl">Cob. atual</span>${impBadgeCob(l.cobAtual)}</div>
+        <div class="im-c-cheg"><span class="im-mlbl">Próx. chegada</span>${impHtmlProxChegada(l)}</div>
+        <div class="im-c-cob"><span class="im-mlbl">Cob. proj.</span>${impBadgeCob(l.cobProj)}</div>
+        <div class="im-c-ped"><span class="im-mlbl">Pedir até</span>${impBadgePedirAte(l)}</div>
+        <div class="im-seta">▾</div>
+      </div>
+      <div class="im-det">${aberta ? impHtmlDetalheSku(l) : ''}</div>
+    </div>`;
+  }).join('')}`;
+}
+function impToggleLinha(k){
+  if(IMP_ABERTOS.has(k)) IMP_ABERTOS.delete(k); else IMP_ABERTOS.add(k);
+  const linha = document.getElementById('imp-l-'+k);
+  if(!linha) return;
+  const l = impLinhasMapa().find(x => x.k === k);
+  linha.classList.toggle('aberta', IMP_ABERTOS.has(k));
+  linha.querySelector('.im-det').innerHTML = IMP_ABERTOS.has(k) && l ? impHtmlDetalheSku(l) : '';
+}
+function impHtmlDetalheSku(l){
+  const v = (rot, val) => `<div><div class="im-rot">${rot}</div><div class="im-val">${val}</div></div>`;
+  const estPropTxt = l.contraCod
+    ? `${impFmtQtd(l.estPropTotal)} <span style="font-size:12px;color:var(--muted)">(${esc(l.cod)}: ${impFmtQtd(l.estProprio)} + ${esc(l.contraCod)}: ${impFmtQtd(l.estContra)})</span>`
+    : impFmtQtd(l.estPropTotal);
+  const fornTxt = l.estForn
+    ? `${impFmtQtd(l.estForn)}<div style="font-size:12px;color:var(--muted)">${[
+        ...l.fornPedidos.map(p => `#${esc(p.numero||'')}${p.numForn?' ('+esc(p.numForn)+')':''}: ${impFmtQtd(p.qtd)}`)].join('<br>')}</div>`
+    : '0';
+  const transTxt = l.transito.length
+    ? `${impFmtQtd(l.enc)}<div style="font-size:12px;color:var(--muted)">${l.transito.map(p => `<span style="${p.atrasado?'color:#dc2626;font-weight:700':''}">#${esc(p.numero||'')}${p.numForn?' ('+esc(p.numForn)+')':''}: ${impFmtQtd(p.qtd)} un · ${p.previsao?impFmtMes(p.previsao):'sem previsão'}${p.atrasado?' (atrasado)':''}</span>`).join('<br>')}</div>`
+    : '0';
+  return `<div class="im-grid">
+      ${v('Cód. fornecedor', esc(l.s.cod_fornecedor||'—'))}
+      ${v('Tipo', esc(l.s.tipo_uso||'—'))}
+      ${v('Saídas no período', l.s.saidas_6m!=null ? impFmtQtd(l.s.saidas_6m) : '—')}
+      ${v('CMM (média/mês)', l.cmm>0 ? impFmtQtd(l.cmm) : '—')}
+      ${v('MOQ', l.moq ? impFmtQtd(l.moq) : '—')}
+      ${v('Estoque próprio', estPropTxt)}
+      ${v('Estoque fornecedor', fornTxt)}
+      ${v('Total disponível', `<strong>${impFmtQtd(l.total)}</strong>`)}
+      ${v('Cobertura atual', impBadgeCob(l.cobAtual))}
+      ${v('Qtd. encomendada', transTxt)}
+      ${v('Estoque projetado', `<strong>${impFmtQtd(l.proj)}</strong>`)}
+      ${v('Cobertura projetada', impBadgeCob(l.cobProj))}
+      ${v('Pedir até', impBadgePedirAte(l))}
+      ${l.usd ? v('Último preço', impFmtUsd(l.usd)) : ''}
+    </div>
+    ${l.s.obs ? `<div class="im-obs">${esc(l.s.obs)}</div>` : ''}
+    <div class="im-acoes"><button class="btn btn-outline btn-sm" onclick="event.stopPropagation();impAbrirEditarSku('${l.k}')">✏️ Editar SKU</button></div>`;
+}
+
+function impHtmlAlertas(linhas){
+  const alerta = linhas.filter(l => l.cobProj !== null && l.cobProj < IMP_COBERTURA_ALVO).sort((a,b) => a.cobProj - b.cobProj);
+  const ok = linhas.filter(l => l.cobProj !== null && l.cobProj >= IMP_COBERTURA_ALVO).sort((a,b) => a.cobProj - b.cobProj);
+  const sem = linhas.filter(l => l.cobProj === null);
+  const totUsd = alerta.reduce((s,l)=>s+l.sugUsd,0);
+  const semPreco = alerta.filter(l => l.sugestao > 0 && !l.usd).length;
+  const linhaHtml = (l, comSug) => `<div class="im-linha"><div class="im-topo" style="cursor:default">
+      <div class="im-c-sku"><strong>${esc(l.cod)}</strong><span>${esc(l.s.cod_fornecedor||'')}</span></div>
+      <div class="im-c-desc">${esc(l.nome)}<span>CMM ${l.cmm>0?impFmtQtd(l.cmm):'—'} · disp. ${impFmtQtd(l.total)} · enc. ${impFmtQtd(l.enc)} · proj. ${impFmtQtd(l.proj)}</span></div>
+      <div class="im-c-cob">${impBadgeCob(l.cobProj)}</div>
+      ${comSug ? `<div class="im-c-sug"><strong>${impFmtQtd(l.sugestao)} un</strong><span>${l.moq?'MOQ '+impFmtQtd(l.moq):'sem MOQ'}${l.usd?' · '+impFmtUsd(l.sugUsd):' · sem preço US$'}</span></div>` : ''}
+    </div></div>`;
+  let avisoMinimo = '';
+  if(alerta.length){
+    const atinge = totUsd >= IMP_PEDIDO_MINIMO_USD;
+    avisoMinimo = `<div class="im-aviso" style="background:${atinge?'#ecfdf5':'#fffbeb'};border-color:${atinge?'#a7f3d0':'#fde68a'}">
+      Sugestão estimada: <strong>${impFmtUsd(totUsd)}</strong> ${atinge?'— atinge':'— <strong>não atinge</strong>'} o pedido mínimo de ${impFmtUsd(IMP_PEDIDO_MINIMO_USD)}.
+      ${semPreco ? `<br><span style="font-size:12px">${semPreco} item(ns) sem preço US$ (nunca vieram em pedido importado da planilha) — o valor real é maior.</span>` : ''}</div>`;
+  }
+  return `<div class="im-resumo"><span>Alerta: cobertura projetada &lt; ${IMP_COBERTURA_ALVO} meses (lead time ${IMP_LEAD_TIME}m + 1m de segurança)</span><span>Sugestão = CMM × ${IMP_COBERTURA_ALVO} − Estoque projetado, arredondado pelo MOQ</span></div>
+    <div class="im-sec">🚨 Precisam entrar no próximo pedido (${alerta.length})</div>
+    ${avisoMinimo}
+    ${alerta.length ? alerta.map(l => linhaHtml(l, true)).join('') : '<div class="im-vazio">Nenhum item em alerta. 🎉</div>'}
+    <div class="im-sec">✅ Cobertura adequada (${ok.length})</div>
+    ${ok.map(l => linhaHtml(l, false)).join('') || '<div class="im-vazio">—</div>'}
+    ${sem.length ? `<div class="im-sec">❔ Sem consumo registrado / CMM a calcular (${sem.length})</div>${sem.map(l => linhaHtml(l, false)).join('')}` : ''}`;
+}
+
+function impHtmlChegadas(){
+  const resumos = impPedidosImportacao(false).map(impResumoPedido).filter(r => r.totTransito > 0);
+  if(!resumos.length) return '<div class="im-vazio">Nenhum pedido de importação em trânsito.</div>';
+  const porMes = {};
+  resumos.forEach(r => { const m = /^\d{4}-\d{2}$/.test(r.previsao) ? r.previsao : 'sem'; (porMes[m] = porMes[m] || []).push(r); });
+  const meses = Object.keys(porMes).sort((a,b) => a === 'sem' ? 1 : b === 'sem' ? -1 : a.localeCompare(b));
+  return meses.map(m => {
+    const atras = m !== 'sem' && m < impMesAtual();
+    return `<div class="im-sec" style="${atras?'color:#dc2626':''}">📅 ${m==='sem'?'Sem previsão informada':impFmtMes(m, true)}${atras?' — ATRASADO':''}</div>
+      ${porMes[m].map(r => `<div class="im-linha"><div class="im-topo" onclick="impAbrirPedido('${r.c.id}')">
+        <div class="im-c-sku"><strong>#${esc(r.c.numero_origem||'')}</strong><span>${esc(r.reg.numero_fornecedor||'')}</span></div>
+        <div class="im-c-desc">${esc(r.c.fornecedor||'')}<span>${r.itens.filter(i=>i.T>0).map(i=>`${esc(i.codigo)}: ${impFmtQtd(i.T)}`).join(' · ')}</span></div>
+        <div class="im-c-cheg"><span class="im-badge" style="background:${r.situacao.bg};color:${r.situacao.cor}">${r.situacao.t}</span><span>${impFmtQtd(r.totTransito)} un em trânsito</span></div>
+        <div class="im-seta">›</div></div></div>`).join('')}`;
+  }).join('');
+}
+
+function impHtmlPedidos(){
+  const todos = impPedidosImportacao(true).map(impResumoPedido)
+    .sort((a,b) => String(b.c.data||'').localeCompare(String(a.c.data||'')));
+  const abertos = todos.filter(r => r.c.status === 'importacao');
+  const fechados = todos.filter(r => r.c.status !== 'importacao').slice(0, 15);
+  const card = r => `<div class="im-linha"><div class="im-topo" onclick="impAbrirPedido('${r.c.id}')">
+      <div class="im-c-sku"><strong>#${esc(r.c.numero_origem||'')}</strong><span>${esc(r.reg.numero_fornecedor||'—')}</span></div>
+      <div class="im-c-desc">${esc(r.c.fornecedor||'')}<span>Pedido ${impFmtData(r.c.data)} · previsão <span style="${r.atrasado?'color:#dc2626;font-weight:700':''}">${impFmtMes(r.previsao)}${r.atrasado?' (atrasado)':''}</span></span></div>
+      <div class="im-c-cheg"><strong>${r.valorUsd>0?impFmtUsd(r.valorUsd):'US$ —'}</strong><span>${r.reg.cotacao?'cotação R$ '+impNum(r.reg.cotacao).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:4}):'sem cotação'}</span></div>
+      <div class="im-c-ped"><span class="im-badge" style="background:${r.situacao.bg};color:${r.situacao.cor}">${r.situacao.t}</span><span>trânsito ${impFmtQtd(r.totTransito)} · fornec. ${impFmtQtd(r.totFornecedor)}</span></div>
+      <div class="im-seta">›</div></div></div>`;
+  return `<div class="im-resumo"><span>Pedidos de compra com status <strong>Importação</strong> (aba Compras). Clique para registrar chegada, retirar do fornecedor, informar US$/cotação/previsão.</span></div>
+    <div class="im-sec">🚢 Em andamento (${abertos.length})</div>
+    ${abertos.map(card).join('') || '<div class="im-vazio">Nenhum pedido com status Importação. Crie em Compras ou use "📥 Importar pedido do fornecedor".</div>'}
+    ${fechados.length ? `<div class="im-sec">✔️ Concluídos recentes</div>${fechados.map(card).join('')}` : ''}`;
+}
+
+function impHtmlSkus(linhasTodas){
+  const linhas = impFiltrar(linhasTodas);
+  const inativos = Object.entries(IMP.skus).filter(([,s]) => s && s.ativo === false);
+  return `<div class="im-resumo"><span><strong>${linhas.length}</strong> SKU(s) na análise</span><button class="btn btn-primary btn-sm" onclick="impAbrirIncluirSku()">+ Incluir item</button></div>
+    ${linhas.map(l => `<div class="im-linha"><div class="im-topo" onclick="impAbrirEditarSku('${l.k}')">
+      <div class="im-c-sku"><strong>${esc(l.cod)}</strong><span>${esc(l.s.cod_fornecedor||'sem cód. fornec.')}</span></div>
+      <div class="im-c-desc">${esc(l.nome)}<span>${esc(l.s.tipo_uso||'—')} · MOQ ${l.moq?impFmtQtd(l.moq):'—'}</span></div>
+      <div class="im-seta">✏️</div></div></div>`).join('')}
+    ${inativos.length ? `<div class="im-sec">Fora da análise (${inativos.length})</div>${inativos.map(([k,s]) => `<div class="im-linha"><div class="im-topo" style="cursor:default">
+      <div class="im-c-sku"><strong>${esc(s.codigo)}</strong><span>${esc(s.cod_fornecedor||'')}</span></div>
+      <div class="im-c-desc">${esc(impCadastro(s.codigo)?.nome || s.descricao || '')}</div>
+      <button class="btn btn-outline btn-sm" onclick="impReativarSku('${k}')">↩️ Voltar para a análise</button></div></div>`).join('')}` : ''}`;
+}
+
+// ── SKUs da análise ───────────────────────────────────────────────────────────
+async function impCargaInicial(){
+  if(!impEhAdmin()) return;
+  if(Object.keys(IMP.skus).length){ toast('Já existem SKUs na análise.','error'); return; }
+  if(!await confirmCustom(`Carregar ${IMP_CARGA_INICIAL.length} SKUs da planilha de 10/11/2026?\n\nVêm: cód. fornecedor, tipo, MOQ e observações.\n\nO Estoque Fornecedor vem dos pedidos de importação: depois, em "Pedidos de Importação", use "Chegou no fornecedor" nos pedidos que já chegaram.`, 'Carregar')) return;
+  const upd = {};
+  IMP_CARGA_INICIAL.forEach(s => {
+    upd[impChave(s.codigo)] = { ...s, ativo:true, incluido_em: agoraTs(), incluido_por: usuarioLogado?.nome || '' };
+  });
+  await db.ref('importacao_skus').update(upd);
+  IMP.skus = { ...IMP.skus, ...upd };
+  toast('✓ SKUs carregados','success');
+  impDesenhar();
+  if(await confirmCustom('Calcular agora o CMM pelas saídas registradas no sistema (últimos 6 meses)?', 'Calcular CMM')) impRecalcularCmm(true);
+}
+
+function impAbrirIncluirSku(){
+  if(!impEhAdmin()) return;
+  document.getElementById('imp-modal-conteudo').innerHTML = `
+    <div class="modal-title">+ Incluir item na análise</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:10px">Busque qualquer insumo ou vendável do cadastro.</div>
+    <input type="text" id="imp-inc-busca" placeholder="Código ou nome…" oninput="impBuscarIncluir()" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:8px">
+    <div id="imp-inc-res" style="margin-top:8px;max-height:340px;overflow:auto"></div>`;
+  abrirModal('imp-modal');
+  setTimeout(() => document.getElementById('imp-inc-busca')?.focus(), 50);
+}
+function impBuscarIncluir(){
+  const q = (document.getElementById('imp-inc-busca').value || '').toLowerCase();
+  const el = document.getElementById('imp-inc-res');
+  if(q.length < 2){ el.innerHTML = ''; return; }
+  const todos = [...INSUMOS_DB.filter(i=>!i.inativo).map(i => ({ codigo:i.codigo, nome:i.nome, tipo:'insumo' })),
+                 ...PRODUTOS_DB.filter(p=>!p.inativo).map(p => ({ codigo:p.codigo, nome:p.nome, tipo:'vendavel' }))];
+  const res = ordenarBuscaPorRelevancia(todos.filter(p => (p.nome||'').toLowerCase().includes(q) || (p.codigo||'').toLowerCase().includes(q)), q).slice(0, 12);
+  el.innerHTML = res.map(p => {
+    const ja = IMP.skus[impChave(p.codigo)]?.ativo !== undefined && IMP.skus[impChave(p.codigo)]?.ativo !== false;
+    return `<div style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:13px;${ja?'color:var(--muted)':'cursor:pointer'}" ${ja?'':`onclick="impAbrirEditarSku('${impChave(p.codigo)}','${esc(p.codigo)}')"`}>
+      <strong>${esc(p.codigo)}</strong> — ${esc(p.nome)} <span class="im-badge" style="background:${p.tipo==='insumo'?'#ede9fe':'#dbeafe'};color:${p.tipo==='insumo'?'#7c3aed':'#1565c0'}">${p.tipo==='insumo'?'INSUMO':'VENDÁVEL'}</span>${ja?' · já está na análise':''}</div>`;
+  }).join('') || '<div style="padding:12px;color:var(--muted);font-size:13px">Nenhum item encontrado</div>';
+}
+
+function impAbrirEditarSku(k, codigoNovo){
+  if(!impEhAdmin()) return;
+  const s = IMP.skus[k] || { codigo: codigoNovo, cod_fornecedor:'', tipo_uso: /^M/i.test(codigoNovo||'') ? 'insumo' : 'acabado', moq:0, obs:'' };
+  const novo = !IMP.skus[k] || IMP.skus[k].ativo === false;
+  const cad = impCadastro(s.codigo);
+  document.getElementById('imp-modal-conteudo').innerHTML = `
+    <div class="modal-title">${novo?'Incluir':'Editar'} SKU ${esc(s.codigo)}</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:12px">${esc(cad?.nome || s.descricao || '')}${cad?'':' — <strong style="color:#dc2626">sem cadastro no sistema</strong>'}</div>
+    <div class="form-row">
+      <div class="form-group"><label>Cód. fornecedor</label><input type="text" id="imp-sku-cf" value="${esc(s.cod_fornecedor||'')}"></div>
+      <div class="form-group"><label>Tipo</label><select id="imp-sku-tipo">
+        ${['insumo','acabado','ambos'].map(t => `<option value="${t}" ${s.tipo_uso===t?'selected':''}>${t}</option>`).join('')}</select></div>
+      <div class="form-group"><label>MOQ (mín. fornecedor)</label><input type="number" id="imp-sku-moq" value="${impNum(s.moq)}"></div>
+    </div>
+    <div class="form-row single"><div class="form-group"><label>Observações</label><textarea id="imp-sku-obs" rows="2" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px">${esc(s.obs||'')}</textarea></div></div>
+    <div style="font-size:12px;color:var(--muted)">"Ambos": o Estoque próprio soma o código M e o vendável sem o M.</div>
+    <div class="form-actions" style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+      ${!novo ? `<button class="btn btn-outline" style="color:#dc2626;border-color:#dc2626" onclick="impRemoverSku('${k}')">Remover da análise</button>` : ''}
+      <button class="btn btn-primary" style="margin-left:auto" onclick="impSalvarSku('${k}','${esc(s.codigo)}')">Salvar</button>
+    </div>`;
+  abrirModal('imp-modal');
+}
+async function impSalvarSku(k, codigo){
+  if(!impEhAdmin()) return;
+  const dados = {
+    codigo,
+    cod_fornecedor: document.getElementById('imp-sku-cf').value.trim(),
+    tipo_uso: document.getElementById('imp-sku-tipo').value,
+    moq: impNum(document.getElementById('imp-sku-moq').value),
+    obs: document.getElementById('imp-sku-obs').value.trim(),
+    ativo: true
+  };
+  if(!IMP.skus[k]){ dados.incluido_em = agoraTs(); dados.incluido_por = usuarioLogado?.nome || ''; dados.descricao = impCadastro(codigo)?.nome || ''; }
+  await db.ref('importacao_skus/'+k).update(dados);
+  IMP.skus[k] = { ...(IMP.skus[k]||{}), ...dados };
+  fecharModal('imp-modal');
+  toast('✓ SKU salvo','success');
+  impDesenhar();
+}
+async function impRemoverSku(k){
+  if(!await confirmCustom(`Tirar ${IMP.skus[k]?.codigo} da análise?\n\nO histórico fica guardado e dá para voltar depois.`, 'Remover')) return;
+  await db.ref('importacao_skus/'+k).update({ ativo:false, removido_em: agoraTs(), removido_por: usuarioLogado?.nome || '' });
+  IMP.skus[k].ativo = false;
+  fecharModal('imp-modal');
+  toast('✓ Removido da análise','success');
+  impDesenhar();
+}
+async function impReativarSku(k){
+  await db.ref('importacao_skus/'+k).update({ ativo:true });
+  IMP.skus[k].ativo = true;
+  impDesenhar();
+}
+
+// ── CMM pelas saídas do sistema ───────────────────────────────────────────────
+// SKU com M (insumo/ambos): consumo nas OPs + venda direta do M (líquidos de estornos).
+// SKU sem M (acabado importado pronto): vendas (líquidas de estornos).
+// Período: últimos 6 meses completos (sem o mês corrente). Se o sistema tiver menos
+// histórico, usa o período disponível e mostra quantos meses entraram na conta.
+// Leitura: uma janela de movimentos_estoque pela chave (sem precisar de índice).
+let _impCalculandoCmm = false;
+async function impRecalcularCmm(semPerguntar){
+  if(!impEhAdmin() || _impCalculandoCmm) return;
+  if(!semPerguntar && !await confirmCustom('Recalcular o CMM de todos os SKUs da análise pelas saídas dos últimos 6 meses registradas no sistema?\n\nFaz uma leitura maior no banco (6 meses de movimentações) — use na revisão (ex.: trimestral).', 'Recalcular')) return;
+  _impCalculandoCmm = true;
+  toast('Calculando CMM…','info');
+  try {
+    const hoje = agora();
+    const fim = new Date(hoje.getFullYear(), hoje.getMonth(), 1).getTime();
+    const ini = new Date(hoje.getFullYear(), hoje.getMonth() - IMP_MESES_CMM, 1).getTime();
+    const sPrim = await db.ref('movimentos_estoque').orderByKey().limitToFirst(1).once('value');
+    const prim = Object.values(sPrim.val() || {})[0];
+    const iniEf = Math.max(ini, impNum(prim?.ts) || ini);
+    const meses = Math.max(0, (fim - iniEf) / (30.4375*24*3600*1000));
+    if(meses < 0.5){ toast('O sistema ainda não tem histórico de saídas suficiente (menos de meio mês).','error'); return; }
+    const snap = await db.ref('movimentos_estoque').orderByKey()
+      .startAt(chavePushDoTs(iniEf - 60000)).endAt(chavePushDoTs(fim + 60000)).once('value');
+    const movs = snap.val() || {};
+    const ativos = Object.entries(IMP.skus).filter(([,s]) => s && s.ativo !== false);
+    const porCod = {};
+    ativos.forEach(([,s]) => { porCod[s.codigo] = 0; });
+    Object.values(movs).forEach(m => {
+      if(!m || m.pendente || m.falhou) return;
+      if(!(m.codigo in porCod)) return;
+      const ts = impNum(m.ts);
+      if(ts < iniEf || ts >= fim) return;
+      const ehM = /^M/i.test(m.codigo);
+      const origens = ehM ? ['op','pedido'] : ['pedido'];
+      if(!origens.includes(m.origem_tipo)) return;
+      const q = impNum(m.qtd);
+      porCod[m.codigo] += m.tipo === 'saida' ? q : (m.tipo === 'entrada' ? -q : 0);
+    });
+    const upd = {};
+    ativos.forEach(([k,s]) => {
+      const saidas = Math.max(0, Math.round(porCod[s.codigo]*100)/100);
+      const cmm = Math.round((saidas / meses) * 10) / 10;
+      upd[k+'/saidas_6m'] = saidas; upd[k+'/cmm'] = cmm;
+      IMP.skus[k].saidas_6m = saidas; IMP.skus[k].cmm = cmm;
+    });
+    await db.ref('importacao_skus').update(upd);
+    const toISO = ms => { const d = new Date(ms); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
+    const cfg = { calc_em: agoraTs(), ini: toISO(iniEf), fim: toISO(fim - 1), meses: Math.round(meses*10)/10, por: usuarioLogado?.nome || '' };
+    await db.ref('importacao_config/cmm').set(cfg);
+    IMP.config.cmm = cfg;
+    toast(`✓ CMM recalculado (${impFmtQtd(cfg.meses)} meses de saídas)`,'success');
+    impDesenhar();
+  } catch(e){
+    toast('Erro ao calcular CMM: '+e.message,'error');
+  } finally { _impCalculandoCmm = false; }
+}
+
+// ── Detalhe do pedido de importação ───────────────────────────────────────────
+function impAbrirPedido(id){
+  if(!impEhAdmin()) return;
+  IMP_DET_ID = id;
+  const c = IMP.compras.find(x => x.id === id);
+  if(!c){ toast('Pedido não encontrado — atualize a tela','error'); return; }
+  const r = impResumoPedido(c);
+  const reg = r.reg;
+  const aberto = c.status === 'importacao';
+  const fmtCot = v => impNum(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:4});
+  const hist = Object.values(reg.cotacao_hist || {}).sort((a,b)=>b.ts-a.ts);
+  const chegadas = Object.values(reg.chegadas || {}).sort((a,b)=>String(a.data).localeCompare(String(b.data)));
+  const somaItensUsd = r.itens.reduce((s,i)=>s+i.usd*i.E,0);
+  document.getElementById('imp-modal-conteudo').innerHTML = `
+    <div class="modal-title">🚢 Importação #${esc(c.numero_origem||'')} — ${esc(c.fornecedor||'')}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+      <span class="im-badge" style="background:${r.situacao.bg};color:${r.situacao.cor}">${r.situacao.t}</span>
+      <span style="font-size:13px;color:var(--muted)">Pedido de ${impFmtData(c.data)}</span>
+      <button class="btn btn-outline btn-sm" onclick="impAbrirNoCompras('${c.id}')">Abrir em Compras</button>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Nº do pedido (fornecedor)</label><input type="text" id="imp-p-numforn" value="${esc(reg.numero_fornecedor||'')}" placeholder="ex: Pedido 9" ${aberto?'':'disabled'}></div>
+      <div class="form-group"><label>Previsão de chegada${r.temChegada?' (do que falta)':''}</label><input type="month" id="imp-p-prev" value="${esc(reg.previsao||'')}" ${aberto?'':'disabled'}></div>
+      <div class="form-group"><label>Valor total US$ ${somaItensUsd>0?'(soma dos itens)':''}</label><input type="number" step="0.01" id="imp-p-usd" value="${somaItensUsd>0?somaItensUsd.toFixed(2):impNum(reg.valor_usd_manual)||''}" ${somaItensUsd>0||!aberto?'disabled':''}></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Cotação do dólar (R$)</label><input type="number" step="0.0001" id="imp-p-cot" value="${reg.cotacao?impNum(reg.cotacao):''}" ${aberto?'':'disabled'}>
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">Ao salvar, o preço em R$ dos itens com preço US$ é recalculado no pedido de compra (US$ × cotação). Impostos continuam calculados no pedido.</div></div>
+    </div>
+    ${hist.length ? `<div style="font-size:12px;color:var(--muted);margin:-6px 0 10px">Histórico da cotação: ${hist.map(h => `R$ ${fmtCot(h.valor)} (${new Date(h.ts).toLocaleDateString('pt-BR')} · ${esc(h.usuario||'')})`).join(' · ')}</div>` : ''}
+    ${aberto ? `<div style="text-align:right;margin-bottom:12px"><button class="btn btn-primary btn-sm" onclick="impSalvarDadosPedido('${c.id}')">💾 Salvar dados da importação</button></div>` : ''}
+    <div class="im-tab-wrap"><table class="im-tab">
+      <thead><tr><th style="text-align:left">Item</th><th>US$ unit.</th><th>Encom.</th><th>Chegou</th><th>Cancel.</th><th>Em trânsito</th><th>Retirado</th><th>No fornec.</th></tr></thead>
+      <tbody>${r.itens.map(i => `<tr>
+        <td style="text-align:left"><strong>${esc(i.codigo)}</strong>${i.codigo_fornecedor?` <span style="color:var(--muted)">(${esc(i.codigo_fornecedor)})</span>`:''}<div style="font-size:11px;color:var(--muted)">${esc(i.nome)}</div>${reg.obs_itens?.[i.k]?`<div style="font-size:11px;color:#92400e">${esc(reg.obs_itens[i.k])}</div>`:''}</td>
+        <td>${aberto ? `<input type="number" step="0.0001" class="imp-p-usd-item" data-k="${i.k}" value="${i.usd||''}" style="width:78px;padding:4px;border:1px solid var(--border);border-radius:4px;text-align:center">` : (i.usd?impFmtUsd(i.usd):'—')}</td>
+        <td>${impFmtQtd(i.E)}</td><td>${impFmtQtd(i.C)}</td><td>${i.X?impFmtQtd(i.X):'—'}</td>
+        <td style="font-weight:700;color:${i.T?'#1565c0':'var(--muted)'}">${impFmtQtd(i.T)}</td>
+        <td>${impFmtQtd(i.R)}</td>
+        <td style="font-weight:700;color:${i.S?'#7c3aed':'var(--muted)'}">${impFmtQtd(i.S)}</td></tr>`).join('')}</tbody>
+    </table></div>
+    ${chegadas.length ? `<div class="im-sec" style="margin-top:14px">🚢 Chegadas no fornecedor</div>${chegadas.map(ch => `<div style="font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)">
+      <strong>${impFmtData(ch.data)}</strong> · ${esc(ch.usuario||'')} — chegou: ${Object.entries(ch.itens||{}).map(([k,q])=>`${esc(r.itens.find(i=>i.k===k)?.codigo||k)} ${impFmtQtd(q)}`).join(', ') || 'nada'}
+      ${Object.keys(ch.cancelado||{}).length ? `<br><span style="color:#dc2626">cancelado: ${Object.entries(ch.cancelado).map(([k,q])=>`${esc(r.itens.find(i=>i.k===k)?.codigo||k)} ${impFmtQtd(q)}`).join(', ')}</span>` : ''}
+      ${ch.nova_previsao ? `<br><span style="color:var(--muted)">restante continua em trânsito — nova previsão ${impFmtMes(ch.nova_previsao)}</span>` : ''}
+      ${ch.obs ? `<br><span style="color:var(--muted)">${esc(ch.obs)}</span>` : ''}</div>`).join('')}` : ''}
+    ${r.retiradas.length ? `<div class="im-sec" style="margin-top:14px">📦 Pedidos de retirada</div>${r.retiradas.map(rc => `<div style="font-size:13px;padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="impAbrirNoCompras('${rc.id}')">
+      <strong>#${esc(rc.numero_origem||'')}</strong> · ${impFmtData(rc.data)} · <span class="badge" style="background:${statusInfoCompra(rc.status).bg};color:${statusInfoCompra(rc.status).cor}">${statusInfoCompra(rc.status).label}</span> — ${(rc.itens||[]).map(i=>`${esc(i.codigo)} ${impFmtQtd(i.qtd)}`).join(', ')}</div>`).join('')}` : ''}
+    <div class="form-actions" style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">
+      ${aberto && r.totTransito > 0 ? `<button class="btn btn-primary" onclick="impAbrirChegada('${c.id}')">🚢 Chegou no fornecedor (Brasil)</button>` : ''}
+      ${aberto && r.totFornecedor > 0 ? `<button class="btn btn-primary" style="background:#7c3aed;border-color:#7c3aed" onclick="impAbrirRetirada('${c.id}')">📦 Retirar do fornecedor</button>` : ''}
+    </div>`;
+  abrirModal('imp-modal');
+}
+
+async function impAbrirNoCompras(id){
+  fecharModal('imp-modal');
+  await new Promise(r => setTimeout(r, 120));
+  abrirDetalheCompra(id);
+}
+
+// Recalcula os campos derivados dos itens (mesma conta de calcularItensCompra em Compras)
+function impCalcItensCompra(itens, frete){
+  const brutos = itens.map(i => impNum(i.qtd) * impNum(i.preco_unit));
+  const totalBruto = brutos.reduce((s,v)=>s+v,0);
+  return itens.map((item, idx) => {
+    const valorBruto = brutos[idx];
+    const valorIpi = valorBruto * (impNum(item.ipi_pct)/100);
+    const valorSt = impNum(item.st_valor);
+    const rateioFrete = totalBruto > 0 ? (valorBruto/totalBruto) * impNum(frete) : 0;
+    const custoTotalItem = valorBruto + valorIpi + valorSt + rateioFrete;
+    const custoFinalUnitario = impNum(item.qtd) > 0 ? custoTotalItem / impNum(item.qtd) : 0;
+    return { ...item, valorBruto, valorIpi, valorSt, rateioFrete, custoTotalItem, custoFinalUnitario };
+  });
+}
+
+async function impSalvarDadosPedido(id){
+  if(!impEhAdmin()) return;
+  const c = IMP.compras.find(x => x.id === id); if(!c) return;
+  const reg = IMP.regs[id] || {};
+  const precos = { ...(reg.precos_usd || {}) };
+  document.querySelectorAll('.imp-p-usd-item').forEach(inp => {
+    const v = impNum(inp.value);
+    if(v > 0) precos[inp.dataset.k] = v; else delete precos[inp.dataset.k];
+  });
+  const cot = impNum(document.getElementById('imp-p-cot').value);
+  const upd = {
+    numero_fornecedor: document.getElementById('imp-p-numforn').value.trim(),
+    previsao: document.getElementById('imp-p-prev').value || null,
+    precos_usd: Object.keys(precos).length ? precos : null,
+    valor_usd_manual: impNum(document.getElementById('imp-p-usd').value) || null,
+    atualizado_em: agoraTs()
+  };
+  const mudouCot = cot > 0 && cot !== impNum(reg.cotacao);
+  if(mudouCot) upd.cotacao = cot;
+  try {
+    await db.ref('importacoes/'+id).update(upd);
+    if(mudouCot){
+      await db.ref('importacoes/'+id+'/cotacao_hist').push({ valor: cot, ts: agoraTs(), usuario: usuarioLogado?.nome || '' });
+    }
+    IMP.regs[id] = { ...reg, ...upd };
+    if(mudouCot) IMP.regs[id].cotacao = cot;
+    // Preço em R$ no pedido de compra = US$ × cotação (só itens com preço US$, só enquanto Importação)
+    const cotUsar = impNum(IMP.regs[id].cotacao);
+    if(c.status === 'importacao' && cotUsar > 0 && Object.keys(precos).length){
+      const fresco = (await db.ref('pedidos_compra/'+id).once('value')).val();
+      if(fresco && fresco.status === 'importacao'){
+        let mudou = false;
+        const itens = (fresco.itens || []).map(i => {
+          const usd = precos[impChave(i.codigo)];
+          if(!usd) return i;
+          const novo = Math.round(usd * cotUsar * 10000) / 10000;
+          if(novo !== impNum(i.preco_unit)) mudou = true;
+          return { ...i, preco_unit: novo };
+        });
+        if(mudou){
+          const calc = impCalcItensCompra(itens, fresco.frete);
+          const total = calc.reduce((s,i)=>s+i.custoTotalItem,0) - impNum(fresco.desconto);
+          await db.ref('pedidos_compra/'+id).update({ itens: calc, total });
+          c.itens = calc; c.total = total;
+          invalidarCacheNo('pedidos_compra');
+        }
+      }
+    }
+    toast('✓ Dados da importação salvos','success');
+    impAbrirPedido(id);
+    impDesenhar();
+  } catch(e){ toast('Erro ao salvar: '+e.message,'error'); }
+}
+
+// ── Chegada no fornecedor ─────────────────────────────────────────────────────
+function impAbrirChegada(id){
+  const c = IMP.compras.find(x => x.id === id); if(!c) return;
+  const r = impResumoPedido(c);
+  const pend = r.itens.filter(i => i.T > 0);
+  document.getElementById('imp-modal-conteudo').innerHTML = `
+    <div class="modal-title">🚢 Chegou no fornecedor — #${esc(c.numero_origem||'')}</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:12px">Informe quanto chegou de cada item. O que chegar passa a contar como <strong>Estoque Fornecedor</strong> (não entra no seu estoque). Se vier faltando, escolha o que fazer com a diferença.</div>
+    <div class="form-row"><div class="form-group"><label>Data da chegada</label><input type="date" id="imp-ch-data" value="${impHojeISO()}"></div></div>
+    <div class="im-tab-wrap"><table class="im-tab">
+      <thead><tr><th style="text-align:left">Item</th><th>Em trânsito</th><th>Chegou agora</th><th style="text-align:left">Diferença</th></tr></thead>
+      <tbody>${pend.map(i => `<tr>
+        <td style="text-align:left"><strong>${esc(i.codigo)}</strong><div style="font-size:11px;color:var(--muted)">${esc(i.nome)}</div></td>
+        <td>${impFmtQtd(i.T)}</td>
+        <td><input type="number" min="0" max="${i.T}" class="imp-ch-q" data-k="${i.k}" data-t="${i.T}" value="${i.T}" oninput="impAtualizarDifChegada()" style="width:84px;padding:4px;border:1px solid var(--border);border-radius:4px;text-align:center"></td>
+        <td style="text-align:left"><div class="imp-ch-dif" data-k="${i.k}"></div></td></tr>`).join('')}</tbody>
+    </table></div>
+    <div id="imp-ch-prev-wrap" style="display:none;margin-top:12px" class="form-row">
+      <div class="form-group"><label>Nova previsão para o que continua em trânsito *</label><input type="month" id="imp-ch-prev" value="${esc(r.reg.previsao||'')}"></div>
+    </div>
+    <div class="form-row single"><div class="form-group"><label>Observação</label><input type="text" id="imp-ch-obs" placeholder="ex: erro do fornecedor, restante vem no próximo container"></div></div>
+    <div class="form-actions" style="margin-top:14px;display:flex;gap:8px">
+      <button class="btn btn-outline" onclick="impAbrirPedido('${id}')">Voltar</button>
+      <button class="btn btn-primary" style="margin-left:auto" onclick="impSalvarChegada('${id}')">Registrar chegada</button>
+    </div>`;
+  impAtualizarDifChegada();
+}
+function impAtualizarDifChegada(){
+  let algumTransito = false;
+  document.querySelectorAll('.imp-ch-q').forEach(inp => {
+    const k = inp.dataset.k, t = impNum(inp.dataset.t);
+    const q = Math.min(t, Math.max(0, impNum(inp.value)));
+    const dif = t - q;
+    const box = document.querySelector(`.imp-ch-dif[data-k="${k}"]`);
+    if(!box) return;
+    if(dif <= 0){ box.innerHTML = '<span style="color:var(--success);font-size:12px">completo</span>'; return; }
+    const sel = box.querySelector('select');
+    const atual = sel ? sel.value : '';
+    box.innerHTML = `<div style="font-size:12px;margin-bottom:3px">Faltam <strong>${impFmtQtd(dif)}</strong>:</div>
+      <select class="imp-ch-acao" data-k="${k}" onchange="impAtualizarDifChegada()" style="padding:4px;border:1px solid var(--border);border-radius:4px;font-size:12px">
+        <option value="">Escolha…</option>
+        <option value="transito" ${atual==='transito'?'selected':''}>Continua em trânsito</option>
+        <option value="cancelar" ${atual==='cancelar'?'selected':''}>Cancelar a diferença</option>
+      </select>`;
+    if(atual === 'transito') algumTransito = true;
+  });
+  const w = document.getElementById('imp-ch-prev-wrap');
+  if(w) w.style.display = algumTransito ? '' : 'none';
+}
+let _impSalvandoChegada = false;
+async function impSalvarChegada(id){
+  if(!impEhAdmin() || _impSalvandoChegada) return;
+  const c = IMP.compras.find(x => x.id === id); if(!c) return;
+  const data = document.getElementById('imp-ch-data').value;
+  if(!data){ toast('Informe a data da chegada','error'); return; }
+  const itens = {}, cancelado = {};
+  let algumTransito = false, erro = '';
+  document.querySelectorAll('.imp-ch-q').forEach(inp => {
+    const k = inp.dataset.k, t = impNum(inp.dataset.t);
+    const q = impNum(inp.value);
+    if(q < 0 || q > t){ erro = 'Quantidade que chegou não pode ser maior que a em trânsito.'; return; }
+    if(q > 0) itens[k] = q;
+    const dif = t - q;
+    if(dif > 0){
+      const acao = document.querySelector(`.imp-ch-acao[data-k="${k}"]`)?.value || '';
+      if(!acao){ erro = 'Escolha o que fazer com a diferença de cada item que veio faltando.'; return; }
+      if(acao === 'cancelar') cancelado[k] = dif; else algumTransito = true;
+    }
+  });
+  if(erro){ toast(erro,'error'); return; }
+  if(!Object.keys(itens).length && !Object.keys(cancelado).length){ toast('Nada para registrar','error'); return; }
+  const novaPrev = algumTransito ? document.getElementById('imp-ch-prev').value : '';
+  if(algumTransito && !novaPrev){ toast('Informe a nova previsão do que continua em trânsito','error'); return; }
+  _impSalvandoChegada = true;
+  try {
+    const registro = { data, ts: agoraTs(), usuario: usuarioLogado?.nome || '', itens: Object.keys(itens).length ? itens : null,
+      cancelado: Object.keys(cancelado).length ? cancelado : null, nova_previsao: novaPrev || null,
+      obs: document.getElementById('imp-ch-obs').value.trim() || null };
+    const ref = db.ref('importacoes/'+id+'/chegadas').push();
+    await ref.set(registro);
+    const reg = IMP.regs[id] = IMP.regs[id] || {};
+    reg.chegadas = { ...(reg.chegadas||{}), [ref.key]: registro };
+    if(novaPrev){ await db.ref('importacoes/'+id+'/previsao').set(novaPrev); reg.previsao = novaPrev; }
+    toast('✓ Chegada registrada — saldo agora está no fornecedor','success');
+    await impVerificarConclusao(id);
+    impAbrirPedido(id);
+    impDesenhar();
+  } catch(e){ toast('Erro: '+e.message,'error'); }
+  finally { _impSalvandoChegada = false; }
+}
+
+// Saldo zerado (nada em trânsito, nada no fornecedor) → pedido de importação Concluído.
+async function impVerificarConclusao(id){
+  const c = IMP.compras.find(x => x.id === id); if(!c || c.status !== 'importacao') return;
+  const r = impResumoPedido(c);
+  if(!r.temChegada || r.totTransito > 0 || r.totFornecedor > 0) return;
+  await db.ref('pedidos_compra/'+id+'/status').set('concluido');
+  await registrarHistoricoStatusCompra(id, 'importacao', 'concluido');
+  await db.ref('importacoes/'+id+'/concluido_em').set(agoraTs());
+  c.status = 'concluido';
+  IMP.regs[id].concluido_em = agoraTs();
+  invalidarCacheNo('pedidos_compra');
+  toast(`✓ Pedido de importação #${c.numero_origem} concluído (saldo zerado)`,'success');
+}
+
+// ── Retirada do fornecedor → pedido de compra normal ─────────────────────────
+function impAbrirRetirada(id){
+  const c = IMP.compras.find(x => x.id === id); if(!c) return;
+  const r = impResumoPedido(c);
+  const cot = impNum(r.reg.cotacao);
+  const disp = r.itens.filter(i => i.S > 0);
+  document.getElementById('imp-modal-conteudo').innerHTML = `
+    <div class="modal-title">📦 Retirar do fornecedor — #${esc(c.numero_origem||'')}</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:12px">Gera um <strong>pedido de compra normal</strong> para ${esc(c.fornecedor||'')} (o que você manda para o fornecedor). A quantidade sai do saldo deste pedido de importação. Quando as peças chegarem, o pedido passa pela conferência do Recebimento e entra no estoque como qualquer compra. Se o pedido de retirada for excluído, a quantidade volta para o saldo.</div>
+    ${cot ? `<div style="font-size:12px;margin-bottom:8px">Preço em R$ = US$ × cotação atual (R$ ${cot.toLocaleString('pt-BR',{maximumFractionDigits:4})}). Dá para editar no pedido se a NF vier diferente.</div>` : '<div class="im-aviso">Sem cotação informada — os preços em R$ vão zerados (preencha no pedido ou informe a cotação antes).</div>'}
+    <div class="im-tab-wrap"><table class="im-tab">
+      <thead><tr><th style="text-align:left">Item</th><th>No fornecedor</th><th>Retirar</th></tr></thead>
+      <tbody>${disp.map(i => `<tr>
+        <td style="text-align:left"><strong>${esc(i.codigo)}</strong><div style="font-size:11px;color:var(--muted)">${esc(i.nome)}</div></td>
+        <td>${impFmtQtd(i.S)}</td>
+        <td><input type="number" min="0" max="${i.S}" class="imp-ret-q" data-k="${i.k}" data-s="${i.S}" value="0" style="width:84px;padding:4px;border:1px solid var(--border);border-radius:4px;text-align:center">
+          <button class="btn btn-outline btn-sm" style="padding:2px 6px;font-size:11px" onclick="this.previousElementSibling.value=${i.S}">tudo</button></td></tr>`).join('')}</tbody>
+    </table></div>
+    <div class="form-actions" style="margin-top:14px;display:flex;gap:8px">
+      <button class="btn btn-outline" onclick="impAbrirPedido('${id}')">Voltar</button>
+      <button class="btn btn-primary" style="margin-left:auto;background:#7c3aed;border-color:#7c3aed" onclick="impCriarRetirada('${id}')">Criar pedido de compra</button>
+    </div>`;
+}
+
+// Grava um pedido de compra no mesmo formato de Compras (_salvarPedidoCompraInterno).
+async function impGravarPedidoCompra(dados){
+  const key = db.ref('pedidos_compra').push().key;
+  const snapNum = await db.ref('contador_pedidos_compra').transaction(v => (v||0)+1);
+  const numero_origem = 'C' + String(snapNum.snapshot.val()).padStart(4,'0');
+  const itens = impCalcItensCompra(dados.itens, 0);
+  const total = itens.reduce((s,i)=>s+i.custoTotalItem,0);
+  const hk = db.ref('pedidos_compra/'+key+'/historico_status').push().key;
+  const reg = {
+    fornecedor: dados.fornecedor, nf: '', data: dados.data || impHojeISO(), frete: 0, desconto: 0,
+    obs: dados.obs || '', numero_origem, status: dados.status, itens, condicao_pagamento: '',
+    total, ts_criacao: agoraTs(), criado_por: usuarioLogado?.nome || '',
+    historico_status: { [hk]: { de: null, para: dados.status, ts: agoraTs(), usuario: usuarioLogado?.nome || '' } },
+    origem: null,
+    ...(dados.extra || {})
+  };
+  await db.ref('pedidos_compra/'+key).set(reg);
+  invalidarCacheNo('pedidos_compra');
+  const obj = { id: key, ...reg };
+  IMP.compras.push(obj);
+  if(typeof COMPRAS_CACHE !== 'undefined' && Array.isArray(COMPRAS_CACHE)) COMPRAS_CACHE.push(obj);
+  return obj;
+}
+
+let _impCriandoRetirada = false;
+async function impCriarRetirada(id){
+  if(!impEhAdmin() || _impCriandoRetirada) return;
+  const c = IMP.compras.find(x => x.id === id); if(!c) return;
+  const r = impResumoPedido(c);
+  const cot = impNum(r.reg.cotacao);
+  const itens = []; let erro = '';
+  document.querySelectorAll('.imp-ret-q').forEach(inp => {
+    const q = impNum(inp.value), s = impNum(inp.dataset.s);
+    if(q < 0 || q > s){ erro = 'Não dá para retirar mais do que o saldo no fornecedor.'; return; }
+    if(q <= 0) return;
+    const it = r.itens.find(i => i.k === inp.dataset.k);
+    const orig = (c.itens || []).find(i => impChave(i.codigo) === it.k) || {};
+    itens.push({ codigo: it.codigo, nome: it.nome, tipo: it.tipo || orig.tipo || 'insumo', codigo_fornecedor: it.codigo_fornecedor || '',
+      qtd: q, preco_unit: it.usd && cot ? Math.round(it.usd*cot*10000)/10000 : 0, ipi_pct: 0, st_valor: 0 });
+  });
+  if(erro){ toast(erro,'error'); return; }
+  if(!itens.length){ toast('Informe a quantidade de ao menos um item','error'); return; }
+  if(!await confirmCustom(`Criar pedido de compra para ${c.fornecedor} com ${itens.length} item(ns)?\n\n${itens.map(i=>`${i.codigo}: ${impFmtQtd(i.qtd)}`).join('\n')}`, 'Criar pedido')) return;
+  _impCriandoRetirada = true;
+  try {
+    const novo = await impGravarPedidoCompra({
+      fornecedor: c.fornecedor, status: 'negociacao', itens,
+      obs: `Retirada do pedido de importação #${c.numero_origem}${r.reg.numero_fornecedor?' ('+r.reg.numero_fornecedor+')':''}`,
+      extra: { importacao_origem: id, importacao_numero: c.numero_origem || null }
+    });
+    const ret = { ts: agoraTs(), usuario: usuarioLogado?.nome || '', itens: Object.fromEntries(itens.map(i => [impChave(i.codigo), i.qtd])) };
+    await db.ref('importacoes/'+id+'/retiradas/'+novo.id).set(ret);
+    const reg = IMP.regs[id] = IMP.regs[id] || {};
+    reg.retiradas = { ...(reg.retiradas||{}), [novo.id]: ret };
+    await impVerificarConclusao(id);
+    fecharModal('imp-modal');
+    impDesenhar();
+    toast(`✓ Pedido de compra #${novo.numero_origem} criado (Em Negociação)`,'success');
+    await new Promise(res => setTimeout(res, 150));
+    abrirDetalheCompra(novo.id);
+  } catch(e){ toast('Erro ao criar a retirada: '+e.message,'error'); }
+  finally { _impCriandoRetirada = false; }
+}
+
+// ── Importar pedido da planilha do fornecedor ─────────────────────────────────
+// Lê: CODIGO (cód. fornecedor), PRODUTOS, QUAN MINI. (quantidade), Preço $ (sem impostos)
+// e EMBALAGENS. Linhas sem quantidade são ignoradas. Para na linha TOTAL.
+async function impAbrirImportarPlanilha(){
+  if(!impEhAdmin()) return;
+  if(!FORNECEDORES_DB.length) await carregarFornecedoresFirebase();
+  const ultimo = impPedidosImportacao(true).sort((a,b)=>String(b.data||'').localeCompare(String(a.data||'')))[0];
+  IMP_PLANILHA = null;
+  document.getElementById('imp-modal-conteudo').innerHTML = `
+    <div class="modal-title">📥 Importar pedido do fornecedor (planilha)</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:12px">Cria um pedido de compra com status <strong>Importação</strong>. Usa a coluna <strong>Preço $</strong> (sem impostos) — IPI e ST continuam no pedido.</div>
+    <div class="form-row single"><div class="form-group"><label>Planilha (.xlsx)</label><input type="file" id="imp-pl-arq" accept=".xlsx,.xls" onchange="impLerPlanilha(this)"></div></div>
+    <div class="form-row">
+      <div class="form-group"><label>Fornecedor *</label><input type="text" id="imp-pl-forn" list="imp-pl-forn-list" value="${esc(ultimo?.fornecedor||'')}"><datalist id="imp-pl-forn-list">${FORNECEDORES_DB.map(f=>`<option value="${esc(f.nome)}">`).join('')}</datalist></div>
+      <div class="form-group"><label>Data do pedido</label><input type="date" id="imp-pl-data" value="${impHojeISO()}"></div>
+      <div class="form-group"><label>Nº do pedido (fornecedor)</label><input type="text" id="imp-pl-num"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Previsão de chegada</label><input type="month" id="imp-pl-prev" value="${impSomarMeses(impMesAtual(), IMP_LEAD_TIME)}"></div>
+      <div class="form-group"><label>Cotação do dólar (R$)</label><input type="number" step="0.0001" id="imp-pl-cot" value="${ultimo && IMP.regs[ultimo.id]?.cotacao ? impNum(IMP.regs[ultimo.id].cotacao) : ''}"></div>
+    </div>
+    <div id="imp-pl-prev-itens"></div>`;
+  abrirModal('imp-modal');
+}
+function impLerPlanilha(inp){
+  const arq = inp.files && inp.files[0]; if(!arq) return;
+  const fr = new FileReader();
+  fr.onload = e => {
+    try {
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type:'array' });
+      let achou = null;
+      for(const nome of wb.SheetNames){
+        const linhas = XLSX.utils.sheet_to_json(wb.Sheets[nome], { header:1, raw:true, defval:null });
+        const hi = linhas.findIndex(l => (l||[]).some(v => impNorm(v) === 'CODIGO') && (l||[]).some(v => impNorm(v) === 'PRECO $'));
+        if(hi >= 0){ achou = { nome, linhas, hi }; break; }
+      }
+      if(!achou){ toast('Não achei o cabeçalho (CODIGO / Preço $) na planilha','error'); return; }
+      const cab = achou.linhas[achou.hi].map(impNorm);
+      const col = n => cab.findIndex(v => v === n);
+      const colQtd = cab.findIndex(v => v.startsWith('QUAN'));
+      const ci = { cod: col('CODIGO'), desc: col('PRODUTOS'), qtd: colQtd, usd: col('PRECO $'), emb: cab.findIndex(v => v.startsWith('EMBALAGE')) };
+      if(ci.cod < 0 || ci.qtd < 0 || ci.usd < 0){ toast('Colunas CODIGO, QUAN MINI. ou Preço $ não encontradas','error'); return; }
+      let numPedido = '';
+      achou.linhas.slice(0, achou.hi).forEach(l => (l||[]).forEach(v => { const m = String(v||'').match(/PEDIDO\s*\d+/i); if(m && !numPedido) numPedido = m[0].toUpperCase(); }));
+      const itens = [];
+      for(let i = achou.hi+1; i < achou.linhas.length; i++){
+        const l = achou.linhas[i] || [];
+        if((l||[]).some(v => impNorm(v).startsWith('TOTAL'))) break;
+        const cf = String(l[ci.cod] ?? '').trim();
+        const qtd = impNum(l[ci.qtd]);
+        if(!cf || qtd <= 0) continue;
+        itens.push({ cf, desc: String(l[ci.desc] ?? '').trim(), qtd, usd: Math.round(impNum(l[ci.usd])*10000)/10000,
+          emb: ci.emb >= 0 ? String(l[ci.emb] ?? '').trim() : '', codigo: impVinculoForn(cf), incluir: false });
+      }
+      if(!itens.length){ toast('Nenhuma linha com quantidade na planilha','error'); return; }
+      IMP_PLANILHA = { itens };
+      if(numPedido && !document.getElementById('imp-pl-num').value) document.getElementById('imp-pl-num').value = numPedido;
+      impDesenharPrevPlanilha();
+    } catch(err){ toast('Erro lendo a planilha: '+err.message,'error'); }
+  };
+  fr.readAsArrayBuffer(arq);
+}
+// Vínculo pelo código EXATO do fornecedor (FVAC002 ≠ FVAC002-E)
+function impVinculoForn(cf){
+  const n = impNorm(cf);
+  const sku = Object.values(IMP.skus).find(s => s && impNorm(s.cod_fornecedor) === n);
+  if(sku && impCadastro(sku.codigo)) return sku.codigo;
+  const m = IMP.mapaForn[impChave(n)];
+  return m && impCadastro(m) ? m : '';
+}
+function impDesenharPrevPlanilha(){
+  const el = document.getElementById('imp-pl-prev-itens'); if(!el || !IMP_PLANILHA) return;
+  const itens = IMP_PLANILHA.itens;
+  const totUsd = itens.reduce((s,i)=>s+i.qtd*i.usd,0);
+  const semVinc = itens.filter(i => !i.codigo).length;
+  const opts = [...INSUMOS_DB.filter(i=>!i.inativo).map(i=>i.codigo+' — '+(i.nome||'')), ...PRODUTOS_DB.filter(p=>!p.inativo).map(p=>p.codigo+' — '+(p.nome||''))];
+  el.innerHTML = `
+    <datalist id="imp-pl-cad-list">${opts.map(o=>`<option value="${esc(o)}">`).join('')}</datalist>
+    <div class="im-resumo" style="margin-top:6px"><span><strong>${itens.length}</strong> item(ns)</span><span>Total: <strong>${impFmtUsd(totUsd)}</strong></span>${semVinc?`<span style="color:#dc2626"><strong>${semVinc}</strong> sem vínculo — informe o produto</span>`:''}</div>
+    <div class="im-tab-wrap"><table class="im-tab">
+      <thead><tr><th style="text-align:left">Cód. fornec.</th><th style="text-align:left">Produto no sistema</th><th>Qtd</th><th>US$ unit.</th></tr></thead>
+      <tbody>${itens.map((i, idx) => {
+        const cad = i.codigo ? impCadastro(i.codigo) : null;
+        const naAnalise = i.codigo && Object.values(IMP.skus).some(s => s && s.ativo !== false && s.codigo === i.codigo);
+        return `<tr>
+          <td style="text-align:left"><strong>${esc(i.cf)}</strong><div style="font-size:11px;color:var(--muted)">${esc(i.desc)}</div>${i.emb?`<div style="font-size:11px;color:#92400e">${esc(i.emb)}</div>`:''}</td>
+          <td style="text-align:left">${cad ? `<strong>${esc(i.codigo)}</strong> — <span style="font-size:12px">${esc(cad.nome)}</span> <a href="#" style="font-size:11px" onclick="event.preventDefault();impDesvincularLinha(${idx})">trocar</a>${naAnalise?'':`<label style="display:block;font-size:11px;margin-top:3px"><input type="checkbox" ${i.incluir?'checked':''} onchange="IMP_PLANILHA.itens[${idx}].incluir=this.checked"> incluir na análise de importação</label>`}`
+            : `<input type="text" list="imp-pl-cad-list" placeholder="Código ou nome do produto…" onchange="impVincularLinha(${idx}, this.value)" style="width:100%;min-width:180px;padding:5px;border:1px solid #dc2626;border-radius:4px">`}</td>
+          <td>${impFmtQtd(i.qtd)}</td><td>${i.usd.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:4})}</td></tr>`;
+      }).join('')}</tbody>
+    </table></div>
+    <div class="form-actions" style="margin-top:14px;display:flex"><button class="btn btn-primary" style="margin-left:auto" onclick="impCriarPedidoDaPlanilha()">Criar pedido de importação</button></div>`;
+}
+function impVincularLinha(idx, valor){
+  const cod = String(valor||'').split(' — ')[0].trim();
+  if(!impCadastro(cod)){ toast('Produto não encontrado no cadastro','error'); return; }
+  IMP_PLANILHA.itens[idx].codigo = cod;
+  IMP_PLANILHA.itens[idx].vinculadoManual = true;
+  IMP_PLANILHA.itens[idx].incluir = true;
+  impDesenharPrevPlanilha();
+}
+function impDesvincularLinha(idx){ IMP_PLANILHA.itens[idx].codigo = ''; impDesenharPrevPlanilha(); }
+
+let _impCriandoPlanilha = false;
+async function impCriarPedidoDaPlanilha(){
+  if(!impEhAdmin() || _impCriandoPlanilha || !IMP_PLANILHA) return;
+  const forn = document.getElementById('imp-pl-forn').value.trim();
+  if(!forn){ toast('Informe o fornecedor','error'); return; }
+  const itensPl = IMP_PLANILHA.itens;
+  if(itensPl.some(i => !i.codigo)){ toast('Vincule todos os itens a um produto do sistema','error'); return; }
+  const cods = itensPl.map(i => i.codigo);
+  if(new Set(cods).size !== cods.length){ toast('Dois itens da planilha estão vinculados ao mesmo produto — confira','error'); return; }
+  const cot = impNum(document.getElementById('imp-pl-cot').value);
+  const numForn = document.getElementById('imp-pl-num').value.trim();
+  const prev = document.getElementById('imp-pl-prev').value || null;
+  const data = document.getElementById('imp-pl-data').value || impHojeISO();
+  const totUsd = itensPl.reduce((s,i)=>s+i.qtd*i.usd,0);
+  if(!await confirmCustom(`Criar pedido de importação para ${forn}?\n\n${itensPl.length} itens · ${impFmtUsd(totUsd)}${cot?`\nCotação R$ ${cot} → preços em R$ calculados`:'\nSem cotação: preços em R$ ficam zerados até informar'}`, 'Criar')) return;
+  _impCriandoPlanilha = true;
+  try {
+    const itens = itensPl.map(i => {
+      const cad = impCadastro(i.codigo);
+      return { codigo: i.codigo, nome: cad?.nome || i.desc, tipo: cad?.tipo || 'insumo', codigo_fornecedor: i.cf,
+        qtd: i.qtd, preco_unit: cot ? Math.round(i.usd*cot*10000)/10000 : 0, ipi_pct: 0, st_valor: 0 };
+    });
+    const novo = await impGravarPedidoCompra({ fornecedor: forn, status: 'importacao', data, itens,
+      obs: `Importado da planilha do fornecedor${numForn?' ('+numForn+')':''}` });
+    const precos = {}, obsItens = {};
+    itensPl.forEach(i => { precos[impChave(i.codigo)] = i.usd; if(i.emb) obsItens[impChave(i.codigo)] = i.emb; });
+    const reg = { numero_fornecedor: numForn || null, previsao: prev, cotacao: cot || null, precos_usd: precos,
+      obs_itens: Object.keys(obsItens).length ? obsItens : null, criado_em: agoraTs(), criado_por: usuarioLogado?.nome || '' };
+    await db.ref('importacoes/'+novo.id).set(reg);
+    if(cot) await db.ref('importacoes/'+novo.id+'/cotacao_hist').push({ valor: cot, ts: agoraTs(), usuario: usuarioLogado?.nome || '' });
+    IMP.regs[novo.id] = reg;
+    // Vínculos manuais ficam guardados para a próxima planilha; itens marcados entram na análise
+    const updMapa = {}, updSkus = {};
+    itensPl.forEach(i => {
+      if(i.vinculadoManual) updMapa[impChave(impNorm(i.cf))] = i.codigo;
+      if(i.incluir && !Object.values(IMP.skus).some(s => s && s.ativo !== false && s.codigo === i.codigo)){
+        const cad = impCadastro(i.codigo);
+        updSkus[impChave(i.codigo)] = { codigo: i.codigo, cod_fornecedor: i.cf, descricao: cad?.nome || i.desc,
+          tipo_uso: /^M/i.test(i.codigo) ? 'insumo' : 'acabado', moq: i.qtd, obs: '',
+          ativo: true, incluido_em: agoraTs(), incluido_por: usuarioLogado?.nome || '' };
+      }
+    });
+    if(Object.keys(updMapa).length){ await db.ref('importacao_mapa_fornecedor').update(updMapa); Object.assign(IMP.mapaForn, updMapa); }
+    if(Object.keys(updSkus).length){ await db.ref('importacao_skus').update(updSkus); Object.assign(IMP.skus, updSkus); }
+    IMP_PLANILHA = null;
+    toast(`✓ Pedido de importação #${novo.numero_origem} criado`,'success');
+    IMP_SUBABA = 'pedidos';
+    impDesenhar();
+    impAbrirPedido(novo.id);
+  } catch(e){ toast('Erro ao criar o pedido: '+e.message,'error'); }
+  finally { _impCriandoPlanilha = false; }
+}
+
+// Painel dentro do detalhe do pedido de compra (aba Compras) — só leitura + atalho.
+async function impHtmlPainelCompra(c){
+  try {
+    if(!usuarioLogado?.admin) return '';
+    if(c.importacao_origem){
+      return `<div style="margin-bottom:14px;padding:10px 14px;background:#ede9fe;border-radius:8px;font-size:13px;color:#5b21b6">📦 Retirada do pedido de importação <strong>#${esc(c.importacao_numero||'')}</strong> — entra no estoque pelo Recebimento, como qualquer compra.</div>`;
+    }
+    if(c.status !== 'importacao' && !(c.status === 'concluido' && IMP.regs[c.id])) return '';
+    const reg = (await db.ref('importacoes/'+c.id).once('value')).val() || {};
+    if(c.status !== 'importacao' && !reg.concluido_em) return '';
+    const usd = Object.entries(reg.precos_usd||{}).reduce((s,[k,v]) => s + impNum(v) * (c.itens||[]).filter(i=>impChave(i.codigo)===k).reduce((t,i)=>t+impNum(i.qtd),0), 0) || impNum(reg.valor_usd_manual);
+    return `<div style="margin-bottom:14px;padding:10px 14px;background:#e0f2fe;border-radius:8px;font-size:13px;color:#075985;display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+      <span>🌏 <strong>Importação</strong>${reg.numero_fornecedor?' · '+esc(reg.numero_fornecedor):''}</span>
+      <span>Previsão: <strong>${impFmtMes(reg.previsao)}</strong></span>
+      <span>Valor: <strong>${usd?impFmtUsd(usd):'US$ —'}</strong></span>
+      <span>Cotação: <strong>${reg.cotacao?'R$ '+impNum(reg.cotacao).toLocaleString('pt-BR',{maximumFractionDigits:4}):'—'}</strong></span>
+      <span style="flex-basis:100%;font-size:12px">Não é marcado como Recebido: a mercadoria entra no estoque pelos pedidos de retirada.</span>
+      <button class="btn btn-outline btn-sm" onclick="impIrParaPedido('${c.id}')">Abrir em Importações</button></div>`;
+  } catch(e){ return ''; }
+}
+async function impIrParaPedido(id){
+  fecharModal('modal-compra-detalhe');
+  showTab('importacoes', document.querySelector('[data-tab="importacoes"]'));
+  await renderImportacoes(true);
+  IMP_SUBABA = 'pedidos'; impDesenhar();
+  impAbrirPedido(id);
+}
 
 </script>
 </body>
