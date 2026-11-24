@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 16/11/2026 11:15\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 17/11/2026 09:56</span>
+            onclick="alert('Versão desta build: 24/11/2026 14:15\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 24/11/2026 14:15</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -1786,7 +1786,7 @@ tbody td{padding:11px 16px;font-size:14px}
           </label>
           <button class="btn btn-outline btn-sm" id="btn-exportar-ops" onclick="exportarOPsSelecionadasExcel()">📥 Exportar Excel (0)</button>
           <button class="btn btn-outline btn-sm etiqueta-logo" style="display:none;color:#1a5c1a;border-color:#1a5c1a" onclick="imprimirEtiquetaLogoAplic()">🏷️ Etiqueta Logo Aplic</button>
-          <button class="btn btn-primary" onclick="abrirModalOP()">+ Nova OP</button>
+          <button class="btn btn-primary" id="btn-nova-op" onclick="abrirModalOP()">+ Nova OP</button>
         </div>
       </div>
       <div class="filtros-bar">
@@ -2059,6 +2059,12 @@ tbody td{padding:11px 16px;font-size:14px}
       <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer">
         <input type="checkbox" id="vend-acesso-fretes" style="margin-top:3px">
         <span><strong>Controla fretes e entregas</strong><br><span style="color:var(--muted);font-size:12px">Vê e edita a tela 🚚 Fretes e Entregas (valores de frete, CT-e, boletos, reversos). Admin já tem isso.</span></span>
+      </label>
+    </div>
+    <div class="form-row single" id="vend-opnaolanca-row">
+      <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="vend-op-nao-lanca" style="margin-top:3px">
+        <span><strong>Não lança novas Ordens de Produção</strong><br><span style="color:var(--muted);font-size:12px">Vê, inicia, cancela e conclui as OPs já lançadas, mas não cria OP nova nem muda a quantidade. Não vale para admin.</span></span>
       </label>
     </div>
     <div class="form-row single" id="vend-reativacao-row">
@@ -3421,6 +3427,17 @@ function ehProducao(){
 function podeCadastrarClientesW3(){
   if(!usuarioLogado) return false;
   return !!usuarioLogado.admin || usuarioLogado.acesso_clientes_w3 === true;
+}
+
+// Usuário marcado como "Não lança novas OPs" (usuarios/{id}/op_nao_lanca): trabalha normalmente
+// nas OPs que já existem (inicia, cancela, conclui), mas não cria OP nova — nem pela tela de
+// Produção nem pelo "Gerar OP" da Separação — e não altera a quantidade da OP ao iniciar.
+// Vale para qualquer tipo de usuário (inclusive expedição). Admin nunca é bloqueado.
+function opNaoLanca(){
+  return !!usuarioLogado && !usuarioLogado.admin && usuarioLogado.op_nao_lanca === true;
+}
+function podeLancarOP(){
+  return temPermissaoEditar('producao') && !opNaoLanca();
 }
 
 // Pode VER o módulo (aparece no menu / acessa a tela)?
@@ -10099,6 +10116,7 @@ async function carregarOPsFirebase(){
 // recarregar=true (padrão): busca as OPs no Firebase — usado ao abrir a aba e depois de salvar/alterar OP.
 // recarregar=false: só refiltra o que já está em memória (filtros, cards, paginação) — zero leitura no Firebase.
 async function renderProducao(recarregar = true){
+  { const b = document.getElementById('btn-nova-op'); if(b) b.style.display = podeLancarOP() ? '' : 'none'; }
   if(!temPermissaoEditar('producao')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
   // Lista carregada há menos de 5 min: em vez de baixar todas as OPs de novo, relê só as
@@ -10357,7 +10375,7 @@ function normalizarPedidoOP(v){
 let opCriandoAgora = false; // trava contra duplo clique no "Criar OP" / "Gerar OP"
 
 function abrirModalOP(){
-  if(!temPermissaoEditar('producao')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  if(!podeLancarOP()){ toast('Seu usuário não pode lançar novas OPs.','error'); return; }
   opProdutoSelecionado = null;
   document.getElementById('op-busca-produto').value = '';
   document.getElementById('op-lista-produtos').style.display = 'none';
@@ -10492,7 +10510,7 @@ function atualizarPreviewReceitaOP(){
 }
 
 async function criarOP(){
-  if(!temPermissaoEditar('producao')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
+  if(!podeLancarOP()){ toast('Seu usuário não pode lançar novas OPs.','error'); return; }
   if(!opProdutoSelecionado){ toast('Selecione um produto','error'); return; }
   const qtd = Number(document.getElementById('op-qtd').value) || 1;
   const destino = document.querySelector('input[name="op-destino"]:checked')?.value;
@@ -10562,8 +10580,12 @@ async function verDetalheOP(key){
   }).join('');
 
   let blocoQuantidade, acoes;
+  if(op.status === 'pendente' && opNaoLanca()){
+    blocoQuantidade = `<div class="dash-card"><div class="dash-card-label">Quantidade</div>
+      <input type="hidden" id="op-qtd-editar" value="${op.qtd_solicitada}"><div class="dash-card-value">${op.qtd_solicitada}</div></div>`;
+  }
   if(op.status === 'pendente'){
-    blocoQuantidade = `<div class="dash-card">
+    if(!opNaoLanca()) blocoQuantidade = `<div class="dash-card">
       <div class="dash-card-label">Quantidade <span style="font-size:10px;color:var(--accent)">(editável)</span></div>
       <input type="number" id="op-qtd-editar" value="${op.qtd_solicitada}" min="1"
         oninput="recalcularReceitaDetalheOP('${key}', this.value)"
@@ -10664,7 +10686,7 @@ async function salvarQtdEIniciar(key){
   const res = await db.ref('ordens_producao/'+key).transaction(cur => {
     if(cur === null) return cur;               // sem dado local: servidor devolve o valor real e roda de novo
     if(cur.status !== 'pendente') return;      // aborta
-    cur.qtd_solicitada = novaQtd;
+    if(!opNaoLanca()) cur.qtd_solicitada = novaQtd;
     cur.status = 'em_producao';
     cur.responsavel_producao = responsavelProducao;
     cur.ts_iniciada = agoraTs();
@@ -15816,7 +15838,7 @@ function renderModalSeparacao(){
       <div style="display:flex;gap:6px">
         ${!jaSeparado ? `
           <button class="btn btn-outline btn-sm" onclick="marcarItemSeparado(${idx})">✓ Marcar separado</button>
-          ${!temEstoqueSuficiente ? `<button class="btn btn-outline btn-sm" style="color:#7c3aed;border-color:#7c3aed" onclick="abrirGerarOPSeparacao(${idx})">🏭 Gerar OP</button>` : ''}
+          ${(!temEstoqueSuficiente && !opNaoLanca()) ? `<button class="btn btn-outline btn-sm" style="color:#7c3aed;border-color:#7c3aed" onclick="abrirGerarOPSeparacao(${idx})">🏭 Gerar OP</button>` : ''}
           ${!temEstoqueSuficiente && podeRemoverItemSemEstoque() ? `<button class="btn btn-outline btn-sm" style="color:#dc2626;border-color:#dc2626" onclick="removerItemSemEstoque(${idx},'separacao')">🚫 Sem estoque — tirar do pedido</button>` : ''}
         ` : `<button class="btn btn-outline btn-sm" onclick="desmarcarItemSeparado(${idx})">↺ Desfazer</button>`}
       </div>
@@ -16003,6 +16025,7 @@ async function removerItemSemEstoque(idx, origem){
 let opSeparacaoContexto = null; // guarda {codigo, nome} do item sendo gerado na OP de separação
 
 async function abrirGerarOPSeparacao(idx){
+  if(opNaoLanca()){ toast('Seu usuário não pode lançar novas OPs.','error'); return; }
   if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
   const item = pedidoSeparacaoAtual.itens[idx];
   opSeparacaoContexto = { codigo: item.codigo, nome: item.nome };
@@ -16089,6 +16112,7 @@ async function abrirGerarOPSeparacao(idx){
 }
 
 async function confirmarGerarOPSeparacao(){
+  if(opNaoLanca()){ toast('Seu usuário não pode lançar novas OPs.','error'); return; }
   if(!Object.keys(RECEITAS_DB).length) await carregarReceitasFirebase();
   if(!INSUMOS_DB.length) await carregarInsumosFirebase();
   if(!opSeparacaoContexto){ toast('Erro: contexto perdido, tente novamente','error'); return; }
@@ -21228,6 +21252,7 @@ function abrirModalVendedor(){
   document.getElementById('vend-acesso-fretes').checked = false;
   document.getElementById('vend-acesso-clientes-w3').checked = false;
   document.getElementById('vend-acesso-reativacao').checked = false;
+  document.getElementById('vend-op-nao-lanca').checked = false;
   montarPermissoesTabela({});
   atualizarVisibilidadePermissoes();
   document.getElementById('modal-vendedor-titulo').textContent = 'Cadastrar Usuário';
@@ -21253,6 +21278,7 @@ async function editarVendedor(id){
   document.getElementById('vend-acesso-fretes').checked = v.acesso_fretes === true;
   document.getElementById('vend-acesso-clientes-w3').checked = v.acesso_clientes_w3 === true;
   document.getElementById('vend-acesso-reativacao').checked = v.acesso_reativacao === true;
+  document.getElementById('vend-op-nao-lanca').checked = v.op_nao_lanca === true;
   montarPermissoesTabela(v.permissoes || {});
   atualizarVisibilidadePermissoes();
   document.getElementById('modal-vendedor-titulo').textContent = 'Editar Usuário';
@@ -21275,6 +21301,7 @@ async function salvarVendedor(){
   const acessoFretes = !admin && document.getElementById('vend-acesso-fretes').checked;
   const acessoClientesW3 = !admin && document.getElementById('vend-acesso-clientes-w3').checked;
   const acessoReativacao = !admin && document.getElementById('vend-acesso-reativacao').checked;
+  const opNaoLancaChk = !admin && document.getElementById('vend-op-nao-lanca').checked;
   if(!nome||!user){ toast('Nome e usuário são obrigatórios','error'); return; }
 
   if(id){
@@ -21286,7 +21313,8 @@ async function salvarVendedor(){
       sem_trava_preco: semTrava || null,
       acesso_fretes: acessoFretes || null,
       acesso_clientes_w3: acessoClientesW3 || null,
-      acesso_reativacao: acessoReativacao || null
+      acesso_reativacao: acessoReativacao || null,
+      op_nao_lanca: opNaoLancaChk || null
     };
     if(pass) dados.senha = pass; // só atualiza a senha se foi digitada uma nova
     await db.ref('usuarios/'+id).update(dados);
@@ -21305,7 +21333,8 @@ async function salvarVendedor(){
       sem_trava_preco: semTrava || null,
       acesso_fretes: acessoFretes || null,
       acesso_clientes_w3: acessoClientesW3 || null,
-      acesso_reativacao: acessoReativacao || null });
+      acesso_reativacao: acessoReativacao || null,
+      op_nao_lanca: opNaoLancaChk || null });
     fecharModal('modal-vendedor'); renderVendedores();
     toast(`✓ Usuário ${nome} cadastrado!`,'success');
   }
