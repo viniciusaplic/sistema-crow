@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 25/11/2026 13:25\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 25/11/2026 13:25</span>
+            onclick="alert('Versão desta build: 25/11/2026 14:10\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 25/11/2026 14:10</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -2992,7 +2992,7 @@ tbody td{padding:11px 16px;font-size:14px}
     </div>
     <div class="coleta-bloco">
       <div class="coleta-rotulo">Pedidos e notas fiscais</div>
-      <input class="search-input" id="coleta-filtro" style="width:100%;box-sizing:border-box;margin-bottom:8px" placeholder="Filtrar por nº do pedido, cliente ou cidade" oninput="renderColetaLinhas()">
+      <input class="search-input" id="coleta-filtro" style="width:100%;box-sizing:border-box;margin-bottom:8px" placeholder="Digite o nº da NF ou o nome do cliente (sem NF lançada: nº do pedido)" autocomplete="off" oninput="renderColetaLinhas()">
       <div id="coleta-linhas" style="max-height:42vh;overflow-y:auto"></div>
       <div id="coleta-resumo" style="font-size:13px;color:var(--muted);margin-top:6px"></div>
     </div>
@@ -16885,6 +16885,9 @@ let COLETA_HIST_FIM = false;
 let COLETA_ASSINATURAS_CACHE = {};
 let coletaEmGravacao = false;
 let assinaturaPadColeta = null;
+// pedidoId -> nº da NF lançada em Transportes e Fretes (lido de pedidos/{id}/entrega).
+// Guarda só o que foi achado; pedido sem NF é consultado de novo na próxima abertura.
+let COLETA_NF_FRETE = {};
 
 function fmtDataHoraColeta(iso){
   if(!iso) return '';
@@ -17842,6 +17845,7 @@ function resumoEntregaPedido(rec, mes, id){
     transportadora: rec.transportadora || '', previsao: rec.previsao || '',
     status: rec.status || '', status_label: infoStatusFrete('envio', rec.status).label,
     data_entrega: rec.data_entrega || '', rastreio: rec.rastreio || '',
+    nf_numero: String(rec.nf_numero || ''),
     ref: mes+'/'+id, atualizado_em: rec.atualizado_em
   };
 }
@@ -18237,29 +18241,66 @@ async function abrirModalColeta(){
   const dlCol = document.getElementById('coleta-coletores-lista'); if(dlCol) dlCol.innerHTML = '';
   renderColetaLinhas();
   abrirModal('modal-coleta');
+  carregarNFsFreteColeta().then(renderColetaLinhas).catch(()=>{});
   // O quadro de assinatura só pode ser medido com o modal visível
   requestAnimationFrame(() => {
     assinaturaPadColeta = iniciarAssinaturaPad(document.getElementById('coleta-assinatura'));
   });
 }
 
+// Lê a NF lançada em Transportes e Fretes de cada pedido da fila: 1 leitura minúscula por
+// pedido (pedidos/{id}/entrega). Fretes lançados antes desta versão não têm a NF no resumo;
+// nesses casos lê só o campo nf_numero do registro do frete.
+async function carregarNFsFreteColeta(){
+  const faltam = COLETA_PENDENTES.filter(p => !COLETA_NF_FRETE[p.id]);
+  await Promise.all(faltam.map(async p => {
+    try {
+      const e = (await db.ref('pedidos/'+p.id+'/entrega').once('value')).val();
+      if(!e) return;
+      let nf = String(e.nf_numero || '');
+      if(!nf && e.ref) nf = String((await db.ref('fretes/'+e.ref+'/nf_numero').once('value')).val() || '');
+      const d = nf.replace(/\D/g,'');
+      if(d && Number(d) > 0) COLETA_NF_FRETE[p.id] = String(Number(d));
+    } catch(_){}
+  }));
+}
+
 function renderColetaLinhas(){
   const el = document.getElementById('coleta-linhas');
   if(!el) return;
-  const filtro = String(document.getElementById('coleta-filtro')?.value||'').trim().toLowerCase();
+  // O campo começa vazio e não lista nada: aparece só o pedido da NF digitada (lançada em
+  // Fretes) ou, se a NF ainda não foi lançada, o pedido pelo número exato.
+  const bruto = String(document.getElementById('coleta-filtro')?.value||'').trim();
+  let dig = bruto.replace(/^#/,'');
+  dig = /^[\d.\s-]+$/.test(dig) ? dig.replace(/\D/g,'') : '';
+  if(dig.length === 44){ const r = analisarChaveNFe(dig); dig = r.ok ? r.numero : ''; }
+  const numBusca = dig ? String(Number(dig)) : '';
+  const txtBusca = numBusca ? '' : normTxtFrete(bruto);
   const lista = COLETA_PENDENTES.filter(p => {
     if(COLETA_SELECAO[p.id]) return true; // selecionado nunca some pelo filtro
-    if(!filtro) return true;
-    return String(p.numero).includes(filtro) || String(p.cliente_nome||'').toLowerCase().includes(filtro)
-      || String(p.cliente_cidade||'').toLowerCase().includes(filtro);
+    const nfF = COLETA_NF_FRETE[p.id];
+    if(numBusca){
+      if(nfF) return nfF === numBusca;
+      return String(Number(String(p.numero).replace(/\D/g,''))) === numBusca;
+    }
+    if(txtBusca.length >= 2) return !!nfF && normTxtFrete(p.cliente_nome).includes(txtBusca);
+    return false;
   });
+  const vazioMsg = !bruto
+    ? 'Digite o nº da NF ou o nome do cliente.<br><span style="font-size:12px">Se a NF ainda não foi lançada em Transportes e Fretes, digite o nº do pedido.</span>'
+    : (numBusca
+        ? `Nenhuma NF ou pedido ${esc(numBusca)} aguardando coleta.<br><span style="font-size:12px">Pedido que já tem NF lançada em Fretes só aparece pelo nº da NF.</span>`
+        : (txtBusca.length < 2 ? 'Digite pelo menos 2 letras do nome do cliente.'
+            : 'Nenhuma NF lançada em Fretes para esse cliente.<br><span style="font-size:12px">Se a NF ainda não foi lançada, digite o nº do pedido.</span>'));
   el.innerHTML = lista.map(p => {
     const s = COLETA_SELECAO[p.id];
+    const nfF = COLETA_NF_FRETE[p.id];
     let statusNF = '';
     if(s){
       if(s.nf){
-        const origem = s.nf.chave ? 'lida da DANFE' : 'digitada';
+        const origem = s.nf.chave ? 'lida da DANFE' : (s.nf.deFrete ? 'lançada em Fretes' : 'digitada');
         statusNF = `<div style="font-size:12px;color:#166534;margin-top:3px">✓ NF ${esc(s.nf.numero)}${s.nf.serie?' · série '+esc(s.nf.serie):''} (${origem})</div>`;
+        if(nfF && s.nf.numero !== nfF) statusNF += `<div style="font-size:12px;color:#b45309">⚠ Diferente da NF lançada em Fretes para este pedido (${esc(nfF)}). Confira a nota.</div>`;
         if(s.nf.outroEmitente) statusNF += `<div style="font-size:12px;color:#b45309">⚠ O CNPJ emitente dessa nota não é o da Crow</div>`;
       } else if(s.nfErro){
         statusNF = `<div style="font-size:12px;color:#dc2626;margin-top:3px">${esc(s.nfErro)}</div>`;
@@ -18269,8 +18310,8 @@ function renderColetaLinhas(){
       <label class="coleta-linha-topo">
         <input type="checkbox" ${s?'checked':''} onchange="alternarPedidoColeta('${esc(p.id)}', this.checked)">
         <div style="flex:1;min-width:0">
-          <div><strong>#${esc(p.numero)}</strong> — ${esc(p.cliente_nome)}</div>
-          <div style="font-size:12px;color:var(--muted)">${esc(p.cliente_cidade)}${p.cliente_uf?'/'+esc(p.cliente_uf):''}</div>
+          <div>${nfF ? `<strong>NF ${esc(nfF)}</strong> · ` : ''}<strong>#${esc(p.numero)}</strong> — ${esc(p.cliente_nome)}</div>
+          <div style="font-size:12px;color:var(--muted)">${esc(p.cliente_cidade)}${p.cliente_uf?'/'+esc(p.cliente_uf):''}${nfF ? '' : ' · <span style="color:#b45309">NF ainda não lançada em Fretes</span>'}</div>
         </div>
       </label>
       ${s ? `<div class="coleta-linha-campos">
@@ -18288,7 +18329,7 @@ function renderColetaLinhas(){
         </label>
       </div>` : ''}
     </div>`;
-  }).join('') || '<div style="padding:16px;color:var(--muted);text-align:center">Nenhum pedido encontrado com esse filtro.</div>';
+  }).join('') || `<div style="padding:16px;color:var(--muted);text-align:center">${vazioMsg}</div>`;
   atualizarResumoColeta();
 }
 
@@ -18303,12 +18344,19 @@ function atualizarResumoColeta(){
 function alternarPedidoColeta(pid, marcado){
   if(marcado){
     const p = COLETA_PENDENTES.find(x => x.id === pid);
-    COLETA_SELECAO[pid] = { volumes: Number(p?.volumes)||1, nf:null, nfTexto:'', nfErro:'' };
+    const nfF = COLETA_NF_FRETE[pid];
+    COLETA_SELECAO[pid] = nfF
+      ? { volumes: Number(p?.volumes)||1, nf:{ numero:nfF, serie:'', chave:'', deFrete:true }, nfTexto:nfF, nfErro:'' }
+      : { volumes: Number(p?.volumes)||1, nf:null, nfTexto:'', nfErro:'' };
   } else {
     delete COLETA_SELECAO[pid];
   }
+  if(marcado){ const f = document.getElementById('coleta-filtro'); if(f) f.value = ''; }
   renderColetaLinhas();
-  if(marcado) setTimeout(() => document.getElementById('coleta-nf-'+pid)?.focus(), 30);
+  if(marcado) setTimeout(() => {
+    if(COLETA_SELECAO[pid]?.nf) document.getElementById('coleta-filtro')?.focus();
+    else document.getElementById('coleta-nf-'+pid)?.focus();
+  }, 30);
 }
 
 function aplicarNFColeta(pid, valor){
