@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 25/11/2026 14:10\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 25/11/2026 14:10</span>
+            onclick="alert('Versão desta build: 25/11/2026 15:00\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 25/11/2026 15:00</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -28887,10 +28887,29 @@ function impUltimosPrecosUsd(){
 }
 
 // ── Cálculos por SKU (Mapa / Alertas) ─────────────────────────────────────────
+// A caminho = já comprado, ainda não recebido no nosso estoque:
+//   • pedidos de compra Em Separação ou Em Trânsito (mesma regra de "a caminho" dos relatórios de Compras);
+//   • pedidos de retirada do fornecedor (importacao_origem) desde a criação, mesmo Em Negociação,
+//     porque a quantidade já saiu do saldo do pedido de importação.
+// Entra no Total disponível — senão a peça "some" entre sair do fornecedor e ser recebida.
+function impACaminhoPorChave(){
+  const mapa = {};
+  IMP.compras.forEach(c => {
+    const conta = c.status === 'separacao' || c.status === 'transito' || (c.importacao_origem && c.status === 'negociacao');
+    if(!conta) return;
+    (c.itens || []).forEach(i => {
+      if(!i.codigo || impNum(i.qtd) <= 0) return;
+      const k = impChave(i.codigo);
+      (mapa[k] = mapa[k] || []).push({ id:c.id, numero:c.numero_origem, status:c.status, fornecedor:c.fornecedor||'', qtd:impNum(i.qtd) });
+    });
+  });
+  return mapa;
+}
 function impLinhasMapa(){
   const resumos = impPedidosImportacao(false).map(impResumoPedido);
   const mesRef = impMesAtual();
   const precosUsd = impUltimosPrecosUsd();
+  const caminhoMapa = impACaminhoPorChave();
   return Object.entries(IMP.skus).filter(([,s]) => s && s.ativo !== false).map(([k, s]) => {
     const cod = s.codigo;
     const cad = impCadastro(cod);
@@ -28908,7 +28927,10 @@ function impLinhasMapa(){
     transito.sort((a,b) => String(a.previsao||'9999').localeCompare(String(b.previsao||'9999')));
     const estForn = fornPedidos.reduce((t,x)=>t+x.qtd,0);
     const enc = transito.reduce((t,x)=>t+x.qtd,0);
-    const total = estPropTotal + estForn;
+    // "ambos": soma também o vendável sem o M, como no estoque próprio
+    const caminho = [...(caminhoMapa[k] || []), ...(contra ? (caminhoMapa[impChave(contra.codigo)] || []) : [])];
+    const aCaminho = caminho.reduce((t,x)=>t+x.qtd,0);
+    const total = estPropTotal + estForn + aCaminho;
     const cmm = impNum(s.cmm);
     const proj = total + enc;
     const cobAtual = cmm > 0 ? total/cmm : null;
@@ -28924,7 +28946,7 @@ function impLinhasMapa(){
     const usd = precosUsd[k] || 0;
     return { k, s, cod, nome: cad?.nome || s.descricao || '', semCadastro: !cad, tipoItem: cad?.tipo || '',
       estProprio, estContra, contraCod: contra?.codigo || '', estPropTotal, fornPedidos, estForn,
-      transito, enc, total, cmm, proj, cobAtual, cobProj, pedirAte, pedirN, moq, sugestao, usd, sugUsd: sugestao*usd };
+      caminho, aCaminho, transito, enc, total, cmm, proj, cobAtual, cobProj, pedirAte, pedirN, moq, sugestao, usd, sugUsd: sugestao*usd };
   }).sort((a,b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
 }
 
@@ -29058,6 +29080,9 @@ function impHtmlDetalheSku(l){
     ? `${impFmtQtd(l.estForn)}<div style="font-size:12px;color:var(--muted)">${[
         ...l.fornPedidos.map(p => `#${esc(p.numero||'')}${p.numForn?' ('+esc(p.numForn)+')':''}: ${impFmtQtd(p.qtd)}`)].join('<br>')}</div>`
     : '0';
+  const caminhoTxt = l.aCaminho
+    ? `${impFmtQtd(l.aCaminho)}<div style="font-size:12px;color:var(--muted)">${l.caminho.map(p => `#${esc(p.numero||'')} ${esc(statusInfoCompra(p.status).label)}: ${impFmtQtd(p.qtd)}`).join('<br>')}</div>`
+    : '0';
   const transTxt = l.transito.length
     ? `${impFmtQtd(l.enc)}<div style="font-size:12px;color:var(--muted)">${l.transito.map(p => `<span style="${p.atrasado?'color:#dc2626;font-weight:700':''}">#${esc(p.numero||'')}${p.numForn?' ('+esc(p.numForn)+')':''}: ${impFmtQtd(p.qtd)} un · ${p.previsao?impFmtMes(p.previsao):'sem previsão'}${p.atrasado?' (atrasado)':''}</span>`).join('<br>')}</div>`
     : '0';
@@ -29069,6 +29094,7 @@ function impHtmlDetalheSku(l){
       ${v('MOQ', l.moq ? impFmtQtd(l.moq) : '—')}
       ${v('Estoque próprio', estPropTxt)}
       ${v('Estoque fornecedor', fornTxt)}
+      ${v('A caminho (compras)', caminhoTxt)}
       ${v('Total disponível', `<strong>${impFmtQtd(l.total)}</strong>`)}
       ${v('Cobertura atual', impBadgeCob(l.cobAtual))}
       ${v('Qtd. encomendada', transTxt)}
@@ -29089,7 +29115,7 @@ function impHtmlAlertas(linhas){
   const semPreco = alerta.filter(l => l.sugestao > 0 && !l.usd).length;
   const linhaHtml = (l, comSug) => `<div class="im-linha"><div class="im-topo" style="cursor:default">
       <div class="im-c-sku"><strong>${esc(l.cod)}</strong><span>${esc(l.s.cod_fornecedor||'')}</span></div>
-      <div class="im-c-desc">${esc(l.nome)}<span>CMM ${l.cmm>0?impFmtQtd(l.cmm):'—'} · disp. ${impFmtQtd(l.total)} · enc. ${impFmtQtd(l.enc)} · proj. ${impFmtQtd(l.proj)}</span></div>
+      <div class="im-c-desc">${esc(l.nome)}<span>CMM ${l.cmm>0?impFmtQtd(l.cmm):'—'} · disp. ${impFmtQtd(l.total)}${l.aCaminho?' (a caminho '+impFmtQtd(l.aCaminho)+')':''} · enc. ${impFmtQtd(l.enc)} · proj. ${impFmtQtd(l.proj)}</span></div>
       <div class="im-c-cob">${impBadgeCob(l.cobProj)}</div>
       ${comSug ? `<div class="im-c-sug"><strong>${impFmtQtd(l.sugestao)} un</strong><span>${l.moq?'MOQ '+impFmtQtd(l.moq):'sem MOQ'}${l.usd?' · '+impFmtUsd(l.sugUsd):' · sem preço US$'}</span></div>` : ''}
     </div></div>`;
