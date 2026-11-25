@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 25/11/2026 15:00\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 25/11/2026 15:00</span>
+            onclick="alert('Versão desta build: 25/11/2026 15:45\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 25/11/2026 15:45</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -2992,7 +2992,7 @@ tbody td{padding:11px 16px;font-size:14px}
     </div>
     <div class="coleta-bloco">
       <div class="coleta-rotulo">Pedidos e notas fiscais</div>
-      <input class="search-input" id="coleta-filtro" style="width:100%;box-sizing:border-box;margin-bottom:8px" placeholder="Digite o nº da NF ou o nome do cliente (sem NF lançada: nº do pedido)" autocomplete="off" oninput="renderColetaLinhas()">
+      <input class="search-input" id="coleta-filtro" style="width:100%;box-sizing:border-box;margin-bottom:8px" placeholder="Digite o nº da NF, o nº do pedido ou o nome do cliente" autocomplete="off" oninput="renderColetaLinhas()">
       <div id="coleta-linhas" style="max-height:42vh;overflow-y:auto"></div>
       <div id="coleta-resumo" style="font-size:13px;color:var(--muted);margin-top:6px"></div>
     </div>
@@ -16827,7 +16827,9 @@ async function finalizarPedidoBipado(){
     invalidarCacheNo('pedidos');
     // Entra na fila da Coleta (nó pequeno próprio: a tela de Coleta não varre os pedidos).
     // Falha aqui não pode travar a bipagem — o botão "Buscar bipados recentes" recupera.
-    db.ref('aguardando_coleta/'+p.id).set(resumoPedidoColeta({ ...p, ts_fim_bipagem: agoraTs() }))
+    // Pedido já marcado "Sem frete" em Fretes entra fora da lista (só aparece buscando).
+    db.ref('pedidos/'+p.id+'/sem_frete').once('value')
+      .then(sf => db.ref('aguardando_coleta/'+p.id).set({ ...resumoPedidoColeta({ ...p, ts_fim_bipagem: agoraTs() }), ...(sf.val() ? { oculto: true, oculto_em: agora().toISOString() } : {}) }))
       .catch(e => console.warn('Falha ao incluir na fila de coleta:', e));
     toast(`✅ Pedido #${p.numero} concluído! Estoque atualizado.`,'success');
 
@@ -16949,6 +16951,7 @@ async function renderColeta(){
     const v = snap.val() || {};
     COLETA_PENDENTES = Object.keys(v).map(id => ({ id, ...v[id] }))
       .sort((a,b) => (Number(a.numero)||0) - (Number(b.numero)||0));
+    if(pode) await arrumarFilaColeta();
   } catch(e){ toast('Erro ao carregar pedidos aguardando coleta: '+e.message,'error'); }
   renderColetaPendentes();
   COLETA_HIST = []; COLETA_HIST_FIM = false;
@@ -16956,20 +16959,53 @@ async function renderColeta(){
   catch(e){ toast('Erro ao carregar romaneios: '+e.message,'error'); }
 }
 
+// Pedidos "fora da lista" (oculto): marcados Sem frete em Fretes, tirados no ✕ ou bipados
+// antes de 25/11/2026. Continuam no mesmo nó aguardando_coleta (nenhuma leitura a mais) e
+// aparecem no Registrar coleta pelo nº do pedido ou nome do cliente.
+const COLETA_CORTE_ANTIGOS = '2026-11-25T03:00:00.000Z'; // 25/11/2026 00:00 (Brasília)
+const COLETA_OCULTO_DIAS = 60;
+function coletaVisiveis(){ return COLETA_PENDENTES.filter(p => !p.oculto); }
+
+// Esconde os bipados antes do corte e apaga os escondidos há mais de 60 dias.
+// Usa só o que já foi lido; grava apenas se houver algo a mudar.
+async function arrumarFilaColeta(){
+  const agoraIso = agora().toISOString();
+  const limite = new Date(agoraTs() - COLETA_OCULTO_DIAS*86400000).toISOString();
+  const up = {};
+  COLETA_PENDENTES.forEach(p => {
+    if(p.oculto){
+      if(p.oculto_em && p.oculto_em < limite) up['aguardando_coleta/'+p.id] = null;
+    } else if(p.bipado_em && p.bipado_em < COLETA_CORTE_ANTIGOS){
+      up['aguardando_coleta/'+p.id+'/oculto'] = true;
+      up['aguardando_coleta/'+p.id+'/oculto_em'] = agoraIso;
+    }
+  });
+  if(!Object.keys(up).length) return;
+  try {
+    await db.ref().update(up);
+    COLETA_PENDENTES = COLETA_PENDENTES
+      .filter(p => up['aguardando_coleta/'+p.id] !== null)
+      .map(p => up['aguardando_coleta/'+p.id+'/oculto'] ? { ...p, oculto: true, oculto_em: agoraIso } : p);
+  } catch(e){ console.warn('Falha ao arrumar a fila de coleta:', e); }
+}
+
 function renderColetaPendentes(){
   const el = document.getElementById('coleta-pendentes');
   if(!el) return;
   const pode = temPermissaoEditar('coleta');
-  if(!COLETA_PENDENTES.length){
-    el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:28px">Nenhum pedido bipado aguardando coleta.</div>';
+  const vis = coletaVisiveis();
+  const nOcultos = COLETA_PENDENTES.length - vis.length;
+  const notaOcultos = nOcultos ? `<div style="font-size:12px;color:var(--muted);margin-top:8px">${nOcultos} pedido(s) bipado(s) fora da lista (sem frete ou antigos) — se algum for retirado, ache pelo nº do pedido ou nome do cliente em <strong>+ Registrar coleta</strong>.</div>` : '';
+  if(!vis.length){
+    el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:28px">Nenhum pedido bipado aguardando coleta.</div>' + notaOcultos;
     return;
   }
-  const totVol = COLETA_PENDENTES.reduce((s,p) => s + (Number(p.volumes)||0), 0);
+  const totVol = vis.reduce((s,p) => s + (Number(p.volumes)||0), 0);
   el.innerHTML = `
-    <div style="font-size:13px;color:var(--muted);margin-bottom:8px">${COLETA_PENDENTES.length} pedido(s) · ${totVol} volume(s)</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:8px">${vis.length} pedido(s) · ${totVol} volume(s)</div>
     <div class="table-wrap"><table>
       <thead><tr><th>Pedido</th><th>Cliente</th><th>Cidade/UF</th><th style="text-align:center">Vol.</th><th>Bipado em</th>${pode?'<th></th>':''}</tr></thead>
-      <tbody>${COLETA_PENDENTES.map(p => `<tr>
+      <tbody>${vis.map(p => `<tr>
         <td><strong>#${esc(p.numero)}</strong></td>
         <td>${esc(p.cliente_nome)}</td>
         <td>${esc(p.cliente_cidade)}${p.cliente_uf?'/'+esc(p.cliente_uf):''}</td>
@@ -16977,16 +17013,17 @@ function renderColetaPendentes(){
         <td style="font-size:12px;color:var(--muted)">${fmtDataHoraColeta(p.bipado_em)}</td>
         ${pode?`<td style="text-align:right"><button class="btn btn-outline btn-sm" title="Tirar da lista (ex.: pedido já entregue antes do sistema de coleta)" onclick="removerDaFilaColeta('${esc(p.id)}')">✕</button></td>`:''}
       </tr>`).join('')}</tbody>
-    </table></div>`;
+    </table></div>${notaOcultos}`;
 }
 
 async function removerDaFilaColeta(pid){
   if(!temPermissaoEditar('coleta')) return;
   const p = COLETA_PENDENTES.find(x => x.id === pid);
-  if(!await confirmCustom(`Tirar o pedido #${esc(p?.numero||'')} da lista de coleta?\n\nUse só para pedidos que já saíram sem romaneio. O pedido em si não é alterado.`, 'Tirar da lista')) return;
+  if(!await confirmCustom(`Tirar o pedido #${esc(p?.numero||'')} da lista de coleta?\n\nEle continua podendo ser achado pelo nº do pedido ou nome do cliente em "Registrar coleta". O pedido em si não é alterado.`, 'Tirar da lista')) return;
   try {
-    await db.ref('aguardando_coleta/'+pid).remove();
-    COLETA_PENDENTES = COLETA_PENDENTES.filter(x => x.id !== pid);
+    const em = agora().toISOString();
+    await db.ref('aguardando_coleta/'+pid).update({ oculto: true, oculto_em: em });
+    COLETA_PENDENTES = COLETA_PENDENTES.map(x => x.id === pid ? { ...x, oculto: true, oculto_em: em } : x);
     renderColetaPendentes();
   } catch(e){ toast('Erro: '+e.message,'error'); }
 }
@@ -17006,8 +17043,10 @@ async function buscarBipadosRecentes(){
     Object.keys(v).forEach(id => {
       const p = v[id];
       if(p && p.status === 'CC' && !p.coleta_id && !naFila.has(id)){
-        updates['aguardando_coleta/'+id] = resumoPedidoColeta(p);
-        n++;
+        updates['aguardando_coleta/'+id] = p.sem_frete
+          ? { ...resumoPedidoColeta(p), oculto: true, oculto_em: agora().toISOString() }
+          : resumoPedidoColeta(p);
+        if(!p.sem_frete) n++;
       }
     });
     if(n) await db.ref().update(updates);
@@ -17458,6 +17497,15 @@ async function dispensarFretePendente(i){
   try {
     await db.ref('fretes/'+mes+'/'+id).set(rec);
     (FRETES_CACHE[mes] = FRETES_CACHE[mes] || []).push({ id, mes, ...rec });
+    if(n.pedido_id){
+      // Sai da lista de coleta (fica localizável pelo nº/nome). Se ainda não foi bipado,
+      // a marca no pedido faz ele já entrar fora da lista na bipagem.
+      const em = agora().toISOString();
+      db.ref('pedidos/'+n.pedido_id+'/sem_frete').set(true).catch(()=>{});
+      db.ref('aguardando_coleta/'+n.pedido_id).transaction(atual => atual ? { ...atual, oculto: true, oculto_em: em } : undefined).catch(()=>{});
+      const pc = COLETA_PENDENTES.find(x => x.id === n.pedido_id);
+      if(pc){ pc.oculto = true; pc.oculto_em = em; }
+    }
     renderFretesPendentes();
     toast('✓ Marcado como sem frete','success');
   } catch(e){ toast('Erro: '+e.message,'error'); }
@@ -18230,7 +18278,7 @@ function aoMudarTipoColeta(){
 // ══ REGISTRAR COLETA ══
 async function abrirModalColeta(){
   if(!temPermissaoEditar('coleta')){ toast('Sem permissão de edição na Coleta','error'); return; }
-  if(!COLETA_PENDENTES.length){ toast('Não há pedidos bipados aguardando coleta','error'); return; }
+  if(!COLETA_PENDENTES.length){ toast('Não há pedidos bipados aguardando coleta','error'); return; }  // inclui os fora da lista
   try { await carregarTransportadoras(); } catch(e){ toast('Erro ao carregar transportadoras: '+e.message,'error'); return; }
   COLETA_SELECAO = {};
   document.querySelector('input[name="coleta-tipo"][value="transportadora"]').checked = true;
@@ -18252,7 +18300,7 @@ async function abrirModalColeta(){
 // pedido (pedidos/{id}/entrega). Fretes lançados antes desta versão não têm a NF no resumo;
 // nesses casos lê só o campo nf_numero do registro do frete.
 async function carregarNFsFreteColeta(){
-  const faltam = COLETA_PENDENTES.filter(p => !COLETA_NF_FRETE[p.id]);
+  const faltam = coletaVisiveis().filter(p => !COLETA_NF_FRETE[p.id]);
   await Promise.all(faltam.map(async p => {
     try {
       const e = (await db.ref('pedidos/'+p.id+'/entrega').once('value')).val();
@@ -18279,6 +18327,10 @@ function renderColetaLinhas(){
   const lista = COLETA_PENDENTES.filter(p => {
     if(COLETA_SELECAO[p.id]) return true; // selecionado nunca some pelo filtro
     const nfF = COLETA_NF_FRETE[p.id];
+    if(p.oculto){
+      if(numBusca) return String(Number(String(p.numero).replace(/\D/g,''))) === numBusca;
+      return txtBusca.length >= 2 && normTxtFrete(p.cliente_nome).includes(txtBusca);
+    }
     if(numBusca){
       if(nfF) return nfF === numBusca;
       return String(Number(String(p.numero).replace(/\D/g,''))) === numBusca;
@@ -18311,7 +18363,7 @@ function renderColetaLinhas(){
         <input type="checkbox" ${s?'checked':''} onchange="alternarPedidoColeta('${esc(p.id)}', this.checked)">
         <div style="flex:1;min-width:0">
           <div>${nfF ? `<strong>NF ${esc(nfF)}</strong> · ` : ''}<strong>#${esc(p.numero)}</strong> — ${esc(p.cliente_nome)}</div>
-          <div style="font-size:12px;color:var(--muted)">${esc(p.cliente_cidade)}${p.cliente_uf?'/'+esc(p.cliente_uf):''}${nfF ? '' : ' · <span style="color:#b45309">NF ainda não lançada em Fretes</span>'}</div>
+          <div style="font-size:12px;color:var(--muted)">${esc(p.cliente_cidade)}${p.cliente_uf?'/'+esc(p.cliente_uf):''}${p.oculto ? ' · <span style="color:#6b7280">fora da lista (sem frete/antigo)</span>' : (nfF ? '' : ' · <span style="color:#b45309">NF ainda não lançada em Fretes</span>')}</div>
         </div>
       </label>
       ${s ? `<div class="coleta-linha-campos">
