@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 24/11/2026 17:45\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 24/11/2026 17:45</span>
+            onclick="alert('Versão desta build: 25/11/2026 10:45\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 25/11/2026 10:45</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -1895,6 +1895,10 @@ tbody td{padding:11px 16px;font-size:14px}
           <div class="filtro-group">
             <label>Produto</label>
             <input type="text" id="op-f-produto" placeholder="Nome ou código...">
+          </div>
+          <div class="filtro-group">
+            <label>Nº Pedido</label>
+            <input type="text" id="op-f-pedido" placeholder="ex: 145" style="min-width:100px;width:110px" onkeydown="if(event.key==='Enter'){paginaProducao=1;renderProducao(false)}">
           </div>
           <div class="filtros-btns">
             <button class="btn btn-primary" onclick="paginaProducao=1;renderProducao(false)">Filtrar</button>
@@ -10232,13 +10236,18 @@ async function renderProducao(recarregar = true){
   const filtroDataFim = document.getElementById('op-f-data-fim')?.value || '';
   const filtroResponsavel = document.getElementById('op-f-responsavel')?.value || '';
   const filtroProduto = (document.getElementById('op-f-produto')?.value || '').toLowerCase();
+  const filtroPedido = normalizarPedidoOP(document.getElementById('op-f-pedido')?.value || '');
 
   let filtrado = filtroStatus ? OPS_DB.filter(o=>o.status===filtroStatus) : OPS_DB;
-  if(filtroDataIni){
+  // Filtro por pedido: mostra TODAS as OPs lançadas para o pedido, então ignora as datas
+  if(filtroPedido){
+    filtrado = filtrado.filter(o => normalizarPedidoOP(o.pedido_origem) === filtroPedido);
+  }
+  if(filtroDataIni && !filtroPedido){
     const dIni = new Date(filtroDataIni + 'T00:00:00');
     filtrado = filtrado.filter(o => o.status !== 'concluida' || new Date(o.ts_criacao) >= dIni); // OP aberta nunca some pelo filtro de data
   }
-  if(filtroDataFim){
+  if(filtroDataFim && !filtroPedido){
     const dFim = new Date(filtroDataFim + 'T23:59:59');
     filtrado = filtrado.filter(o => o.status !== 'concluida' || new Date(o.ts_criacao) <= dFim);
   }
@@ -10383,6 +10392,7 @@ function limparFiltrosOP(){
   document.getElementById('filtro-status-op').value = '';
   document.getElementById('op-f-responsavel').value = '';
   document.getElementById('op-f-produto').value = '';
+  document.getElementById('op-f-pedido').value = '';
   paginaProducao = 1;
   renderProducao(false);
 }
