@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 25/11/2026 10:45\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 25/11/2026 10:45</span>
+            onclick="alert('Versão desta build: 25/11/2026 13:25\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 25/11/2026 13:25</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -13580,7 +13580,9 @@ async function _alterarStatusManualCompraInterno(id, novoStatus){
   if(!novoStatus) return;
   if(!temPermissaoEditar('compras')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const c = COMPRAS_CACHE.find(x=>x.id===id);
-  const statusAnterior = c?.status;
+  // Status do BANCO, não da tela: uma tela aberta há tempo pode mostrar status antigo.
+  const statusAnterior = await statusCompraNoBanco(id, c);
+  if(statusAnterior === novoStatus){ await avisarTelaCompraDesatualizada(id, statusAnterior); return; }
   const bloqImp = bloqueioStatusImportacao(statusAnterior, novoStatus);
   if(bloqImp){
     toast(bloqImp,'error');
@@ -13614,6 +13616,19 @@ async function _alterarStatusManualCompraInterno(id, novoStatus){
   toast(`✓ Status alterado para "${statusInfoCompra(novoStatus).label}"`,'success');
 }
 
+// Lê só o campo status do pedido no Firebase (leitura mínima) e corrige o cache da tela.
+async function statusCompraNoBanco(id, c){
+  const st = (await db.ref('pedidos_compra/'+id+'/status').once('value')).val();
+  if(st && c) c.status = st;
+  return st || c?.status || null;
+}
+async function avisarTelaCompraDesatualizada(id, statusBanco){
+  const sel = document.getElementById('compra-detalhe-status-select'); if(sel) sel.value = '';
+  fecharModal('modal-compra-detalhe');
+  await atualizarTelasAposStatusCompra(id, statusBanco);
+  toast('Este pedido já está "' + statusInfoCompra(statusBanco).label + '". Sua tela estava desatualizada — nada foi alterado.','error');
+}
+
 async function registrarHistoricoStatusCompra(compraId, statusAnterior, statusNovo){
   const logKey = db.ref('pedidos_compra/'+compraId+'/historico_status').push().key;
   await db.ref('pedidos_compra/'+compraId+'/historico_status/'+logKey).set({
@@ -13627,7 +13642,8 @@ async function registrarHistoricoStatusCompra(compraId, statusAnterior, statusNo
 async function avancarStatusCompra(id, novoStatus){
   if(!temPermissaoEditar('compras')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const c = COMPRAS_CACHE.find(x=>x.id===id);
-  const statusAnterior = c?.status;
+  const statusAnterior = await statusCompraNoBanco(id, c);
+  if(statusAnterior === novoStatus){ await avisarTelaCompraDesatualizada(id, statusAnterior); return; }
   const bloqImp = bloqueioStatusImportacao(statusAnterior, novoStatus);
   if(bloqImp){ toast(bloqImp,'error'); return; }
   if(novoStatus === 'concluido' && statusAnterior !== 'recebido'){
@@ -13650,13 +13666,14 @@ async function _marcarCompraRecebidaInterno(id){
   if(!temPermissaoEditar('compras')){ toast('Acesso restrito — sem permissão de edição nesta área','error'); return; }
   const c = COMPRAS_CACHE.find(x=>x.id===id);
   if(!c) return;
-  const stBanco = (await db.ref('pedidos_compra/'+id+'/status').once('value')).val();
-  const bloqImp = bloqueioStatusImportacao(stBanco || c.status, 'recebido');
+  const stBanco = await statusCompraNoBanco(id, c);
+  if(['recebido','concluido'].includes(stBanco)){ await avisarTelaCompraDesatualizada(id, stBanco); return; }
+  const bloqImp = bloqueioStatusImportacao(stBanco, 'recebido');
   if(bloqImp){ toast(bloqImp,'error'); return; }
   const confRec = await lerConferenciaCompra(id);
   if(!confirm(`Compra de "${c.fornecedor}"\n\n` + textoConfirmRecebimentoCompra(c, confRec))) return;
 
-  const statusAnterior = c.status;
+  const statusAnterior = stBanco;
   // Entrada primeiro: se cair no meio, o status não avança e o recebimento pode ser
   // refeito sem duplicar os itens que já entraram.
   await darEntradaEstoqueCompra(id, c, statusAnterior);
