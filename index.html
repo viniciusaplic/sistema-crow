@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 25/11/2026 15:45\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 25/11/2026 15:45</span>
+            onclick="alert('Versão desta build: 25/11/2026 17:10\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 25/11/2026 17:10</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -1490,6 +1490,7 @@ tbody td{padding:11px 16px;font-size:14px}
         <div style="display:flex;gap:8px">
           <button class="btn btn-outline" style="color:#dc2626;border-color:#dc2626" onclick="abrirRevisaoItensSemCadastro()">⚠️ Itens sem Cadastro</button>
           <button class="btn btn-outline" onclick="exportarComprasExcel()">📊 Exportar Excel</button>
+          <button class="btn btn-outline" id="btn-enf-log" style="display:none;border-color:#16a34a;color:#166534" onclick="abrirEntradasParaLog(false)">📋 Entradas p/ LOG</button>
           <button class="btn btn-primary" onclick="abrirModalNovaCompra()">+ Nova Compra</button>
         </div>
       </div>
@@ -13232,6 +13233,7 @@ async function renderCompras(){
   const snap = await db.ref('pedidos_compra').once('value');
   const todos = snap.val() || {};
   COMPRAS_CACHE = Object.keys(todos).map(id=>({id, ...todos[id]})).sort((a,b)=>(b.ts_criacao||0)-(a.ts_criacao||0));
+  const btnEnfLog = document.getElementById('btn-enf-log'); if(btnEnfLog) btnEnfLog.style.display = usuarioLogado?.admin ? '' : 'none';
 
   const filtroStatus = document.getElementById('compra-f-status')?.value || '';
   const filtroDataIni = document.getElementById('compra-f-data-ini')?.value || '';
@@ -13268,7 +13270,7 @@ async function renderCompras(){
           ${numeroExibir ? `<div style="font-size:12px;color:var(--accent);font-weight:600;margin-top:2px">🔖 ${numeroExibir}</div>` : ''}
           <div style="font-size:12px;color:var(--muted);margin-top:2px">${c.itens?.length||0} itens · ${c.data?new Date(c.data+'T00:00').toLocaleDateString('pt-BR'):''}</div>
         </div>
-        <span class="badge" style="background:${statusInfo.bg};color:${statusInfo.cor}">${statusInfo.label}</span>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px"><span class="badge" style="background:${statusInfo.bg};color:${statusInfo.cor}">${statusInfo.label}</span>${usuarioLogado?.admin ? enfBadgeLista(c) : ''}</div>
       </div>
       <div class="pedido-card-info">💰 Total: <span><strong>${fmtMoeda(c.total)}</strong></span></div>
       ${c.obs ? `<div style="margin-top:6px;padding:6px 10px;background:#fffbeb;border-left:3px solid #fde68a;border-radius:0 6px 6px 0;font-size:12px;color:#92400e">⚠️ ${c.obs}</div>` : ''}
@@ -13562,6 +13564,7 @@ async function abrirDetalheCompra(id){
       <button class="btn btn-outline" onclick="editarPedidoCompra('${c.id}')">✏️ Editar</button>
       <button class="btn btn-outline" onclick="clonarPedidoCompra('${c.id}')">📑 Clonar Pedido</button>
       <button class="btn btn-outline" onclick="imprimirCapaPedidoCompra('${c.id}')">🖨️ Imprimir Pedido</button>
+      ${usuarioLogado?.admin && !['negociacao','importacao'].includes(c.status) ? `<button class="btn btn-outline" style="border-color:#16a34a;color:#166534" onclick="abrirEntradaNF('${c.id}')">📑 Entrada de NF${c.entrada_nf ? (enfSituacaoPronta(c.entrada_nf) ? (c.entrada_nf.copiado_log_em ? ' ✓' : ' (pronta)') : ' (aguardando ST)') : ''}</button>` : ''}
       ${podeCancel ? `<button class="btn btn-outline" style="color:#dc2626;border-color:#dc2626" onclick="cancelarPedidoCompra('${c.id}')">🗑️ Cancelar Pedido</button>` : ''}
       ${botaoAvancar}
     </div>
@@ -13693,6 +13696,681 @@ async function atualizarTelasAposStatusCompra(id, novoStatus){
   invalidarCacheNo('pedidos_compra');
   if(document.getElementById('tab-compras')?.style.display !== 'none') await renderCompras();
   if(document.getElementById('tab-painel')?.style.display !== 'none') renderConferenciasPendentesPainel();
+}
+
+// ══════════════════════════════════════════════
+// ══ ENTRADA DE NF (custo de compra → LOG DE ENTRADAS da planilha MC) ══
+// Substitui a aba ENTRADA NF da planilha MC_2025. Só admin. Tudo fica gravado em
+// pedidos_compra/{id}/entrada_nf — não mexe nos itens, na quantidade nem no estoque do pedido.
+// Cálculo igual ao da planilha:
+//   frete % = frete ÷ (Σ (preço + IPI) × qtd + Σ ST)
+//   CMV final = (preço + IPI unit + ST ÷ qtd) × (1 + frete %)
+// Leituras no Firebase: 1 (o pedido, fresco) ao abrir; 1 nó pequeno de configuração só ao
+// importar a planilha de ST. A lista de "Entradas p/ LOG" usa o COMPRAS_CACHE já carregado.
+// ══════════════════════════════════════════════
+const ENF_NO_MAPA_ST = 'config/entrada_nf_colunas_st';
+const ENF_ALERTA_CMV = 0.10;          // alerta quando o CMV sobe mais de 10% sobre o anterior
+let ENF = null;                        // estado da tela aberta
+
+function enfNum(v){
+  if(v === null || v === undefined || v === '') return 0;
+  if(typeof v === 'number') return isFinite(v) ? v : 0;
+  let s = String(v).replace(/R\$/gi,'').replace(/\s/g,'');
+  if(s.includes(',')) s = s.replace(/\./g,'').replace(',', '.');
+  const n = Number(s);
+  return isFinite(n) ? n : 0;
+}
+function enfNormCab(s){
+  return String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
+}
+function enfNormCod(s){ return String(s ?? '').trim().toUpperCase(); }
+function enfCodIgual(a, b){
+  a = enfNormCod(a); b = enfNormCod(b);
+  if(!a || !b) return false;
+  if(a === b) return true;
+  return a.replace(/^0+(?=.)/,'') === b.replace(/^0+(?=.)/,'');
+}
+function enfListaNfs(txt){ return String(txt || '').split(/[\/,;\s]+/).map(s => s.trim().replace(/^0+(?=.)/,'')).filter(Boolean); }
+function enfFmtNum(v, casas){ return Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas }); }
+function enfFmtPct(v){ return (v >= 0 ? '+' : '') + (v * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '%'; }
+
+// Código do fornecedor do item: o do item no pedido; se vazio, o do cadastro do produto/insumo
+// (fornecedor do pedido; se não houver, o padrão — mesma regra de adicionarItemCompra).
+function enfCodigoFornecedorItem(item, fornecedorPedido){
+  if(String(item.codigo_fornecedor || '').trim()) return { cod: String(item.codigo_fornecedor).trim(), origem: 'pedido' };
+  const fonte = item.tipo === 'insumo' ? INSUMOS_DB : PRODUTOS_DB;
+  const cad = fonte.find(x => x.codigo === item.codigo);
+  const fs = cad?.fornecedores || [];
+  const nomeF = String(fornecedorPedido || '').trim().toLowerCase();
+  const f = fs.find(x => String(x.nome || '').trim().toLowerCase() === nomeF) || fs.find(x => x.padrao) || fs[0];
+  const cod = String(f?.codigo_fornecedor || '').trim();
+  return cod ? { cod, origem: 'cadastro' } : { cod: '', origem: '' };
+}
+
+function enfSituacaoPronta(e){ return !!e && !!e.st_situacao && e.st_situacao !== 'aguardando'; }
+
+// Cálculo do CMV de uma entrada. Função pura: serve para a tela, para o CMV anterior e para a
+// cópia em lote (o frete vem sempre do pedido, então muda junto se o frete for corrigido lá).
+function enfCalcular(c, entrada){
+  const itens = c?.itens || [];
+  const ei = entrada?.itens || {};
+  const linhas = itens.map((it, idx) => {
+    const chave = chaveItemCompra(it, idx);
+    const e = ei[chave] || {};
+    const qtd = enfNum(e.qtd);
+    const preco = enfNum(e.preco);
+    const ipiPct = enfNum(e.ipi_pct);
+    const st = enfNum(e.st);
+    const ipiUnit = preco * ipiPct / 100;
+    return { chave, idx, item: it, qtd, preco, ipiPct, st, ipiUnit, ipiValor: ipiUnit * qtd, totalItem: (preco + ipiUnit) * qtd };
+  });
+  const frete = enfNum(c?.frete);
+  const ativos = linhas.filter(l => l.qtd > 0);
+  const base = ativos.reduce((s, l) => s + l.totalItem + l.st, 0);
+  const fretePct = base > 0 ? frete / base : 0;
+  linhas.forEach(l => {
+    l.cmv = l.qtd > 0 ? (l.preco + l.ipiUnit + l.st / l.qtd) * (1 + fretePct) : 0;
+  });
+  const totalNf = ativos.reduce((s, l) => s + l.totalItem, 0);
+  const totalSt = ativos.reduce((s, l) => s + l.st, 0);
+  return { linhas, frete, fretePct, base, totalNf, totalSt };
+}
+
+// CMV anterior de um código: última entrada pronta (pela data da NF) em OUTRO pedido do cache;
+// se não houver, o preço de custo do cadastro.
+function enfCmvAnterior(codigo, idAtual, tipo){
+  let melhor = null;
+  for(const c of (COMPRAS_CACHE || [])){
+    if(c.id === idAtual || !enfSituacaoPronta(c.entrada_nf)) continue;
+    const calc = enfCalcular(c, c.entrada_nf);
+    const l = calc.linhas.find(x => x.item.codigo === codigo && x.qtd > 0);
+    if(!l) continue;
+    const data = c.entrada_nf.data || c.data || '';
+    if(!melhor || data > melhor.data) melhor = { cmv: l.cmv, data, origem: 'entrada', nf: c.entrada_nf.nfs || c.nf || '' };
+  }
+  if(melhor) return melhor;
+  const fonte = tipo === 'insumo' ? INSUMOS_DB : PRODUTOS_DB;
+  const cad = fonte.find(x => x.codigo === codigo);
+  const pc = Number(cad?.preco_custo) || 0;
+  return pc > 0 ? { cmv: pc, data: '', origem: 'cadastro' } : null;
+}
+
+// Dias da condição de pagamento do pedido (mesma regra do preview do pedido de compra)
+function enfDiasCondicao(cond){
+  const n = String(cond || '').toUpperCase().replace(/\s/g,'');
+  if(!n) return [];
+  if(n.includes('VISTA')) return [0];
+  if(n.includes('/')) return n.split('/').map(Number).filter(x => !isNaN(x));
+  if(!isNaN(Number(n))) return [Number(n)];
+  return null; // formato não reconhecido
+}
+
+async function abrirEntradaNF(id){
+  if(!usuarioLogado?.admin){ toast('Entrada de NF: somente administrador','error'); return; }
+  if(!PRODUTOS_DB.length) await carregarProdutosFirebase();
+  if(!INSUMOS_DB.length) await carregarInsumosFirebase();
+  // Leitura fresca do pedido: uma tela aberta há tempo não pode sobrescrever a entrada salva.
+  const c = (await db.ref('pedidos_compra/' + id).once('value')).val();
+  if(!c){ toast('Pedido de compra não encontrado','error'); return; }
+  c.id = id;
+  const cc = COMPRAS_CACHE.find(x => x.id === id); if(cc) Object.assign(cc, c);
+  const conf = await lerConferenciaCompra(id);
+  const salvo = c.entrada_nf || null;
+
+  const itens = {};
+  (c.itens || []).forEach((it, idx) => {
+    const chave = chaveItemCompra(it, idx);
+    const s = salvo?.itens?.[chave];
+    if(s){ itens[chave] = { ...s }; return; }
+    // Primeira vez: qtd recebida na conferência da expedição (se finalizada), senão a do pedido
+    const ci = conf?.status === 'finalizada' ? conf.itens?.[chave] : null;
+    const qtdConf = (ci && ci.qtd_recebida !== undefined && ci.qtd_recebida !== null) ? Number(ci.qtd_recebida) || 0 : null;
+    itens[chave] = { qtd: qtdConf !== null ? qtdConf : (Number(it.qtd) || 0), preco: Number(it.preco_unit) || 0,
+      ipi_pct: Number(it.ipi_pct) || 0, st: Number(it.st_valor) || 0 };
+  });
+
+  ENF = {
+    id, c, conf,
+    nfs: salvo?.nfs ?? (c.nf || conf?.nf || ''),
+    data: salvo?.data || agora().toISOString().split('T')[0],
+    st_situacao: salvo?.st_situacao || 'aguardando',
+    st_import: salvo?.st_import || null,
+    copiado_log_em: salvo?.copiado_log_em || null,
+    copiado_log_por: salvo?.copiado_log_por || '',
+    itens, salvo: !!salvo, alterado: false
+  };
+  fecharModal('modal-compra-detalhe');
+  enfRender();
+}
+
+function enfFechar(){
+  if(ENF?.alterado && !confirm('Há alterações não salvas na Entrada de NF. Fechar mesmo assim?')) return;
+  document.getElementById('enf-overlay')?.remove();
+  ENF = null;
+}
+
+function enfCampo(chave, campo, valor){
+  if(!ENF?.itens[chave]) return;
+  ENF.itens[chave][campo] = enfNum(valor);
+  if(campo === 'st' && ENF.st_situacao === 'aguardando') ENF.st_situacao = 'manual';
+  ENF.alterado = true;
+  // Re-render depois que o foco já foi para o próximo campo (Tab/clique) e devolve o foco a ele,
+  // para dar para preencher a coluna inteira sem clicar campo a campo.
+  setTimeout(() => {
+    const foco = document.activeElement?.id || '';
+    enfRender();
+    if(foco){ const el = document.getElementById(foco); if(el){ el.focus(); if(el.select) el.select(); } }
+  }, 0);
+}
+function enfCabecalho(campo, valor){
+  if(!ENF) return;
+  ENF[campo] = valor;
+  ENF.alterado = true;
+  if(campo === 'st_situacao') enfRender(); else enfRenderResumo();
+}
+
+function enfRender(){
+  if(!ENF) return;
+  const { c } = ENF;
+  const entrada = { itens: ENF.itens };
+  const calc = enfCalcular(c, entrada);
+  const pronta = enfSituacaoPronta({ st_situacao: ENF.st_situacao });
+  const scroll = document.getElementById('enf-corpo')?.scrollTop || 0;
+
+  const linhasHtml = calc.linhas.map(l => {
+    const it = l.item;
+    const qtdPed = Number(it.qtd) || 0, precoPed = Number(it.preco_unit) || 0;
+    const difQtd = Math.abs(l.qtd - qtdPed) > 0.0001;
+    const difPreco = Math.abs(l.preco - precoPed) > 0.005;
+    const cf = enfCodigoFornecedorItem(it, c.fornecedor);
+    const ant = l.qtd > 0 ? enfCmvAnterior(it.codigo, ENF.id, it.tipo) : null;
+    const var_ = ant && ant.cmv > 0 ? (l.cmv - ant.cmv) / ant.cmv : null;
+    const corVar = var_ === null ? 'var(--muted)' : var_ > ENF_ALERTA_CMV ? '#dc2626' : var_ < -ENF_ALERTA_CMV ? '#16a34a' : 'var(--muted)';
+    const inp = (campo, v, w, destaque) => `<input type="number" step="any" id="enf-${campo}-${l.idx}" value="${v}" onchange="enfCampo('${l.chave}','${campo}',this.value)"
+      style="width:${w}px;padding:3px 4px;border:1px solid ${destaque ? '#f59e0b' : 'var(--border)'};background:${destaque ? '#fffbeb' : 'var(--surface,#fff)'};border-radius:4px;text-align:right;font-size:12px">`;
+    return `<tr style="border-bottom:1px solid var(--border);${l.qtd <= 0 ? 'opacity:.5' : ''}">
+      <td style="padding:5px 4px"><strong>${esc(it.codigo)}</strong><div style="font-size:11px;color:${cf.cod ? 'var(--muted)' : '#dc2626'}">${cf.cod ? 'Forn.: ' + esc(cf.cod) : 'sem cód. fornecedor'}</div></td>
+      <td style="padding:5px 4px;font-size:11px">${esc(it.nome || '')}</td>
+      <td style="padding:5px 4px;text-align:right">${inp('qtd', l.qtd, 64, difQtd)}${difQtd ? `<div style="font-size:10px;color:#b45309">pedido ${enfFmtNum(qtdPed, 0)}</div>` : ''}</td>
+      <td style="padding:5px 4px;text-align:right">${inp('preco', l.preco, 76, difPreco)}${difPreco ? `<div style="font-size:10px;color:#b45309">pedido ${enfFmtNum(precoPed, 2)}</div>` : ''}</td>
+      <td style="padding:5px 4px;text-align:right">${inp('ipi_pct', l.ipiPct, 52, false)}<div style="font-size:10px;color:var(--muted)">${fmtMoeda(l.ipiValor)}</div></td>
+      <td style="padding:5px 4px;text-align:right">${inp('st', l.st, 72, false)}</td>
+      <td style="padding:5px 4px;text-align:right;font-weight:700;color:var(--success)">${l.qtd > 0 ? 'R$ ' + enfFmtNum(l.cmv, 4) : '—'}</td>
+      <td style="padding:5px 4px;text-align:right;font-size:11px;color:${corVar}">${ant ? 'R$ ' + enfFmtNum(ant.cmv, 4) + `<div>${var_ !== null ? enfFmtPct(var_) : ''}${ant.origem === 'cadastro' ? ' (cadastro)' : ''}</div>` : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  const optSt = [['aguardando','⏳ Aguardando planilha de ST'],['importado','✓ ST importado da planilha'],['manual','✍️ ST lançado à mão'],['sem_st','Sem ST nesta compra']]
+    .map(([v, t]) => `<option value="${v}" ${ENF.st_situacao === v ? 'selected' : ''}>${t}</option>`).join('');
+
+  document.getElementById('enf-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'enf-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9990;display:flex;align-items:center;justify-content:center;padding:10px';
+  ov.innerHTML = `<div style="background:var(--surface,#fff);color:var(--text,#111);border-radius:12px;max-width:1100px;width:100%;max-height:94vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.4)">
+    <div style="padding:14px 18px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
+        <div>
+          <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800">📑 Entrada de NF — ${esc(c.fornecedor || '')}</div>
+          <div style="font-size:12px;color:var(--muted)">${c.numero_origem ? 'Pedido #' + esc(c.numero_origem) + ' · ' : ''}${statusInfoCompra(c.status).label}${ENF.conf?.status === 'finalizada' ? ' · qtd inicial = conferência da expedição' : ''}</div>
+        </div>
+        <span class="badge" style="background:${pronta ? '#dcfce7' : '#fef3c7'};color:${pronta ? '#166534' : '#92400e'}">${pronta ? (ENF.copiado_log_em ? '✓ Copiada para o LOG' : 'Pronta para o LOG') : 'Aguardando ST'}</span>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:12px;align-items:flex-end">
+        <label style="display:flex;flex-direction:column;gap:2px">Nº da(s) NF(s) <input id="enf-nfs" value="${esc(ENF.nfs)}" placeholder="ex: 8819/9728" oninput="enfCabecalho('nfs',this.value)" style="width:140px;padding:5px;border:1px solid var(--border);border-radius:6px"></label>
+        <label style="display:flex;flex-direction:column;gap:2px">Data da NF <input type="date" value="${esc(ENF.data)}" onchange="enfCabecalho('data',this.value)" style="padding:4px;border:1px solid var(--border);border-radius:6px"></label>
+        <div style="display:flex;flex-direction:column;gap:2px">Frete (do pedido)<div style="padding:5px 0;font-weight:700">${fmtMoeda(calc.frete)} <span style="font-weight:400;color:var(--muted)">· ${(calc.fretePct * 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%</span></div></div>
+        <label style="display:flex;flex-direction:column;gap:2px">ST <select onchange="enfCabecalho('st_situacao',this.value)" style="padding:5px;border:1px solid var(--border);border-radius:6px">${optSt}</select></label>
+        <button class="btn btn-outline btn-sm" onclick="enfEscolherArquivoST()">📥 Importar planilha de ST</button>
+      </div>
+      ${ENF.st_import ? `<div style="font-size:11px;color:var(--muted);margin-top:6px">Última importação de ST: ${esc(ENF.st_import.arquivo || '')} · ${esc(ENF.st_import.usuario || '')} · ${ENF.st_import.ts ? new Date(ENF.st_import.ts).toLocaleString('pt-BR') : ''} · total planilha ${fmtMoeda(ENF.st_import.total_planilha)}</div>` : ''}
+      ${!calc.frete ? '<div style="font-size:11px;color:#b45309;margin-top:6px">⚠ Pedido sem frete lançado. Se tem CT-e, lance o frete no pedido (Editar) antes de copiar para o LOG.</div>' : ''}
+    </div>
+    <div id="enf-corpo" style="overflow:auto;padding:0 18px">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead style="position:sticky;top:0;z-index:1"><tr style="background:var(--primary);color:rgba(255,255,255,.9)">
+          <th style="padding:6px 4px;text-align:left">Código</th><th style="padding:6px 4px;text-align:left">Descrição</th>
+          <th style="padding:6px 4px;text-align:right">Qtd NF</th><th style="padding:6px 4px;text-align:right">Preço NF</th>
+          <th style="padding:6px 4px;text-align:right">IPI %</th><th style="padding:6px 4px;text-align:right">ST total R$</th>
+          <th style="padding:6px 4px;text-align:right">CMV final</th><th style="padding:6px 4px;text-align:right">CMV anterior</th>
+        </tr></thead>
+        <tbody>${linhasHtml}</tbody>
+      </table>
+      <div style="font-size:11px;color:var(--muted);margin:6px 0">Destaque amarelo = diferente do pedido. Qtd 0 = item não veio (fica fora do cálculo e do LOG). Alterações aqui não mudam o pedido nem o estoque.</div>
+      <div id="enf-resumo"></div>
+    </div>
+    <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+      <button class="btn btn-outline" onclick="enfFechar()">Fechar</button>
+      <button class="btn btn-outline" onclick="enfSalvar()">💾 Salvar</button>
+      <button class="btn btn-primary" ${pronta ? '' : 'disabled title="Importe a planilha de ST ou marque Sem ST / lançado à mão"'} onclick="enfCopiarLogAtual()">📋 Salvar e copiar para o LOG</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  enfRenderResumo(calc);
+  const corpo = document.getElementById('enf-corpo'); if(corpo) corpo.scrollTop = scroll;
+}
+
+// Totais + parcelas (só conferência: as parcelas vêm da condição de pagamento do pedido)
+function enfRenderResumo(calcPronto){
+  const el = document.getElementById('enf-resumo');
+  if(!el || !ENF) return;
+  const { c } = ENF;
+  const calc = calcPronto || enfCalcular(c, { itens: ENF.itens });
+  const desconto = Number(c.desconto) || 0;
+  const totalPedido = (c.itens || []).reduce((s, it) => s + (Number(it.qtd) || 0) * (Number(it.preco_unit) || 0) * (1 + (Number(it.ipi_pct) || 0) / 100), 0) - desconto;
+  const totalNf = calc.totalNf - desconto;
+  const difTotal = totalNf - totalPedido;
+  const dias = enfDiasCondicao(c.condicao_pagamento);
+  let parcelasHtml;
+  if(dias === null){
+    parcelasHtml = `<div style="font-size:12px;color:#b45309">Condição de pagamento do pedido "${esc(c.condicao_pagamento)}" não está no formato 30/60/90 ou À VISTA — confira as parcelas no pedido.</div>`;
+  } else if(!dias.length){
+    parcelasHtml = '<div style="font-size:12px;color:#b45309">Pedido sem condição de pagamento lançada — lance no pedido (Editar) para conferir as parcelas.</div>';
+  } else {
+    const n = dias.length;
+    const base = ENF.data ? new Date(ENF.data + 'T00:00:00') : null;
+    parcelasHtml = `<table style="border-collapse:collapse;font-size:12px;min-width:420px">
+      <thead><tr style="background:var(--bg)"><th style="padding:5px 8px;text-align:left">Parcela</th><th style="padding:5px 8px;text-align:left">Vencimento (data da NF)</th><th style="padding:5px 8px;text-align:right">Pelo pedido</th><th style="padding:5px 8px;text-align:right">Pela NF conferida</th><th style="padding:5px 8px;text-align:right">Diferença</th></tr></thead>
+      <tbody>${dias.map((d, i) => {
+        let venc = '—';
+        if(base){ const v = new Date(base); v.setDate(v.getDate() + d); venc = v.toLocaleDateString('pt-BR'); }
+        const vp = totalPedido / n, vn = totalNf / n, df = vn - vp;
+        return `<tr style="border-bottom:1px solid var(--border)"><td style="padding:5px 8px">${i + 1}ª · ${d > 0 ? d + ' dias' : 'à vista'}</td><td style="padding:5px 8px">${venc}</td>
+          <td style="padding:5px 8px;text-align:right">${fmtMoeda(vp)}</td><td style="padding:5px 8px;text-align:right;font-weight:700">${fmtMoeda(vn)}</td>
+          <td style="padding:5px 8px;text-align:right;color:${Math.abs(df) > 0.01 ? '#dc2626' : 'var(--muted)'}">${Math.abs(df) > 0.01 ? fmtMoeda(df) : '—'}</td></tr>`;
+      }).join('')}</tbody></table>`;
+  }
+  el.innerHTML = `<div style="display:flex;gap:18px;flex-wrap:wrap;margin:10px 0 14px">
+    <div style="flex:1;min-width:240px;font-size:13px;background:var(--bg);border-radius:8px;padding:10px 14px;align-self:flex-start">
+      <div>Mercadoria + IPI (NF conferida): <strong>${fmtMoeda(calc.totalNf)}</strong></div>
+      <div>ST total: <strong>${fmtMoeda(calc.totalSt)}</strong></div>
+      <div>Frete (CT-e): <strong>${fmtMoeda(calc.frete)}</strong> → ${(calc.fretePct * 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}% sobre o custo</div>
+      ${desconto ? `<div>Desconto do pedido: <strong style="color:#dc2626">- ${fmtMoeda(desconto)}</strong></div>` : ''}
+    </div>
+    <div style="flex:2;min-width:320px">
+      <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:6px">💳 Parcelas para conferência · ${esc(c.condicao_pagamento || 'sem condição')}</div>
+      ${parcelasHtml}
+      <div style="font-size:12px;margin-top:6px">Total pelo pedido ${fmtMoeda(totalPedido)} · pela NF ${fmtMoeda(totalNf)}
+        ${Math.abs(difTotal) > 0.01 ? `<strong style="color:#dc2626"> · diferença ${fmtMoeda(difTotal)} — ajuste o pedido se a NF estiver certa</strong>` : ' <span style="color:#166534">· bate ✓</span>'}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">Mercadoria + IPI − desconto. ST (guia) e frete (CT-e) são pagos à parte e não entram nas parcelas.</div>
+    </div>
+  </div>`;
+}
+
+function enfDadosParaGravar(){
+  return {
+    nfs: String(ENF.nfs || '').trim(), data: ENF.data || '',
+    itens: ENF.itens, st_situacao: ENF.st_situacao || 'aguardando',
+    st_import: ENF.st_import || null,
+    copiado_log_em: ENF.copiado_log_em || null, copiado_log_por: ENF.copiado_log_por || null,
+    atualizado_em: agoraTs(), atualizado_por: usuarioLogado?.nome || ''
+  };
+}
+
+async function enfSalvar(silencioso){
+  if(!ENF) return false;
+  if(!usuarioLogado?.admin){ toast('Entrada de NF: somente administrador','error'); return false; }
+  if(!String(ENF.nfs || '').trim()){ toast('Informe o nº da NF','error'); return false; }
+  if(!ENF.data){ toast('Informe a data da NF','error'); return false; }
+  const existe = (await db.ref('pedidos_compra/' + ENF.id + '/fornecedor').once('value')).exists();
+  if(!existe){ toast('Pedido de compra não existe mais — nada foi salvo','error'); return false; }
+  const dados = enfDadosParaGravar();
+  await db.ref('pedidos_compra/' + ENF.id + '/entrada_nf').set(dados);
+  const cc = COMPRAS_CACHE.find(x => x.id === ENF.id); if(cc) cc.entrada_nf = dados;
+  ENF.c.entrada_nf = dados;
+  ENF.salvo = true; ENF.alterado = false;
+  invalidarCacheNo('pedidos_compra');
+  if(!silencioso){ toast('✓ Entrada de NF salva','success'); enfRender(); }
+  return true;
+}
+
+// Linhas no formato do LOG DE ENTRADAS: DATA | FORNECEDOR | Nº NF | CÓDIGO | CMV FINAL (tab = colunas no Excel)
+function enfLinhasLog(c, entrada){
+  const calc = enfCalcular(c, entrada);
+  const data = fmtData(entrada.data || c.data || '');
+  const nf = String(entrada.nfs || c.nf || '').trim();
+  const forn = String(c.fornecedor || '').trim();
+  return calc.linhas.filter(l => l.qtd > 0)
+    .map(l => [data, forn, nf, l.item.codigo, enfFmtNum(l.cmv, 4).replace(/\./g,'')].join('\t'));
+}
+
+async function enfCopiarTexto(txt){
+  try { await navigator.clipboard.writeText(txt); return true; }
+  catch(e){
+    const ta = document.createElement('textarea');
+    ta.value = txt; ta.style.cssText = 'position:fixed;left:-9999px'; document.body.appendChild(ta); ta.select();
+    let ok = false; try { ok = document.execCommand('copy'); } catch(e2){}
+    ta.remove(); return ok;
+  }
+}
+
+async function enfCopiarLogAtual(){
+  if(!ENF) return;
+  if(!enfSituacaoPronta({ st_situacao: ENF.st_situacao })){ toast('Importe a planilha de ST (ou marque Sem ST / lançado à mão) antes de copiar','error'); return; }
+  if(ENF.copiado_log_em && !confirm('Esta entrada já foi copiada para o LOG em ' + new Date(ENF.copiado_log_em).toLocaleString('pt-BR') + (ENF.copiado_log_por ? ' por ' + ENF.copiado_log_por : '') + '.\n\nCopiar de novo? (cuidado para não colar duas vezes no LOG)')) return;
+  const linhas = enfLinhasLog(ENF.c, { ...ENF, itens: ENF.itens });
+  if(!linhas.length){ toast('Nenhum item com quantidade para copiar','error'); return; }
+  const ok = await enfCopiarTexto(linhas.join('\n'));
+  if(!ok){ toast('Não foi possível copiar — o navegador bloqueou a área de transferência','error'); return; }
+  ENF.copiado_log_em = agoraTs(); ENF.copiado_log_por = usuarioLogado?.nome || '';
+  const salvou = await enfSalvar(true);
+  if(salvou){ toast(`✓ ${linhas.length} linha(s) copiadas. Cole (Ctrl+V) na primeira linha vazia da coluna DATA do LOG DE ENTRADAS.`,'success'); enfRender(); }
+}
+
+// ── Importação da planilha de ST da contabilidade ──
+function enfEscolherArquivoST(){
+  if(!ENF) return;
+  if(typeof XLSX === 'undefined'){ toast('Biblioteca de planilhas não carregada — recarregue a página','error'); return; }
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.xlsx,.xls,.xlsm,.csv';
+  inp.onchange = async () => {
+    const f = inp.files?.[0]; if(!f) return;
+    try {
+      const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
+      let mapa = null;
+      try { mapa = (await db.ref(ENF_NO_MAPA_ST).once('value')).val(); } catch(e){}
+      const achado = enfLocalizarTabelaST(wb, mapa);
+      if(achado) enfPreviaST(f.name, wb, achado);
+      else enfMapearColunasST(f.name, wb, mapa);
+    } catch(e){
+      console.error(e); toast('Não foi possível ler a planilha: ' + (e.message || e),'error');
+    }
+  };
+  inp.click();
+}
+
+function enfLinhasAba(wb, nome){
+  return XLSX.utils.sheet_to_json(wb.Sheets[nome], { header: 1, raw: true, defval: null, blankrows: true });
+}
+// sheet_to_json começa na primeira linha usada da aba; isto converte para o nº de linha do Excel
+function enfOffsetAba(wb, nome){
+  try { return XLSX.utils.decode_range(wb.Sheets[nome]['!ref']).s.r; } catch(e){ return 0; }
+}
+
+const ENF_CAB_PADRAO = {
+  cod: ['cod','codigo','codfornecedor','codproduto','codigoproduto','codprod','referencia','ref'],
+  st:  ['totalstfcp','totalicmsstfcp','totalsticmsfcp','stfcptotal','totalst'],
+  nf:  ['nf','nfe','notafiscal','numeronf','nnf','numnf'],
+  ipi: ['ipi','valoripi','vipi','ipir']
+};
+
+function enfIndiceColuna(cab, nomes){
+  const n = cab.map(enfNormCab);
+  for(const alvo of nomes){ const i = n.indexOf(alvo); if(i >= 0) return i; }
+  return -1;
+}
+
+// Procura em todas as abas uma linha de cabeçalho com COD e Total ST + FCP (pelo nome, não pela posição).
+function enfLocalizarTabelaST(wb, mapa){
+  const nomes = {};
+  for(const k of Object.keys(ENF_CAB_PADRAO)){
+    nomes[k] = [...(mapa?.[k] ? [enfNormCab(mapa[k])] : []), ...ENF_CAB_PADRAO[k]];
+  }
+  for(const aba of wb.SheetNames){
+    const linhas = enfLinhasAba(wb, aba);
+    for(let r = 0; r < linhas.length; r++){
+      const cab = (linhas[r] || []).map(v => v === null ? '' : String(v));
+      const iCod = enfIndiceColuna(cab, nomes.cod);
+      const iSt = enfIndiceColuna(cab, nomes.st);
+      if(iCod < 0 || iSt < 0) continue;
+      return { aba, linhaCab: r, cols: { cod: iCod, st: iSt, nf: enfIndiceColuna(cab, nomes.nf), ipi: enfIndiceColuna(cab, nomes.ipi) }, cab };
+    }
+  }
+  return null;
+}
+
+function enfExtrairLinhasST(wb, achado){
+  const linhas = enfLinhasAba(wb, achado.aba);
+  const out = [];
+  let nfAtual = '';
+  for(let r = achado.linhaCab + 1; r < linhas.length; r++){
+    const row = linhas[r] || [];
+    const cod = row[achado.cols.cod];
+    if(cod === null || cod === undefined || String(cod).trim() === '') break;   // fim da tabela
+    if(achado.cols.nf >= 0){
+      const nf = row[achado.cols.nf];
+      if(nf !== null && nf !== undefined && String(nf).trim() !== '') nfAtual = String(nf).trim();
+    }
+    out.push({ linha: r + 1, cod: String(cod).trim(), nf: nfAtual, st: enfNum(row[achado.cols.st]),
+      ipi: achado.cols.ipi >= 0 ? (row[achado.cols.ipi] === null || row[achado.cols.ipi] === '' ? null : enfNum(row[achado.cols.ipi])) : null });
+  }
+  return out;
+}
+
+// Tela de mapeamento: quando a contabilidade mudar o formato e o sistema não achar as colunas.
+function enfMapearColunasST(arquivo, wb, mapa){
+  document.getElementById('enf-st-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'enf-st-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9995;display:flex;align-items:center;justify-content:center;padding:12px';
+  const abas = wb.SheetNames.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  ov.innerHTML = `<div style="background:var(--surface,#fff);color:var(--text,#111);border-radius:12px;max-width:620px;width:100%;max-height:90vh;overflow:auto;padding:18px;box-shadow:0 10px 40px rgba(0,0,0,.4)">
+    <div style="font-family:'Syne',sans-serif;font-size:17px;font-weight:800">🧭 Indicar as colunas da planilha de ST</div>
+    <div style="font-size:12px;color:var(--muted);margin:4px 0 12px">Não encontrei as colunas COD e "Total ST + FCP" em ${esc(arquivo)}. O formato pode ter mudado — indique abaixo. A escolha fica guardada para os próximos arquivos.</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px">
+      <label>Aba <select id="enf-map-aba" style="padding:5px">${abas}</select></label>
+      <label>Linha do cabeçalho <input id="enf-map-linha" type="number" min="1" value="1" style="width:70px;padding:5px"></label>
+    </div>
+    <div id="enf-map-cols" style="margin-top:12px;font-size:12px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+      <button class="btn btn-outline btn-sm" onclick="document.getElementById('enf-st-overlay').remove()">Cancelar</button>
+      <button class="btn btn-primary btn-sm" id="enf-map-ok">Usar e lembrar</button>
+    </div></div>`;
+  document.body.appendChild(ov);
+
+  const sugerirLinha = () => {
+    const linhas = enfLinhasAba(wb, document.getElementById('enf-map-aba').value);
+    let melhor = 0, max = -1;
+    linhas.slice(0, 40).forEach((row, i) => {
+      const txt = (row || []).filter(v => typeof v === 'string' && v.trim() && isNaN(enfNum(v) || NaN)).length;
+      if(txt > max){ max = txt; melhor = i; }
+    });
+    document.getElementById('enf-map-linha').value = melhor + 1 + enfOffsetAba(wb, document.getElementById('enf-map-aba').value);
+  };
+  const montarCols = () => {
+    const abaSel = document.getElementById('enf-map-aba').value;
+    const linhas = enfLinhasAba(wb, abaSel);
+    const r = Math.max(1, Number(document.getElementById('enf-map-linha').value) || 1) - 1 - enfOffsetAba(wb, abaSel);
+    const cab = (linhas[r] || []).map(v => v === null ? '' : String(v));
+    const opts = (sel, opcional) => (opcional ? '<option value="-1">— não tem —</option>' : '<option value="-1">— escolha —</option>') +
+      cab.map((t, i) => `<option value="${i}" ${i === sel ? 'selected' : ''}>${XLSX.utils.encode_col(i)} · ${esc(t || '(vazio)')}</option>`).join('');
+    const guess = k => enfIndiceColuna(cab, [...(mapa?.[k] ? [enfNormCab(mapa[k])] : []), ...ENF_CAB_PADRAO[k]]);
+    document.getElementById('enf-map-cols').innerHTML = `
+      <div style="display:grid;grid-template-columns:150px 1fr;gap:8px;align-items:center">
+        <div><strong>Código (COD)</strong></div><select id="enf-map-cod" style="padding:5px">${opts(guess('cod'), false)}</select>
+        <div><strong>Total ST + FCP</strong></div><select id="enf-map-st" style="padding:5px">${opts(guess('st'), false)}</select>
+        <div>NF (opcional)</div><select id="enf-map-nf" style="padding:5px">${opts(guess('nf'), true)}</select>
+        <div>IPI R$ (opcional)</div><select id="enf-map-ipi" style="padding:5px">${opts(guess('ipi'), true)}</select>
+      </div>`;
+  };
+  document.getElementById('enf-map-aba').onchange = () => { sugerirLinha(); montarCols(); };
+  document.getElementById('enf-map-linha').oninput = montarCols;
+  sugerirLinha(); montarCols();
+
+  document.getElementById('enf-map-ok').onclick = async () => {
+    const aba = document.getElementById('enf-map-aba').value;
+    const r = Math.max(1, Number(document.getElementById('enf-map-linha').value) || 1) - 1 - enfOffsetAba(wb, aba);
+    if(r < 0){ toast('Linha do cabeçalho fora da tabela','error'); return; }
+    const cols = { cod: Number(document.getElementById('enf-map-cod').value), st: Number(document.getElementById('enf-map-st').value),
+      nf: Number(document.getElementById('enf-map-nf').value), ipi: Number(document.getElementById('enf-map-ipi').value) };
+    if(cols.cod < 0 || cols.st < 0){ toast('Escolha as colunas de Código e de Total ST + FCP','error'); return; }
+    const cab = (enfLinhasAba(wb, aba)[r] || []).map(v => v === null ? '' : String(v));
+    const novoMapa = { cod: cab[cols.cod] || '', st: cab[cols.st] || '', nf: cols.nf >= 0 ? cab[cols.nf] || '' : '', ipi: cols.ipi >= 0 ? cab[cols.ipi] || '' : '',
+      atualizado_em: agoraTs(), atualizado_por: usuarioLogado?.nome || '' };
+    try { await db.ref(ENF_NO_MAPA_ST).set(novoMapa); } catch(e){ toast('Não consegui guardar a escolha das colunas (segue só nesta importação)','error'); }
+    ov.remove();
+    enfPreviaST(arquivo, wb, { aba, linhaCab: r, cols, cab });
+  };
+}
+
+// Prévia: liga cada linha da planilha a um item do pedido e mostra o que vai entrar.
+function enfPreviaST(arquivo, wb, achado){
+  if(!ENF) return;
+  const linhasST = enfExtrairLinhasST(wb, achado);
+  if(!linhasST.length){ toast('A tabela de ST foi encontrada, mas não tem nenhuma linha com código','error'); return; }
+  const { c } = ENF;
+  const itens = (c.itens || []).map((it, idx) => ({ it, idx, chave: chaveItemCompra(it, idx), cf: enfCodigoFornecedorItem(it, c.fornecedor) }));
+  const nfsPedido = enfListaNfs(ENF.nfs);
+
+  const lig = linhasST.map(l => {
+    const cands = itens.filter(x => x.cf.cod && enfCodIgual(x.cf.cod, l.cod));
+    return { ...l, cands, escolha: cands.length === 1 ? cands[0].chave : '' };
+  });
+  const estado = { arquivo, linhas: lig };
+
+  const render = () => {
+    const calc = enfCalcular(c, { itens: ENF.itens });
+    const porChave = Object.fromEntries(calc.linhas.map(x => [x.chave, x]));
+    const totalPlan = estado.linhas.reduce((s, l) => s + l.st, 0);
+    const totalLig = estado.linhas.filter(l => l.escolha).reduce((s, l) => s + l.st, 0);
+    const optsItens = sel => '<option value="">— não ligar —</option>' + itens.map(x =>
+      `<option value="${x.chave}" ${x.chave === sel ? 'selected' : ''}>${esc(x.it.codigo)} · ${esc(String(x.it.nome || '').slice(0, 40))}${x.cf.cod ? ' (forn. ' + esc(x.cf.cod) + ')' : ''}</option>`).join('');
+    const linhasHtml = estado.linhas.map((l, i) => {
+      const avisos = [];
+      let cor = '';
+      if(!l.escolha){
+        if(l.cands.length > 1){ avisos.push(`<span style="color:#dc2626;font-weight:700">Código em ${l.cands.length} itens do pedido — escolha</span>`); cor = '#fef2f2'; }
+        else { avisos.push('<span style="color:#dc2626;font-weight:700">Não encontrado no pedido</span>'); cor = '#fef2f2'; }
+      } else if(l.cands.length === 1 && l.cands[0].chave === l.escolha){
+        avisos.push('<span style="color:#166534">✓ ligado pelo código</span>');
+      } else {
+        avisos.push('<span style="color:#1565c0">ligado à mão</span>');
+      }
+      if(l.nf && nfsPedido.length && !nfsPedido.includes(String(l.nf).replace(/^0+(?=.)/,''))){
+        avisos.push(`<span style="color:#b45309">NF ${esc(l.nf)} não é a da entrada (${esc(ENF.nfs)})</span>`); if(!cor) cor = '#fffbeb';
+      }
+      if(l.escolha && l.ipi !== null){
+        const ipiCalc = porChave[l.escolha]?.ipiValor || 0;
+        if(Math.abs(ipiCalc - l.ipi) > 0.05){ avisos.push(`<span style="color:#b45309">IPI não bate: planilha ${fmtMoeda(l.ipi)} × entrada ${fmtMoeda(ipiCalc)}</span>`); if(!cor) cor = '#fffbeb'; }
+        else avisos.push('<span style="color:#166534">IPI ✓</span>');
+      }
+      return `<tr style="border-bottom:1px solid var(--border);${cor ? 'background:' + cor : ''}">
+        <td style="padding:5px">${esc(l.nf || '—')}</td><td style="padding:5px"><strong>${esc(l.cod)}</strong></td>
+        <td style="padding:5px;text-align:right">${fmtMoeda(l.st)}</td>
+        <td style="padding:5px;text-align:right">${l.ipi === null ? '—' : fmtMoeda(l.ipi)}</td>
+        <td style="padding:5px"><select data-i="${i}" class="enf-st-sel" style="max-width:260px;padding:3px;font-size:12px">${optsItens(l.escolha)}</select></td>
+        <td style="padding:5px;font-size:11px">${avisos.join('<br>')}</td></tr>`;
+    }).join('');
+    const ligadas = new Set(estado.linhas.filter(l => l.escolha).map(l => l.escolha));
+    const semLinha = itens.filter(x => !ligadas.has(x.chave) && (porChave[x.chave]?.qtd || 0) > 0);
+    const semLinhaHtml = semLinha.length ? `<div style="margin-top:12px;font-size:12px">
+      <div style="font-weight:700;margin-bottom:4px">Itens do pedido sem linha na planilha (${semLinha.length}) — ficam com o ST atual da entrada</div>
+      ${semLinha.map(x => `<div>• <strong>${esc(x.it.codigo)}</strong> ${esc(x.it.nome || '')} — ${x.cf.cod
+        ? `cód. fornecedor ${esc(x.cf.cod)}${x.cf.origem === 'cadastro' ? ' (do cadastro)' : ''}`
+        : '<span style="color:#dc2626;font-weight:700">Código do fornecedor não cadastrado — atualize o cadastro do item</span>'}</div>`).join('')}
+    </div>` : '';
+    document.getElementById('enf-st-conteudo').innerHTML = `
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:var(--primary);color:rgba(255,255,255,.9)"><th style="padding:5px;text-align:left">NF</th><th style="padding:5px;text-align:left">COD</th><th style="padding:5px;text-align:right">Total ST + FCP</th><th style="padding:5px;text-align:right">IPI planilha</th><th style="padding:5px;text-align:left">Item do pedido</th><th style="padding:5px;text-align:left">Situação</th></tr></thead>
+        <tbody>${linhasHtml}</tbody></table>
+      <div style="margin-top:8px;font-size:13px">Total da planilha: <strong>${fmtMoeda(totalPlan)}</strong> · ligado aos itens: <strong>${fmtMoeda(totalLig)}</strong>
+        ${Math.abs(totalPlan - totalLig) > 0.01 ? `<strong style="color:#dc2626"> · faltam ligar ${fmtMoeda(totalPlan - totalLig)}</strong>` : ' <span style="color:#166534">· bate ✓</span>'}</div>
+      ${semLinhaHtml}`;
+    document.querySelectorAll('.enf-st-sel').forEach(s => s.onchange = () => { estado.linhas[Number(s.dataset.i)].escolha = s.value; render(); });
+  };
+
+  document.getElementById('enf-st-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'enf-st-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9995;display:flex;align-items:center;justify-content:center;padding:12px';
+  ov.innerHTML = `<div style="background:var(--surface,#fff);color:var(--text,#111);border-radius:12px;max-width:980px;width:100%;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.4)">
+    <div style="padding:14px 18px;border-bottom:1px solid var(--border)">
+      <div style="font-family:'Syne',sans-serif;font-size:17px;font-weight:800">📥 Prévia da planilha de ST</div>
+      <div style="font-size:12px;color:var(--muted)">${esc(arquivo)} · aba "${esc(achado.aba)}" · colunas: ${esc(achado.cab[achado.cols.cod] || '')} / ${esc(achado.cab[achado.cols.st] || '')}${achado.cols.nf >= 0 ? ' / ' + esc(achado.cab[achado.cols.nf] || '') : ''}${achado.cols.ipi >= 0 ? ' / ' + esc(achado.cab[achado.cols.ipi] || '') : ''}
+        · <a href="#" id="enf-st-remapear">colunas erradas? indicar à mão</a></div>
+    </div>
+    <div id="enf-st-conteudo" style="overflow:auto;padding:12px 18px"></div>
+    <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-outline" onclick="document.getElementById('enf-st-overlay').remove()">Cancelar</button>
+      <button class="btn btn-primary" id="enf-st-ok">✓ Aplicar ST e salvar</button>
+    </div></div>`;
+  document.body.appendChild(ov);
+  document.getElementById('enf-st-remapear').onclick = (ev) => { ev.preventDefault(); ov.remove(); enfMapearColunasST(arquivo, wb, null); };
+  render();
+
+  document.getElementById('enf-st-ok').onclick = async () => {
+    const naoLig = estado.linhas.filter(l => !l.escolha && l.st > 0);
+    if(naoLig.length && !confirm(`${naoLig.length} linha(s) da planilha com ST não estão ligadas a nenhum item (${fmtMoeda(naoLig.reduce((s, l) => s + l.st, 0))}). Esse ST vai ficar FORA do custo.\n\nAplicar mesmo assim?`)) return;
+    const soma = {};
+    estado.linhas.filter(l => l.escolha).forEach(l => { soma[l.escolha] = (soma[l.escolha] || 0) + l.st; });
+    Object.entries(soma).forEach(([chave, v]) => { if(ENF.itens[chave]) ENF.itens[chave].st = Math.round(v * 100) / 100; });
+    ENF.st_situacao = 'importado';
+    ENF.st_import = { arquivo, ts: agoraTs(), usuario: usuarioLogado?.nome || '', total_planilha: Math.round(estado.linhas.reduce((s, l) => s + l.st, 0) * 100) / 100 };
+    ENF.alterado = true;
+    ov.remove();
+    if(await enfSalvar(true)) toast('✓ ST aplicado e entrada salva','success');
+    enfRender();
+  };
+}
+
+// ── Copiar várias entradas para o LOG de uma vez (usa o COMPRAS_CACHE da lista, sem leitura extra) ──
+function abrirEntradasParaLog(mostrarCopiadas){
+  if(!usuarioLogado?.admin){ toast('Somente administrador','error'); return; }
+  const lista = (COMPRAS_CACHE || []).filter(c => c.entrada_nf && (mostrarCopiadas || !c.entrada_nf.copiado_log_em))
+    .sort((a, b) => String(a.entrada_nf.data || '').localeCompare(String(b.entrada_nf.data || '')));
+  document.getElementById('enf-log-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'enf-log-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9990;display:flex;align-items:center;justify-content:center;padding:12px';
+  const linhas = lista.map(c => {
+    const e = c.entrada_nf, pronta = enfSituacaoPronta(e);
+    const n = enfCalcular(c, e).linhas.filter(l => l.qtd > 0).length;
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:6px;text-align:center"><input type="checkbox" class="enf-log-chk" value="${c.id}" ${pronta && !e.copiado_log_em ? 'checked' : ''} ${pronta ? '' : 'disabled'}></td>
+      <td style="padding:6px">${fmtData(e.data)}</td><td style="padding:6px">${esc(c.fornecedor)}</td><td style="padding:6px">${esc(e.nfs || '')}</td>
+      <td style="padding:6px;text-align:center">${n}</td>
+      <td style="padding:6px;font-size:11px">${pronta ? (e.copiado_log_em ? '✓ copiada ' + new Date(e.copiado_log_em).toLocaleDateString('pt-BR') : '<span style="color:#166534;font-weight:700">Pronta</span>') : '<span style="color:#92400e">Aguardando ST</span>'}</td>
+      <td style="padding:6px"><a href="#" onclick="event.preventDefault();document.getElementById('enf-log-overlay').remove();abrirEntradaNF('${c.id}')">abrir</a></td></tr>`;
+  }).join('');
+  ov.innerHTML = `<div style="background:var(--surface,#fff);color:var(--text,#111);border-radius:12px;max-width:760px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.4)">
+    <div style="padding:14px 18px;border-bottom:1px solid var(--border)">
+      <div style="font-family:'Syne',sans-serif;font-size:17px;font-weight:800">📋 Entradas de NF para o LOG</div>
+      <div style="font-size:12px;color:var(--muted)">Todos os pedidos de compra com Entrada de NF. Ordem pela data da NF, para a última entrada de cada código ficar por último no LOG.</div>
+      <label style="font-size:12px;display:flex;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" ${mostrarCopiadas ? 'checked' : ''} onchange="abrirEntradasParaLog(this.checked)"> mostrar também as já copiadas</label>
+    </div>
+    <div style="overflow:auto;padding:8px 18px">
+      ${lista.length ? `<table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:var(--bg)"><th></th><th style="padding:6px;text-align:left">Data NF</th><th style="padding:6px;text-align:left">Fornecedor</th><th style="padding:6px;text-align:left">NF</th><th style="padding:6px">Itens</th><th style="padding:6px;text-align:left">Situação</th><th></th></tr></thead>
+        <tbody>${linhas}</tbody></table>` : '<div style="padding:24px;text-align:center;color:var(--muted)">Nenhuma entrada de NF pendente de cópia.</div>'}
+    </div>
+    <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-outline" onclick="document.getElementById('enf-log-overlay').remove()">Fechar</button>
+      <button class="btn btn-primary" onclick="enfCopiarSelecionadasLog()">📋 Copiar selecionadas</button>
+    </div></div>`;
+  document.body.appendChild(ov);
+}
+
+async function enfCopiarSelecionadasLog(){
+  const ids = [...document.querySelectorAll('.enf-log-chk:checked')].map(x => x.value);
+  if(!ids.length){ toast('Selecione ao menos uma entrada','error'); return; }
+  const sel = ids.map(id => COMPRAS_CACHE.find(c => c.id === id)).filter(c => c && enfSituacaoPronta(c.entrada_nf))
+    .sort((a, b) => String(a.entrada_nf.data || '').localeCompare(String(b.entrada_nf.data || '')));
+  const jaCopiadas = sel.filter(c => c.entrada_nf.copiado_log_em).length;
+  if(jaCopiadas && !confirm(`${jaCopiadas} das entradas selecionadas já foram copiadas antes. Copiar de novo? (cuidado para não colar duas vezes no LOG)`)) return;
+  const linhas = sel.flatMap(c => enfLinhasLog(c, c.entrada_nf));
+  if(!linhas.length){ toast('Nada para copiar','error'); return; }
+  if(!(await enfCopiarTexto(linhas.join('\n')))){ toast('Não foi possível copiar — o navegador bloqueou a área de transferência','error'); return; }
+  const ts = agoraTs(), quem = usuarioLogado?.nome || '';
+  const upd = {};
+  sel.forEach(c => {
+    upd['pedidos_compra/' + c.id + '/entrada_nf/copiado_log_em'] = ts;
+    upd['pedidos_compra/' + c.id + '/entrada_nf/copiado_log_por'] = quem;
+  });
+  try {
+    await db.ref().update(upd);
+    sel.forEach(c => { c.entrada_nf.copiado_log_em = ts; c.entrada_nf.copiado_log_por = quem; });
+    invalidarCacheNo('pedidos_compra');
+  } catch(e){ toast('Linhas copiadas, mas não consegui marcar como copiadas: ' + (e.message || e),'error'); }
+  document.getElementById('enf-log-overlay')?.remove();
+  toast(`✓ ${linhas.length} linha(s) de ${sel.length} NF(s) copiadas. Cole (Ctrl+V) na primeira linha vazia da coluna DATA do LOG DE ENTRADAS.`,'success');
+}
+
+function enfBadgeLista(c){
+  const e = c?.entrada_nf;
+  if(!e) return '';
+  if(!enfSituacaoPronta(e)) return '<span class="badge" style="background:#fef3c7;color:#92400e;font-size:10px">NF: aguardando ST</span>';
+  if(!e.copiado_log_em) return '<span class="badge" style="background:#dcfce7;color:#166534;font-size:10px">NF pronta p/ LOG</span>';
+  return '<span class="badge" style="background:#f1f5f9;color:#475569;font-size:10px">NF ✓ no LOG</span>';
 }
 
 // ══ CONFERÊNCIAS AGUARDANDO ENTRADA (Painel do admin/Compras) ══
