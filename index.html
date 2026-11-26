@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 25/11/2026 17:30\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 26/11/2026 10:12</span>
+            onclick="alert('Versão desta build: 26/11/2026 12:25\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 26/11/2026 12:25</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -13744,7 +13744,10 @@ function enfCodIgual(a, b){
   a = enfNormCod(a); b = enfNormCod(b);
   if(!a || !b) return false;
   if(a === b) return true;
-  return a.replace(/^0+(?=.)/,'') === b.replace(/^0+(?=.)/,'');
+  if(a.replace(/^0+(?=.)/,'') === b.replace(/^0+(?=.)/,'')) return true;
+  // ignora hífen, espaço, ponto e barra: 1107-A = 1107A = 1107 A
+  const sa = a.replace(/[^A-Z0-9]/g,'').replace(/^0+(?=.)/,''), sb = b.replace(/[^A-Z0-9]/g,'').replace(/^0+(?=.)/,'');
+  return !!sa && sa === sb;
 }
 function enfListaNfs(txt){ return String(txt || '').split(/[\/,;\s]+/).map(s => s.trim().replace(/^0+(?=.)/,'')).filter(Boolean); }
 function enfFmtNum(v, casas){ return Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas }); }
@@ -13938,6 +13941,7 @@ function enfRender(){
         <label style="display:flex;flex-direction:column;gap:2px">Data da NF <input type="date" value="${esc(ENF.data)}" onchange="enfCabecalho('data',this.value)" style="padding:4px;border:1px solid var(--border);border-radius:6px"></label>
         <div style="display:flex;flex-direction:column;gap:2px">Frete (do pedido)<div style="padding:5px 0;font-weight:700">${fmtMoeda(calc.frete)} <span style="font-weight:400;color:var(--muted)">· ${(calc.fretePct * 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%</span></div></div>
         <label style="display:flex;flex-direction:column;gap:2px">ST <select onchange="enfCabecalho('st_situacao',this.value)" style="padding:5px;border:1px solid var(--border);border-radius:6px">${optSt}</select></label>
+        <button class="btn btn-outline btn-sm" onclick="enfEscolherArquivoFornecedor()" title="PDF do pedido do fornecedor (pode escolher mais de um). Ou preencha à mão na tabela.">📄 Importar pedido do fornecedor</button>
         <button class="btn btn-outline btn-sm" onclick="enfEscolherArquivoST()">📥 Importar planilha de ST</button>
       </div>
       ${ENF.st_import ? `<div style="font-size:11px;color:var(--muted);margin-top:6px">Última importação de ST: ${esc(ENF.st_import.arquivo || '')} · ${esc(ENF.st_import.usuario || '')} · ${ENF.st_import.ts ? new Date(ENF.st_import.ts).toLocaleString('pt-BR') : ''} · total planilha ${fmtMoeda(ENF.st_import.total_planilha)}</div>` : ''}
@@ -14375,6 +14379,314 @@ function enfPreviaST(arquivo, wb, achado){
     ov.remove();
     if(await enfSalvar(true)) toast('✓ ST aplicado e entrada salva','success');
     enfRender();
+  };
+}
+
+// ── Importar o PDF do pedido do fornecedor para preencher a Entrada de NF ──
+// Lê o texto do PDF (pdf.js, carregado só na hora de importar — não pesa na abertura do sistema).
+// Layouts reconhecidos: pedido do grupo MIRAC (VELOX / ALADDIN), "PED.VENDA" (Nro.Pedido / Preco Lq. / Vl.Mercad.)
+// "Item Qtde Produto Codigo" (RDPrint — ex.: TDG) e pedido sem código (PRODUTO UN QTDE VALOR UNIT. — ex.: ALIKA,
+// ligado pela descrição).
+// Outros layouts: lançar à mão.
+// PDF escaneado (imagem) não tem texto: avisa e segue manual.
+const ENF_PDFJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+const ENF_PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+let ENF_PDFJS_PROMESSA = null;
+
+function enfCarregarPdfJs(){
+  if(window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if(ENF_PDFJS_PROMESSA) return ENF_PDFJS_PROMESSA;
+  ENF_PDFJS_PROMESSA = new Promise((ok, erro) => {
+    const s = document.createElement('script');
+    s.src = ENF_PDFJS_URL;
+    s.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = ENF_PDFJS_WORKER; ok(window.pdfjsLib); };
+    s.onerror = () => { ENF_PDFJS_PROMESSA = null; erro(new Error('não foi possível carregar o leitor de PDF (sem internet?)')); };
+    document.head.appendChild(s);
+  });
+  return ENF_PDFJS_PROMESSA;
+}
+
+// Texto do PDF agrupado em linhas, com a posição x de cada pedaço
+async function enfLinhasPdf(buffer){
+  const pdfjs = await enfCarregarPdfJs();
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
+  const linhas = [];
+  for(let p = 1; p <= doc.numPages; p++){
+    const pg = await doc.getPage(p);
+    const tc = await pg.getTextContent();
+    const itens = tc.items.filter(i => i.str && i.str.trim())
+      .map(i => ({ s: i.str.trim(), x: i.transform[4], y: i.transform[5] }));
+    itens.sort((a, b) => b.y - a.y || a.x - b.x);
+    let atual = null;
+    for(const it of itens){
+      if(!atual || Math.abs(atual.y - it.y) > 2.5){ atual = { y: it.y, pagina: p, partes: [] }; linhas.push(atual); }
+      atual.partes.push(it);
+    }
+  }
+  linhas.forEach(l => { l.partes.sort((a, b) => a.x - b.x); l.texto = l.partes.map(x => x.s).join(' ').replace(/\s+/g, ' ').trim(); });
+  return linhas;
+}
+
+// Layout MIRAC (VELOX / ALADDIN). Retorna null se o PDF não for desse layout.
+function enfLerPdfMirac(linhas){
+  const temCab = linhas.some(l => /Silk\./i.test(l.texto) && /Quant\./i.test(l.texto) && /C[oó]digo/i.test(l.texto));
+  if(!temCab) return null;
+  const reItem = /^(\d{1,3}) (\S+) (\d{8}) (.*?) ([SN]) ([\d.]+(?:,\d+)?) ([A-Z]{1,3}) ([\d.]+,\d+) ([\d.]+,\d+) ([\d.]+,\d+) ([\d.]+,\d+) ([\d.]+,\d+)$/;
+  const out = [];
+  let ultimo = null, fim = false;
+  for(const l of linhas){
+    if(fim) break;
+    if(/^OB[S]?ERVA[CÇ][OÕ]ES/i.test(l.texto)){ fim = true; continue; }
+    const m = l.texto.match(reItem);
+    if(m){
+      const parteCod = l.partes.find(p => p.s === m[2] || p.s.startsWith(m[2]));
+      ultimo = { seq: Number(m[1]), cod: m[2], desc: m[4], qtd: enfNum(m[6]), un: m[7], preco: enfNum(m[8]),
+        ipiUnit: enfNum(m[9]), stUnit: enfNum(m[10]), total: enfNum(m[12]), xCod: parteCod ? parteCod.x : null, pagina: l.pagina };
+      out.push(ultimo);
+      continue;
+    }
+    // Linha de continuação: o código e a descrição quebram para a linha de baixo (ex.: "LFCOR008-I" + "-1")
+    if(ultimo && ultimo.pagina === l.pagina && ultimo.xCod !== null){
+      const contCod = l.partes.filter(p => Math.abs(p.x - ultimo.xCod) < 8);
+      if(contCod.length || l.partes.every(p => p.x > ultimo.xCod)){
+        if(contCod.length) ultimo.cod += contCod.map(p => p.s).join('');
+        const resto = l.partes.filter(p => !contCod.includes(p)).map(p => p.s).join(' ');
+        if(resto && resto.length < 80) ultimo.desc += ' ' + resto;
+        if(!contCod.length && !resto) ultimo = null;
+      }
+    }
+  }
+  // Total do documento para conferir a leitura
+  let totalDoc = null;
+  // "TOTAIS" e os valores ficam em alturas um pouco diferentes: pega o 1º valor (Total Produtos) perto dessa altura
+  const lt = linhas.find(l => /^TOTAIS\b/i.test(l.texto));
+  if(lt){
+    const vals = linhas.filter(l => l.pagina === lt.pagina && Math.abs(l.y - lt.y) < 8)
+      .flatMap(l => l.partes).filter(p => /^[\d.]+,\d{2}$/.test(p.s)).sort((a, b) => a.x - b.x);
+    if(vals.length) totalDoc = enfNum(vals[0].s);
+  }
+  const numDoc = (linhas.find(l => /PEDIDO N[ºo°]?:?/i.test(l.texto))?.texto.match(/PEDIDO N[ºo°]?:?\s*(\d+)/i) || [])[1] || '';
+  return { layout: 'MIRAC (VELOX / ALADDIN)', linhas: out, totalDoc, numDoc };
+}
+
+// Layout "PED.VENDA" (Nro.Pedido / Quantidade Un Produto Preco Lq. Vl.Mercad. | Vencto. Valor).
+// Quantidade e preço vêm na unidade do fornecedor (ex.: MI = milheiro): a conversão é feita ao ligar ao item.
+// Este modelo não traz IPI: o IPI % da entrada fica como está.
+function enfLerPdfPedVenda(linhas){
+  const temCab = linhas.some(l => /^Quantidade Un Produto/i.test(l.texto) && /Vl\.?\s*Mercad/i.test(l.texto));
+  if(!temCab) return null;
+  const reItem = /^([\d.]+,\d+) ([A-Z]{1,3}) (\S+) (.+?) ([\d.]+,\d{2}) ([\d.]+,\d{2})$/;
+  const out = [];
+  for(const l of linhas){
+    if(/Total do Pedido/i.test(l.texto)) break;
+    const txt = l.texto.replace(/\s*\|.*$/, '').replace(/\s+\d{2}\/\d{2}\/\d{2,4}\s+[\d.]+,\d{2}$/, '').trim();
+    const m = txt.match(reItem);
+    if(!m) continue;
+    out.push({ seq: out.length + 1, cod: m[3], desc: m[4], qtd: enfNum(m[1]), un: m[2], preco: enfNum(m[5]),
+      ipiUnit: null, stUnit: 0, total: enfNum(m[6]) });
+  }
+  const lt = linhas.find(l => /Total do Pedido/i.test(l.texto));
+  const mt = lt ? lt.texto.match(/Total do Pedido\s*-*>?\s*([\d.]+,\d{2})/i) : null;
+  const numDoc = (linhas.find(l => /Nro\.?\s*Pedido/i.test(l.texto))?.texto.match(/Nro\.?\s*Pedido\s*:?\s*(\d+)/i) || [])[1] || '';
+  return { layout: 'PED.VENDA', linhas: out, totalDoc: mt ? enfNum(mt[1]) : null, numDoc };
+}
+
+// Unidades do fornecedor que viram peças. Usa a conversão só se ela deixar a quantidade mais perto da do pedido
+// (se o item estiver cadastrado no pedido na mesma unidade do fornecedor, não converte).
+const ENF_FATOR_UN = { MI: 1000, ML: 1000, MIL: 1000, CT: 100, CE: 100 };
+function enfAjusteUnidade(l, it){
+  const f = ENF_FATOR_UN[String(l.un || '').toUpperCase()] || 1;
+  if(f === 1) return { qtd: l.qtd, preco: l.preco, fator: 1 };
+  const qPed = Number(it?.qtd) || 0;
+  if(it && qPed > 0 && Math.abs(l.qtd - qPed) < Math.abs(l.qtd * f - qPed)) return { qtd: l.qtd, preco: l.preco, fator: 1 };
+  return { qtd: l.qtd * f, preco: l.preco / f, fator: f };
+}
+
+// Layout "PEDIDO Nº / PRODUTO UN QTDE VALOR UNIT. VALOR R$" (ex.: ALIKA). Não tem código do produto:
+// liga pela descrição (código do fornecedor igual à descrição, ou nome parecido). O PDF traz duas vias
+// do mesmo pedido — só a primeira é lida.
+function enfLerPdfSemCodigo(linhas){
+  const iCab = linhas.findIndex(l => /^PRODUTO UN QTDE/i.test(l.texto));
+  if(iCab < 0) return null;
+  const reItem = /^(.+?) ([A-Z]{1,3}) ([\d.]+,\d+) ([\d.]+,\d+) ([\d.]+,\d{2})$/;
+  const out = [];
+  for(let i = iCab + 1; i < linhas.length; i++){
+    const t = linhas[i].texto;
+    if(/^VENCTO/i.test(t) || /TOTAL BRUTO/i.test(t)) break;
+    const m = t.match(reItem);
+    if(!m) continue;
+    out.push({ seq: out.length + 1, cod: '', desc: m[1].replace(/\s*-\s*$/, '').trim(), qtd: enfNum(m[3]), un: m[2],
+      preco: enfNum(m[4]), ipiUnit: null, stUnit: 0, total: enfNum(m[5]) });
+  }
+  const lt = linhas.find(l => /TOTAL BRUTO/i.test(l.texto));
+  const mt = lt ? lt.texto.match(/TOTAL BRUTO[.\s]*R\$:?\s*([\d.]+,\d{2})/i) : null;
+  const numDoc = (linhas.find(l => /PEDIDO N[ºo°]/i.test(l.texto))?.texto.match(/PEDIDO N[ºo°]\s*(\d+)/i) || [])[1] || '';
+  return { layout: 'pedido sem código (pela descrição)', linhas: out, totalDoc: mt ? enfNum(mt[1]) : null, numDoc };
+}
+
+// Candidatos pela descrição: 1º código do fornecedor igual à descrição; senão nome do item parecido.
+function enfCandidatosDescricao(desc, itens){
+  const porCod = itens.filter(x => x.cf.cod && enfNormCab(x.cf.cod) === enfNormCab(desc));
+  if(porCod.length) return porCod;
+  const pal = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase()
+    .split(/[^A-Z0-9]+/).filter(w => w.length >= 3 && !['COM','PARA','DOS','DAS'].includes(w));
+  const pd = new Set(pal(desc));
+  if(!pd.size) return [];
+  const notas = itens.map(x => {
+    const pi = new Set(pal(x.it.nome));
+    const comum = [...pd].filter(w => pi.has(w)).length;
+    return { x, nota: comum / pd.size };
+  }).filter(n => n.nota >= 0.6).sort((a, b) => b.nota - a.nota);
+  if(!notas.length) return [];
+  if(notas.length === 1 || notas[0].nota > notas[1].nota) return [notas[0].x];
+  return notas.filter(n => n.nota === notas[0].nota).map(n => n.x);
+}
+
+// Layout "Item Qtde Produto Codigo Vlr. Unit Vlr. Total" (orçamento RDPrint/Deltress — ex.: TDG).
+// A quantidade vem com ponto de milhar (1.500 = 1500): confirma pela conta qtd × unitário = total.
+function enfLerPdfItemQtdeCodigo(linhas){
+  const iCab = linhas.findIndex(l => /^Item Qtde Produto Codigo Vlr\.? ?Unit/i.test(l.texto));
+  if(iCab < 0) return null;
+  const reItem = /^(\d{1,3}) ([\d.]+(?:,\d+)?) (.+) (\S+) ([\d.]+,\d+) ([\d.]+,\d{2})$/;
+  const out = [];
+  for(let i = iCab + 1; i < linhas.length; i++){
+    const t = linhas[i].texto;
+    if(/VALOR TOTAL/i.test(t)) break;
+    const m = t.match(reItem);
+    if(!m) continue;
+    const preco = enfNum(m[5]), total = enfNum(m[6]);
+    const qMilhar = m[2].includes(',') ? enfNum(m[2]) : Number(m[2].replace(/\./g, ''));
+    const qtd = Math.abs(qMilhar * preco - total) <= Math.abs(enfNum(m[2]) * preco - total) ? qMilhar : enfNum(m[2]);
+    out.push({ seq: Number(m[1]), cod: m[4], desc: m[3], qtd, un: '', preco, ipiUnit: null, stUnit: 0, total });
+  }
+  const lt = linhas.find(l => /VALOR TOTAL\s+[\d.]+,\d{2}/i.test(l.texto));
+  const mt = lt ? lt.texto.match(/VALOR TOTAL\s+([\d.]+,\d{2})/i) : null;
+  const numDoc = (linhas.find(l => /Nro Pedido/i.test(l.texto))?.texto.match(/Nro Pedido:?\s*([\d.\/]+)/i) || [])[1]
+    || (linhas.find(l => /ORCAMENTO/i.test(l.texto))?.texto.match(/ORCAMENTO\.*:?\s*([\d.]+)/i) || [])[1] || '';
+  return { layout: 'Item / Qtde / Codigo', linhas: out, totalDoc: mt ? enfNum(mt[1]) : null, numDoc };
+}
+
+function enfEscolherArquivoFornecedor(){
+  if(!ENF) return;
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.pdf'; inp.multiple = true;
+  inp.onchange = async () => {
+    const arqs = [...(inp.files || [])];
+    if(!arqs.length) return;
+    const lidos = [], problemas = [];
+    for(const f of arqs){
+      try {
+        const linhas = await enfLinhasPdf(await f.arrayBuffer());
+        if(!linhas.length){ problemas.push(`${f.name}: o PDF é uma imagem (escaneado), não tem texto para ler — lance à mão.`); continue; }
+        const r = enfLerPdfMirac(linhas) || enfLerPdfPedVenda(linhas) || enfLerPdfItemQtdeCodigo(linhas) || enfLerPdfSemCodigo(linhas);
+        if(!r || !r.linhas.length){ problemas.push(`${f.name}: formato de PDF ainda não reconhecido pelo sistema — lance à mão.`); continue; }
+        lidos.push({ arquivo: f.name, ...r });
+      } catch(e){
+        console.error(e); problemas.push(`${f.name}: erro ao ler (${e.message || e}).`);
+      }
+    }
+    if(!lidos.length){ alert('Nenhum arquivo pôde ser importado:\n\n' + problemas.join('\n')); return; }
+    enfPreviaArquivoFornecedor(lidos, problemas);
+  };
+  inp.click();
+}
+
+// Prévia: liga cada linha do arquivo a um item do pedido pelo código do fornecedor e mostra o que muda.
+function enfPreviaArquivoFornecedor(lidos, problemas){
+  if(!ENF) return;
+  const { c } = ENF;
+  const itens = (c.itens || []).map((it, idx) => ({ it, idx, chave: chaveItemCompra(it, idx), cf: enfCodigoFornecedorItem(it, c.fornecedor) }));
+  const linhas = lidos.flatMap(d => d.linhas.map(l => {
+    const porDescricao = !l.cod;
+    const cands = porDescricao ? enfCandidatosDescricao(l.desc, itens) : itens.filter(x => x.cf.cod && enfCodIgual(x.cf.cod, l.cod));
+    return { ...l, arquivo: d.arquivo, numDoc: d.numDoc, cands, porDescricao, escolha: cands.length === 1 ? cands[0].chave : '' };
+  }));
+
+  const render = () => {
+    const optsItens = sel => '<option value="">— não ligar —</option>' + itens.map(x =>
+      `<option value="${x.chave}" ${x.chave === sel ? 'selected' : ''}>${esc(x.it.codigo)} · ${esc(String(x.it.nome || '').slice(0, 40))}${x.cf.cod ? ' (forn. ' + esc(x.cf.cod) + ')' : ''}</option>`).join('');
+    const porItem = {};
+    linhas.filter(l => l.escolha).forEach(l => { (porItem[l.escolha] = porItem[l.escolha] || []).push(l); });
+    const rows = linhas.map((l, i) => {
+      let sit, cor = '';
+      if(!l.escolha){ sit = l.cands.length > 1 ? `<span style="color:#dc2626;font-weight:700">Código em ${l.cands.length} itens — escolha</span>` : '<span style="color:#dc2626;font-weight:700">Não encontrado no pedido</span>'; cor = '#fef2f2'; }
+      else if(l.cands.length === 1 && l.cands[0].chave === l.escolha) sit = l.porDescricao ? '<span style="color:#1565c0;font-weight:700">ligado pela descrição — confira o item</span>' : '<span style="color:#166534">✓ ligado pelo código</span>';
+      else sit = '<span style="color:#1565c0">ligado à mão</span>';
+      const it = l.escolha ? itens.find(x => x.chave === l.escolha).it : null;
+      const aj = enfAjusteUnidade(l, it);
+      const difs = [];
+      if(it && Math.abs(aj.qtd - (Number(it.qtd) || 0)) > 0.0001) difs.push(`qtd pedido ${enfFmtNum(it.qtd, 0)}`);
+      if(it && Math.abs(aj.preco - (Number(it.preco_unit) || 0)) > 0.005) difs.push(`preço pedido ${enfFmtNum(it.preco_unit, 4)}`);
+      if(difs.length && !cor) cor = '#fffbeb';
+      if((porItem[l.escolha] || []).length > 1) sit += '<br><span style="color:#1565c0">item em mais de uma linha: qtd somada, preço médio</span>';
+      return `<tr style="border-bottom:1px solid var(--border);${cor ? 'background:' + cor : ''}">
+        <td style="padding:5px;font-size:11px">${esc(l.numDoc || l.arquivo)}</td>
+        <td style="padding:5px">${l.cod ? `<strong>${esc(l.cod)}</strong><div style="font-size:10px;color:var(--muted)">${esc(l.desc.slice(0, 45))}</div>` : `<strong style="font-size:11px">${esc(l.desc.slice(0, 50))}</strong><div style="font-size:10px;color:var(--muted)">sem código</div>`}</td>
+        <td style="padding:5px;text-align:right">${aj.fator > 1 ? `${enfFmtNum(aj.qtd, 0)}<div style="font-size:10px;color:var(--muted)">${enfFmtNum(l.qtd, 3)} ${esc(l.un)} × ${aj.fator}</div>` : `${enfFmtNum(l.qtd, l.qtd % 1 ? 3 : 0)} ${esc(l.un)}`}</td>
+        <td style="padding:5px;text-align:right">${enfFmtNum(aj.preco, 4)}${aj.fator > 1 ? `<div style="font-size:10px;color:var(--muted)">${enfFmtNum(l.preco, 2)}/${esc(l.un)}</div>` : ''}</td>
+        <td style="padding:5px;text-align:right">${l.ipiUnit === null ? '—' : l.ipiUnit ? enfFmtNum(l.ipiUnit / (l.preco || 1) * 100, 2) + '%' : '0%'}</td>
+        <td style="padding:5px"><select data-i="${i}" class="enf-arq-sel" style="max-width:240px;padding:3px;font-size:12px">${optsItens(l.escolha)}</select></td>
+        <td style="padding:5px;font-size:11px">${sit}${difs.length ? '<br><span style="color:#b45309">' + difs.join(' · ') + '</span>' : ''}</td></tr>`;
+    }).join('');
+    const ligadas = new Set(Object.keys(porItem));
+    const semLinha = itens.filter(x => !ligadas.has(x.chave));
+    const conf = lidos.map(d => {
+      const soma = d.linhas.reduce((s, l) => s + l.total, 0);
+      const ok = d.totalDoc === null ? null : Math.abs(soma - d.totalDoc) < 0.05;
+      return `<div>${esc(d.arquivo)} (${esc(d.layout)}${d.numDoc ? ' · nº ' + esc(d.numDoc) : ''}): ${d.linhas.length} linha(s) lidas, soma ${fmtMoeda(soma)}${d.totalDoc === null ? '' : ok ? ' <span style="color:#166534">= total do documento ✓</span>' : ` <strong style="color:#dc2626">≠ total do documento ${fmtMoeda(d.totalDoc)} — confira, a leitura pode ter falhado</strong>`}</div>`;
+    }).join('');
+    document.getElementById('enf-arq-conteudo').innerHTML = `
+      <div style="font-size:12px;margin-bottom:8px">${conf}${problemas.length ? `<div style="color:#b45309;margin-top:4px">${problemas.map(esc).join('<br>')}</div>` : ''}</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:var(--primary);color:rgba(255,255,255,.9)"><th style="padding:5px;text-align:left">Doc.</th><th style="padding:5px;text-align:left">Código</th><th style="padding:5px;text-align:right">Qtd</th><th style="padding:5px;text-align:right">Preço</th><th style="padding:5px;text-align:right">IPI</th><th style="padding:5px;text-align:left">Item do pedido</th><th style="padding:5px;text-align:left">Situação</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+      ${semLinha.length ? `<div style="margin-top:12px;font-size:12px"><div style="font-weight:700;margin-bottom:4px">Itens do pedido que não estão no arquivo (${semLinha.length}) — ficam como estão na entrada (se não vieram, coloque qtd 0)</div>
+        ${semLinha.map(x => `<div>• <strong>${esc(x.it.codigo)}</strong> ${esc(x.it.nome || '')}${x.cf.cod ? ' — cód. fornecedor ' + esc(x.cf.cod) : ' — <span style="color:#dc2626;font-weight:700">Código do fornecedor não cadastrado — atualize o cadastro do item</span>'}</div>`).join('')}</div>` : ''}
+      <div style="font-size:11px;color:var(--muted);margin-top:8px">Preenche quantidade, preço e IPI % (IPI "—" = o arquivo não traz IPI: fica o IPI % da entrada). Unidade em milheiro/cento é convertida para peças. O ST não vem deste arquivo — ele entra pela planilha da contabilidade.</div>`;
+    document.querySelectorAll('.enf-arq-sel').forEach(s => s.onchange = () => { linhas[Number(s.dataset.i)].escolha = s.value; render(); });
+  };
+
+  document.getElementById('enf-st-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'enf-st-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9995;display:flex;align-items:center;justify-content:center;padding:12px';
+  ov.innerHTML = `<div style="background:var(--surface,#fff);color:var(--text,#111);border-radius:12px;max-width:1000px;width:100%;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.4)">
+    <div style="padding:14px 18px;border-bottom:1px solid var(--border)">
+      <div style="font-family:'Syne',sans-serif;font-size:17px;font-weight:800">📄 Prévia do arquivo do fornecedor</div>
+      <div style="font-size:12px;color:var(--muted)">Confira as linhas antes de preencher a entrada. Nada é gravado até você salvar a Entrada de NF.</div>
+    </div>
+    <div id="enf-arq-conteudo" style="overflow:auto;padding:12px 18px"></div>
+    <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-outline" onclick="document.getElementById('enf-st-overlay').remove()">Cancelar</button>
+      <button class="btn btn-primary" id="enf-arq-ok">✓ Preencher a entrada</button>
+    </div></div>`;
+  document.body.appendChild(ov);
+  render();
+
+  document.getElementById('enf-arq-ok').onclick = () => {
+    const naoLig = linhas.filter(l => !l.escolha);
+    if(naoLig.length && !confirm(`${naoLig.length} linha(s) do arquivo não estão ligadas a nenhum item do pedido e serão ignoradas.\n\nContinuar?`)) return;
+    const porItem = {};
+    linhas.filter(l => l.escolha).forEach(l => { (porItem[l.escolha] = porItem[l.escolha] || []).push(l); });
+    Object.entries(porItem).forEach(([chave, ls]) => {
+      if(!ENF.itens[chave]) return;
+      const it = itens.find(x => x.chave === chave)?.it;
+      const ajs = ls.map(l => ({ l, aj: enfAjusteUnidade(l, it) }));
+      const qtd = ajs.reduce((s, x) => s + x.aj.qtd, 0);
+      const valor = ajs.reduce((s, x) => s + x.aj.qtd * x.aj.preco, 0);
+      const preco = qtd > 0 ? valor / qtd : ajs[0].aj.preco;
+      ENF.itens[chave].qtd = Math.round(qtd * 10000) / 10000;
+      ENF.itens[chave].preco = Math.round(preco * 1000000) / 1000000;   // 6 casas: preço por milheiro ÷ 1000
+      if(ls.every(l => l.ipiUnit !== null)){
+        const ipi = ls.reduce((s, l) => s + l.qtd * l.ipiUnit, 0);
+        const valorDoc = ls.reduce((s, l) => s + l.qtd * l.preco, 0);
+        ENF.itens[chave].ipi_pct = valorDoc > 0 ? Math.round(ipi / valorDoc * 100 * 10000) / 10000 : 0;
+      }
+    });
+    ENF.alterado = true;
+    ov.remove();
+    enfRender();
+    toast(`✓ ${Object.keys(porItem).length} item(ns) preenchidos pelo arquivo. Confira e clique em Salvar.`, 'success');
   };
 }
 
