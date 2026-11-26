@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 26/11/2026 12:25\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 26/11/2026 12:25</span>
+            onclick="alert('Versão desta build: 26/11/2026 15:38\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 26/11/2026 15:38</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -659,6 +659,8 @@ tbody td{padding:11px 16px;font-size:14px}
           <div class="filtros-btns">
             <button class="btn btn-secondary btn-sm" onclick="paginaClientes=1;renderClientes()">Filtrar</button>
             <button class="btn btn-outline btn-sm" onclick="limparFiltrosClientes()">Limpar</button>
+            <button class="btn btn-outline btn-sm admin-only" style="color:#16a34a;border-color:#16a34a" onclick="exportarClientesExcel()">📊 Excel</button>
+            <button class="btn btn-outline btn-sm admin-only" style="color:#dc2626;border-color:#dc2626" onclick="exportarClientesPDF()">📄 PDF</button>
           </div>
         </div>
       </div>
@@ -9676,6 +9678,7 @@ async function renderClientes(){
       return true;
     });
 
+    CLIENTES_FILTRADOS_ATUAL = filtrado; // usado pela exportação Excel/PDF (mesma lista da tela, sem nova leitura)
     const total=filtrado.length, inicio=(paginaClientes-1)*POR_PAGINA;
     const pagina=filtrado.slice(inicio,inicio+POR_PAGINA);
     document.getElementById('clientes-table').innerHTML = pagina.map(c=>{
@@ -9724,8 +9727,143 @@ function limparFiltrosClientes(){
   document.getElementById('cliente-f-vendedor').value = '';
   document.getElementById('cliente-f-data-ini').value = '';
   document.getElementById('cliente-f-data-fim').value = '';
+  const fW3El = document.getElementById('cliente-f-w3'); if(fW3El) fW3El.value = '';
   paginaClientes = 1;
   renderClientes();
+}
+
+// ── Exportar clientes filtrados (Excel / PDF) ──
+// Usa exatamente a lista que está na tela (todas as páginas), já respeitando
+// filtros e permissões. Não faz nenhuma leitura extra no Firebase.
+let CLIENTES_FILTRADOS_ATUAL = [];
+
+function linhasExportClientes(){
+  const mostraVend = vejaTudoDoModulo('clientes');
+  return CLIENTES_FILTRADOS_ATUAL.map(c=>{
+    const e = (c.logradouro || c.numero || c.bairro)
+      ? { logradouro:c.logradouro||'', numero:c.numero||'', complemento:c.complemento||'', bairro:c.bairro||'' }
+      : separarEnderecoCliente(c.endereco || c.end || '');
+    const l = {
+      'Código': c.codigo||'',
+      'Cliente': c.nome||'',
+      'CNPJ/CPF': c.cpf_cnpj||'',
+      'Telefone': c.telefone||'',
+      'E-mail': c.email||'',
+      'Endereço': montarEnderecoCliente(e.logradouro, e.numero, e.complemento, ''),
+      'Bairro': e.bairro||'',
+      'Cidade': (c.cidade||'').trim(),
+      'UF': (c.uf||'').trim().toUpperCase(),
+      'CEP': String(c.cep||'').trim()
+    };
+    if(mostraVend) l['Vendedor'] = c.vendedor_nome||'';
+    l['Situação'] = c.inativo ? 'Inativo' : 'Ativo';
+    l['W3'] = c.pendente_w3 ? 'Pendente' : 'OK';
+    l['Cadastrado em'] = c.ts_cadastro ? new Date(c.ts_cadastro).toLocaleDateString('pt-BR') : '';
+    return l;
+  });
+}
+
+function resumoFiltrosClientes(){
+  const v = id => (document.getElementById(id)?.value||'').trim();
+  const fmtD = d => d ? d.split('-').reverse().join('/') : '';
+  const w3 = {pendente:'Pendente no W3', ok:'Cadastrado no W3', 'incompleto-import':'Importado do W3 sem CNPJ/telefone'}[v('cliente-f-w3')];
+  const partes = [
+    v('cliente-f-nome') && 'Nome: '+v('cliente-f-nome'),
+    v('cliente-f-cnpj') && 'CNPJ/CPF: '+v('cliente-f-cnpj'),
+    v('cliente-f-endereco') && 'Endereço: '+v('cliente-f-endereco'),
+    v('cliente-f-cidade') && 'Cidade: '+v('cliente-f-cidade'),
+    v('cliente-f-uf') && 'UF: '+v('cliente-f-uf').toUpperCase(),
+    v('cliente-f-vendedor') && 'Vendedor: '+v('cliente-f-vendedor'),
+    (v('cliente-f-data-ini')||v('cliente-f-data-fim')) && 'Cadastro: '+(fmtD(v('cliente-f-data-ini'))||'...')+' a '+(fmtD(v('cliente-f-data-fim'))||'...'),
+    w3 && 'W3: '+w3
+  ].filter(Boolean);
+  return partes.length ? partes.join('  |  ') : 'Sem filtro (todos os clientes)';
+}
+
+function exportarClientesExcel(){
+  if(!usuarioLogado?.admin){ toast('Acesso restrito ao administrador','error'); return; }
+  const dados = linhasExportClientes();
+  if(!dados.length){ toast('Nenhum cliente no filtro para exportar','error'); return; }
+  const ws = XLSX.utils.json_to_sheet(dados);
+  const larg = {'Código':10,'Cliente':40,'CNPJ/CPF':20,'Telefone':16,'E-mail':30,'Endereço':40,'Bairro':20,'Cidade':20,'UF':5,'CEP':11,'Vendedor':18,'Situação':9,'W3':9,'Cadastrado em':13};
+  ws['!cols'] = Object.keys(dados[0]).map(k=>({ wch: larg[k]||14 }));
+  ws['!autofilter'] = { ref: ws['!ref'] };
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
+  XLSX.writeFile(wb, `clientes_crow_${agora().toISOString().split('T')[0]}.xlsx`);
+  toast(`✓ Excel exportado — ${dados.length} cliente(s)`,'success');
+}
+
+function exportarClientesPDF(){
+  if(!usuarioLogado?.admin){ toast('Acesso restrito ao administrador','error'); return; }
+  const dados = linhasExportClientes();
+  if(!dados.length){ toast('Nenhum cliente no filtro para exportar','error'); return; }
+  try {
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ orientation:'landscape', unit:'mm', format:'a4' });
+    const PW = 297, PH = 210, M = 10;
+    const mostraVend = vejaTudoDoModulo('clientes');
+    // Colunas do PDF (o Excel traz todas; aqui junta algumas pra caber na folha)
+    const cols = [
+      { t:'Cliente',   w:62, f:l=>l['Cliente'] },
+      { t:'CNPJ/CPF',  w:31, f:l=>l['CNPJ/CPF'] },
+      { t:'Telefone',  w:26, f:l=>l['Telefone'] },
+      { t:'Endereço',  w:mostraVend?64:84, f:l=>[l['Endereço'], l['Bairro']].filter(Boolean).join(' - ') },
+      { t:'Cidade/UF', w:34, f:l=>[l['Cidade'], l['UF']].filter(Boolean).join('/') },
+      { t:'CEP',       w:18, f:l=>l['CEP'] },
+    ];
+    if(mostraVend) cols.push({ t:'Vendedor', w:24, f:l=>l['Vendedor'] });
+    cols.push({ t:'Situação', w:18, f:l=>l['Situação'] + (l['W3']==='Pendente'?' / W3 pend.':'') });
+
+    const geradoEm = agora().toLocaleString('pt-BR');
+    const filtros = resumoFiltrosClientes();
+    let y = 0, pagina = 0;
+    const cabecalho = ()=>{
+      pagina++;
+      y = M;
+      if(pagina === 1){
+        pdf.setFont('helvetica','bold'); pdf.setFontSize(14); pdf.setTextColor(26,26,46);
+        pdf.text('Relatório de Clientes — CROW', M, y+5);
+        pdf.setFont('helvetica','normal'); pdf.setFontSize(8.5); pdf.setTextColor(100);
+        pdf.text(`Gerado em ${geradoEm} por ${usuarioLogado?.nome||''}  •  ${dados.length} cliente(s)`, M, y+10);
+        const fl = pdf.splitTextToSize('Filtros: '+filtros, PW-2*M);
+        pdf.text(fl, M, y+14);
+        y += 14 + fl.length*3.6 + 2;
+      }
+      pdf.setFillColor(26,26,46); pdf.rect(M, y, PW-2*M, 7, 'F');
+      pdf.setFont('helvetica','bold'); pdf.setFontSize(8); pdf.setTextColor(255);
+      let x = M;
+      cols.forEach(c=>{ pdf.text(c.t, x+1.5, y+4.8); x += c.w; });
+      y += 7;
+      pdf.setFont('helvetica','normal'); pdf.setTextColor(30);
+    };
+    cabecalho();
+    pdf.setFontSize(7.5);
+    const LH = 3.3;
+    dados.forEach((l, i)=>{
+      const cel = cols.map(c=>{
+        const linhas = pdf.splitTextToSize(String(c.f(l)||''), c.w-3);
+        if(linhas.length > 2){ linhas.length = 2; linhas[1] = linhas[1].replace(/.{0,2}$/,'…'); }
+        return linhas;
+      });
+      const h = Math.max(...cel.map(x=>x.length)) * LH + 2.4;
+      if(y + h > PH - M - 5){ pdf.addPage(); cabecalho(); pdf.setFontSize(7.5); }
+      if(i % 2 === 1){ pdf.setFillColor(245,246,250); pdf.rect(M, y, PW-2*M, h, 'F'); }
+      let x = M;
+      cel.forEach((linhas, ci)=>{ pdf.text(linhas, x+1.5, y+3.4); x += cols[ci].w; });
+      y += h;
+    });
+    // Rodapé com nº da página
+    const totalPag = pdf.getNumberOfPages();
+    for(let p=1; p<=totalPag; p++){
+      pdf.setPage(p);
+      pdf.setFontSize(7.5); pdf.setTextColor(130);
+      pdf.text(`Página ${p} de ${totalPag}`, PW-M, PH-5, { align:'right' });
+      pdf.text('Aplic Metais / Crow Importadora', M, PH-5);
+    }
+    pdf.save(`clientes_crow_${agora().toISOString().split('T')[0]}.pdf`);
+    toast(`✓ PDF exportado — ${dados.length} cliente(s)`,'success');
+  } catch(e){ console.error(e); toast('Erro ao gerar PDF: '+(e.message||e),'error'); }
 }
 
 async function verHistoricoCliente(cod){
