@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 26/11/2026 15:58\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 26/11/2026 15:58</span>
+            onclick="alert('Versão desta build: 26/11/2026 17:10\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 26/11/2026 17:10</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -30205,14 +30205,16 @@ function impPedidosImportacao(incluirConcluidos){
     return !!incluirConcluidos && c.status === 'concluido' && !!reg?.concluido_em;
   });
 }
-function impRetiradasDo(compraId){
-  const reg = IMP.regs[compraId] || {};
+function impRetiradasDo(compraId, regOv, comprasOv){
+  const reg = regOv || IMP.regs[compraId] || {};
+  const lista = comprasOv || IMP.compras;
   const ids = new Set(Object.keys(reg.retiradas || {}));
-  IMP.compras.forEach(c => { if(c.importacao_origem === compraId) ids.add(c.id); });
-  return IMP.compras.filter(c => ids.has(c.id));
+  lista.forEach(c => { if(c.importacao_origem === compraId) ids.add(c.id); });
+  return lista.filter(c => ids.has(c.id));
 }
-function impResumoPedido(c){
-  const reg = IMP.regs[c.id] || {};
+// regOv/comprasOv: opcionais — o painel em Compras passa o registro lido na hora e a lista de Compras.
+function impResumoPedido(c, regOv, comprasOv){
+  const reg = regOv || IMP.regs[c.id] || {};
   // Map (e não objeto) para manter a ordem do pedido — objeto põe códigos numéricos na frente
   const itensMap = new Map();
   (c.itens || []).forEach(i => {
@@ -30227,7 +30229,7 @@ function impResumoPedido(c){
     Object.entries(ch.itens || {}).forEach(([k,q]) => { if(itens[k]) itens[k].C += impNum(q); });
     Object.entries(ch.cancelado || {}).forEach(([k,q]) => { if(itens[k]) itens[k].X += impNum(q); });
   });
-  const retiradas = impRetiradasDo(c.id);
+  const retiradas = impRetiradasDo(c.id, regOv, comprasOv);
   retiradas.forEach(rc => (rc.itens || []).forEach(i => { const k = impChave(i.codigo); if(itens[k]) itens[k].R += impNum(i.qtd); }));
   const lista = Array.from(itensMap.values()).map(it => {
     it.T = Math.max(0, it.E - it.C - it.X);
@@ -31196,12 +31198,23 @@ async function impHtmlPainelCompra(c){
     const reg = (await db.ref('importacoes/'+c.id).once('value')).val() || {};
     if(c.status !== 'importacao' && !reg.concluido_em) return '';
     const usd = Object.entries(reg.precos_usd||{}).reduce((s,[k,v]) => s + impNum(v) * (c.itens||[]).filter(i=>impChave(i.codigo)===k).reduce((t,i)=>t+impNum(i.qtd),0), 0) || impNum(reg.valor_usd_manual);
+    // Saldo por item (mesma conta da aba Importações). Pedidos de retirada: lista de Compras já
+    // carregada na tela (sem leitura extra); se ela não estiver carregada, usa a da aba Importações.
+    const listaCompras = (typeof COMPRAS_CACHE !== 'undefined' && Array.isArray(COMPRAS_CACHE) && COMPRAS_CACHE.length) ? COMPRAS_CACHE : IMP.compras;
+    const r = impResumoPedido(c, reg, listaCompras);
+    const qtdCel = (v, cor) => `<td style="${v&&cor?'font-weight:700;color:'+cor:''}">${v?impFmtQtd(v):'—'}</td>`;
+    const tabelaSaldo = r.itens.length ? `<div class="im-tab-wrap" style="flex-basis:100%;margin-top:4px"><table class="im-tab" style="background:#fff">
+        <thead><tr><th style="text-align:left">Item</th><th>Encomendado</th><th>Chegou no fornec.</th><th>Em trânsito</th><th>Retirado</th><th>No fornecedor</th></tr></thead>
+        <tbody>${r.itens.map(i => `<tr><td style="text-align:left"><strong>${esc(i.codigo)}</strong> <span style="font-size:11px;color:var(--muted)">${esc(i.nome)}</span></td>
+          ${qtdCel(i.E)}${qtdCel(i.C)}${qtdCel(i.T,'#1565c0')}${qtdCel(i.R)}${qtdCel(i.S,'#7c3aed')}</tr>`).join('')}</tbody>
+      </table></div>` : '';
     return `<div style="margin-bottom:14px;padding:10px 14px;background:#e0f2fe;border-radius:8px;font-size:13px;color:#075985;display:flex;gap:14px;flex-wrap:wrap;align-items:center">
       <span>🌏 <strong>Importação</strong>${reg.numero_fornecedor?' · '+esc(reg.numero_fornecedor):''}</span>
       <span>Previsão: <strong>${impFmtMes(reg.previsao)}</strong></span>
       <span>Valor: <strong>${usd?impFmtUsd(usd):'US$ —'}</strong></span>
       <span>Cotação: <strong>${reg.cotacao?'R$ '+impNum(reg.cotacao).toLocaleString('pt-BR',{maximumFractionDigits:4}):'—'}</strong></span>
-      <span style="flex-basis:100%;font-size:12px">Não é marcado como Recebido: a mercadoria entra no estoque pelos pedidos de retirada.</span>
+      <span style="flex-basis:100%;font-size:12px">Não é marcado como Recebido: a mercadoria entra no estoque pelos pedidos de retirada. As quantidades do pedido abaixo são as encomendadas; o saldo fica em "No fornecedor".</span>
+      ${tabelaSaldo}
       <button class="btn btn-outline btn-sm" onclick="impIrParaPedido('${c.id}')">Abrir em Importações</button></div>`;
   } catch(e){ return ''; }
 }
