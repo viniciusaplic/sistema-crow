@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 25/11/2026 17:30\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 25/11/2026 17:30</span>
+            onclick="alert('Versão desta build: 25/11/2026 17:30\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 26/11/2026 10:12</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -3957,16 +3957,22 @@ function ordenarBuscaPorRelevancia(lista, termoBusca){
 // aprovação, criação, etc.) — sempre com data/hora exata e quem foi o responsável.
 async function registrarEventoHistorico(pedidoId, textoEvento){
   try {
-    const ref = db.ref('pedidos/'+pedidoId+'/historico_edicoes');
-    const snap = await ref.once('value');
-    const historico = snap.val() || [];
-    historico.push({
+    if(!pedidoId) return;
+    // Pedido apagado: gravar o histórico recriaria um "pedido fantasma"
+    if(!(await db.ref('pedidos/'+pedidoId+'/status').once('value')).exists()) return;
+    const entrada = {
       ts: agoraTs(),
       usuario_nome: usuarioLogado?.nome || 'Desconhecido',
       usuario_tipo: usuarioLogado?.admin ? 'admin' : (usuarioLogado?.tipo==='expedicao' ? 'expedicao' : 'vendedor'),
       alteracoes: [textoEvento]
+    };
+    // transaction: dois eventos ao mesmo tempo (ex.: faturar e criar contas a receber)
+    // não apagam um ao outro, como acontecia com once() + set()
+    await db.ref('pedidos/'+pedidoId+'/historico_edicoes').transaction(atual => {
+      const lista = Array.isArray(atual) ? atual.filter(Boolean) : (atual ? Object.values(atual) : []);
+      lista.push(entrada);
+      return lista;
     });
-    await ref.set(historico);
   } catch(e){ /* não trava o fluxo principal (imprimir/gerar pdf) se o registro falhar */ }
 }
 
@@ -6053,10 +6059,10 @@ async function verPedido(id){
           <button class="btn btn-outline btn-sm" style="margin-top:8px;color:#7c3aed;border-color:#7c3aed" onclick="abrirLogBipagem('${id}')">Ver horário item por item</button>
         </div>` : ''
       }
-      ${(p.historico_edicoes||[]).length ? `
+      ${Object.keys(p.historico_edicoes||{}).length ? `
         <div style="margin-top:16px;padding:14px 16px;background:var(--bg);border-radius:10px;font-size:13px">
           <div style="font-weight:700;color:var(--primary);margin-bottom:8px">📝 Histórico do Pedido</div>
-          ${p.historico_edicoes.slice().reverse().map(h=>`
+          ${(Array.isArray(p.historico_edicoes)?p.historico_edicoes:Object.values(p.historico_edicoes)).filter(Boolean).slice().reverse().map(h=>`
             <div style="padding:8px 0;border-top:1px solid var(--border)">
               <div style="font-size:12px;color:var(--muted)">
                 <strong>${new Date(h.ts).toLocaleString('pt-BR')}</strong> — por <strong>${h.usuario_nome}</strong>${h.usuario_tipo?` (${h.usuario_tipo==='admin'?'Admin':h.usuario_tipo==='expedicao'?'Expedição':'Vendedor'})`:''}
@@ -7193,6 +7199,7 @@ async function enviarPedidoAnalise(id){
     if(!usuarioLogado?.admin){ toast('Só administrador pode enviar para análise','error'); return; }
     const r = await transicaoStatus('pedidos/'+id+'/status', 'AA', 'EA');
     if(!r.ok){ toast('Pedido não está mais em Aguardando Aprovação — atualize a tela','error'); return; }
+    await registrarEventoHistorico(id, '🔎 Enviado para análise financeira (Aguard. Aprovação → Em Análise)');
     fecharModal('modal-ver-pedido');
     renderPedidos();
     toast('🔎 Pedido em análise financeira','success');
@@ -7204,6 +7211,7 @@ async function voltarPedidoAguardando(id){
     if(!usuarioLogado?.admin){ toast('Só administrador pode alterar este status','error'); return; }
     const r = await transicaoStatus('pedidos/'+id+'/status', 'EA', 'AA');
     if(!r.ok){ toast('Pedido não está mais Em Análise — atualize a tela','error'); return; }
+    await registrarEventoHistorico(id, '↩️ Voltou para Aguardando Aprovação (Em Análise → Aguard. Aprovação)');
     fecharModal('modal-ver-pedido');
     renderPedidos();
     toast('↩️ Pedido voltou para Aguardando Aprovação','success');
@@ -7220,6 +7228,7 @@ async function aprovarPedido(id){
       ? await transicaoStatus('pedidos/'+id+'/status', atual, 'AP')
       : { ok:false };
     if(!resAprov.ok){ toast('Pedido não está mais aguardando aprovação/análise — atualize a tela','error'); return; }
+    await registrarEventoHistorico(id, `✅ Pedido aprovado (${atual==='EA'?'Em Análise':'Aguard. Aprovação'} → Aprovado)`);
     fecharModal('modal-ver-pedido');
     renderPedidos();
     toast('✓ Pedido aprovado! Já disponível para separação.','success');
@@ -7282,6 +7291,7 @@ async function cancelarBipagemPedido(id){
   // Pedido volta a estar "em aberto" (AP) — precisa reservar de novo, já que a bipagem tinha liberado a reserva
   await reservarEstoquePedido(p.itens || []);
 
+  await registrarEventoHistorico(id, `↩️ Bipagem cancelada — ${(p.itens||[]).length} item(ns) devolvido(s) ao estoque, pedido voltou para Aprovado`);
   fecharModal('modal-ver-pedido');
   renderPedidos();
   toast(`✓ Bipagem cancelada. Estoque devolvido e pedido voltou para Aprovado.`,'success');
@@ -7640,6 +7650,8 @@ async function cancelarPedido(id){
       return 'Cancelado';
     });
     if(!resCancel.committed){ toast('Este pedido já está cancelado','error'); return; }
+    const labelStatusCanc = { AA:'Aguard. Aprovação', EA:'Em Análise', AP:'Aprovado', EX:'Em Separação', CC:'Concluído' };
+    const histCancel = [`❌ Pedido cancelado (estava ${labelStatusCanc[p.status]||p.status||'—'})`];
     if(crTemTitulos(p)) setTimeout(() => alert(`⚠️ O pedido #${p.numero} tem títulos no Contas a Receber.\n\nConfira na aba Financeiro e exclua os que não valem mais.`), 400);
     await db.ref('pedidos/'+id+'/status_antes_cancelamento').set(p?.status || 'AA');
     if(p?.status === 'CC') db.ref('aguardando_coleta/'+id).remove().catch(()=>{});
@@ -7658,6 +7670,7 @@ async function cancelarPedido(id){
         await aplicarDeltaCredito(cli._key, creditoUsado);
         await db.ref('pedidos/'+id+'/credito_debitado_valor').set(0);
         await db.ref('pedidos/'+id+'/credito_devolvido_em').set(agoraTs());
+        histCancel.push(`crédito de ${fmtMoeda(creditoUsado)} devolvido ao cliente`);
         toast(`💰 ${fmtMoeda(creditoUsado)} de crédito devolvido a ${p.cliente_nome}`,'success');
       } else {
         toast(`⚠ Não foi possível devolver ${fmtMoeda(creditoUsado)} de crédito: cliente não localizado no cadastro. Ajuste manualmente.`,'error');
@@ -7673,10 +7686,13 @@ async function cancelarPedido(id){
             motivo:`Estorno — cancelamento do Pedido #${p.numero} (${esc(p.cliente_nome)})`, origemTipo:'pedido', origemId:id });
         }
       }
+      histCancel.push(`${p.itens.length} item(ns) estornado(s) ao estoque`);
       toast(`✅ Pedido cancelado e ${p.itens.length} item(ns) estornado(s) ao estoque.`,'success');
     } else {
+      if(p.status === 'CC') histCancel.push('itens NÃO devolvidos ao estoque (mercadoria já enviada)');
       toast('Pedido cancelado');
     }
+    await registrarEventoHistorico(id, histCancel.join(' — '));
     renderPedidos();
 
   } catch(e){ toast('Erro ao cancelar pedido: '+e.message,'error'); }
@@ -16667,8 +16683,11 @@ async function abrirSeparacaoPedido(pedidoId){
 
   // Marcar como "Em Separação" no primeiro acesso
   if(p.status === 'AP'){
-    await db.ref('pedidos/'+pedidoId+'/status').set('EX');
-    pedidoSeparacaoAtual.status = 'EX';
+    const rSep = await transicaoStatus('pedidos/'+pedidoId+'/status', 'AP', 'EX');
+    if(rSep.ok){
+      pedidoSeparacaoAtual.status = 'EX';
+      await registrarEventoHistorico(pedidoId, '📦 Separação iniciada (Aprovado → Em Separação)');
+    } else if(rSep.atual) pedidoSeparacaoAtual.status = rSep.atual;
   }
 
   renderModalSeparacao();
@@ -17039,6 +17058,7 @@ async function confirmarGerarOPSeparacao(){
 async function irParaBipagem(){
   pedidoSeparacaoAtual.ts_inicio_bipagem = agoraTs();
   await db.ref('pedidos/'+pedidoSeparacaoAtual.id+'/ts_inicio_bipagem').set(pedidoSeparacaoAtual.ts_inicio_bipagem);
+  registrarEventoHistorico(pedidoSeparacaoAtual.id, '📷 Bipagem final iniciada');
   await recarregarItensBipagem();
   fecharModal('modal-separacao');
   renderModalBipagem();
@@ -17345,6 +17365,7 @@ function confirmarReiniciarBipagem(){
     p.itens.forEach(item => { item.qtd_bipada = 0; delete item.bip_adiado; });
     await db.ref('pedidos/'+p.id+'/itens').set(p.itens);
     await db.ref('pedidos/'+p.id+'/caixas').remove();
+    registrarEventoHistorico(p.id, '🔄 Bipagem reiniciada — contagem de todos os itens e caixas zeradas');
     p.caixas = [];
     renderModalBipagem();
     toast('✓ Bipagem reiniciada','success');
@@ -17561,6 +17582,7 @@ async function finalizarPedidoBipado(){
       ts_fim_bipagem: agoraTs(),
       bipado_por: usuarioLogado?.nome || ''
     });
+    await registrarEventoHistorico(p.id, '✅ Pedido concluído — bipagem finalizada e baixa de estoque feita');
     invalidarCacheNo('pedidos');
     // Entra na fila da Coleta (nó pequeno próprio: a tela de Coleta não varre os pedidos).
     // Falha aqui não pode travar a bipagem — o botão "Buscar bipados recentes" recupera.
@@ -18199,6 +18221,7 @@ async function salvarFretePendente(i){
     else rec.pedido_id = '';
     await db.ref().update(updates);
     if(FRETES_CACHE[mes]) FRETES_CACHE[mes].push({ id, mes, ...rec }); else await carregarMesFretes(mes, true);
+    if(rec.pedido_id) registrarEventoHistorico(rec.pedido_id, `🚛 Frete lançado — NF ${nf} — ${transp}${previsao?' — previsão de entrega '+fmtData(previsao):''}`);
     toast(`✓ Frete da NF ${nf} lançado`,'success');
     renderFretesCards(); renderFretesPendentes(); montarFiltrosFretes(); renderTabelaFretes();
     // Já deixa o cursor no frete da próxima linha
@@ -18239,6 +18262,7 @@ async function dispensarFretePendente(i){
       // a marca no pedido faz ele já entrar fora da lista na bipagem.
       const em = agora().toISOString();
       db.ref('pedidos/'+n.pedido_id+'/sem_frete').set(true).catch(()=>{});
+      registrarEventoHistorico(n.pedido_id, '🚛 Marcado como "Sem frete" (sem frete a controlar)');
       db.ref('aguardando_coleta/'+n.pedido_id).transaction(atual => atual ? { ...atual, oculto: true, oculto_em: em } : undefined).catch(()=>{});
       const pc = COLETA_PENDENTES.find(x => x.id === n.pedido_id);
       if(pc){ pc.oculto = true; pc.oculto_em = em; }
@@ -18457,6 +18481,7 @@ async function marcarEntregueFrete(mes, id){
     Object.keys(mud).forEach(k => { updates['fretes/'+mes+'/'+id+'/'+k] = mud[k]; });
     if(f.pedido_id && await pedidoExisteFrete(f.pedido_id)) updates['pedidos/'+f.pedido_id+'/entrega'] = resumoEntregaPedido({ ...f, ...mud }, mes, id);
     await db.ref().update(updates);
+    if(f.pedido_id) registrarEventoHistorico(f.pedido_id, `📬 Entrega realizada em ${fmtData(mud.data_entrega)}${f.transportadora?' — '+f.transportadora:''}`);
     Object.assign(f, mud);
     toast('✓ Entrega realizada','success');
     renderFretesCards(); renderTabelaFretes();
@@ -18721,6 +18746,27 @@ async function salvarFrete(){
     updates['fretes/'+mes+'/'+id] = rec;
     await db.ref().update(updates);
 
+    // Histórico do pedido (sem valores de frete)
+    if(!rev){
+      const orig = FRETE_EDIT?.original || null;
+      const descFrete = `NF ${rec.nf_numero||'—'}${rec.transportadora?' — '+rec.transportadora:''}`;
+      if(pidAntigo && pidAntigo !== pidNovo) registrarEventoHistorico(pidAntigo, `🚛 Frete (${descFrete}) desvinculado deste pedido`);
+      if(rec.pedido_id){
+        if(!orig || pidAntigo !== rec.pedido_id){
+          registrarEventoHistorico(rec.pedido_id, `🚛 Frete lançado — ${descFrete}${rec.previsao?' — previsão de entrega '+fmtData(rec.previsao):''}`);
+        } else {
+          const mudou = [];
+          if((orig.status||'') !== (rec.status||'')) mudou.push(`situação: ${infoStatusFrete('envio', orig.status).label} → ${infoStatusFrete('envio', rec.status).label}`);
+          if((orig.previsao||'') !== (rec.previsao||'')) mudou.push(`previsão de entrega: ${orig.previsao?fmtData(orig.previsao):'—'} → ${rec.previsao?fmtData(rec.previsao):'—'}`);
+          if((orig.data_entrega||'') !== (rec.data_entrega||'')) mudou.push(`data de entrega: ${orig.data_entrega?fmtData(orig.data_entrega):'—'} → ${rec.data_entrega?fmtData(rec.data_entrega):'—'}`);
+          if(String(orig.nf_numero||'') !== String(rec.nf_numero||'')) mudou.push(`NF: ${orig.nf_numero||'—'} → ${rec.nf_numero||'—'}`);
+          if((orig.transportadora||'') !== (rec.transportadora||'')) mudou.push(`transportadora: ${orig.transportadora||'—'} → ${rec.transportadora||'—'}`);
+          if((orig.rastreio||'') !== (rec.rastreio||'')) mudou.push(`rastreio: ${rec.rastreio||'—'}`);
+          if(mudou.length) registrarEventoHistorico(rec.pedido_id, `🚛 Frete atualizado — ${mudou.join('; ')}`);
+        }
+      }
+    }
+
     // Atualiza o cache local
     if(FRETE_EDIT) FRETES_CACHE[FRETE_EDIT.mes] = (FRETES_CACHE[FRETE_EDIT.mes]||[]).filter(x => x.id !== id);
     if(FRETES_CACHE[mes]) FRETES_CACHE[mes] = FRETES_CACHE[mes].filter(x => x.id !== id).concat([{ id, mes, ...rec }]);
@@ -18744,6 +18790,9 @@ async function excluirFrete(){
     const updates = { ['fretes/'+FRETE_EDIT.mes+'/'+FRETE_EDIT.id]: null };
     if(f.pedido_id && await pedidoExisteFrete(f.pedido_id)) updates['pedidos/'+f.pedido_id+'/entrega'] = null;
     await db.ref().update(updates);
+    if(f.pedido_id) registrarEventoHistorico(f.pedido_id, f.tipo==='reverso'
+      ? `🔁 Reverso ${f.codigo_autorizacao||''} excluído`
+      : `🚛 Frete excluído — NF ${f.nf_numero||'—'}${f.transportadora?' — '+f.transportadora:''}`);
     FRETES_CACHE[FRETE_EDIT.mes] = (FRETES_CACHE[FRETE_EDIT.mes]||[]).filter(x => x.id !== FRETE_EDIT.id);
     fecharModal('modal-frete');
     toast('✓ Excluído','success');
@@ -19592,6 +19641,8 @@ async function confirmarColeta(modoPapel){
     const gravacao = db.ref().update(updates);
     if(!numero) txNumero.then(n => { if(n) db.ref('coletas/'+cid+'/numero').set(n).catch(()=>{}); });
     await gravacao;
+    notas.forEach(n => registrarEventoHistorico(n.pedido_id,
+      `🚚 Coletado${numero?' — romaneio Nº '+numero:''} — NF ${n.nf_numero}${transp?.nome?' — '+transp.nome:''} — retirado por ${nome}`));
 
     if(assinaturaPng) COLETA_ASSINATURAS_CACHE[cid] = assinaturaPng;
     if(coletorSalvo){
@@ -19815,6 +19866,7 @@ async function desfazerColeta(id){
       };
     });
     await db.ref().update(updates);
+    notas.forEach(n => registrarEventoHistorico(n.pedido_id, `↩️ Romaneio${c.numero?' Nº '+c.numero:''} desfeito — pedido voltou para Aguardando coleta`));
     delete COLETA_ASSINATURAS_CACHE[id];
     fecharModal('modal-coleta-ver');
     toast('Romaneio desfeito — pedidos de volta na lista de coleta','success');
@@ -27278,6 +27330,11 @@ async function finalizarPedidosEmMassa(){
     updates['pedidos/'+id+'/status'] = 'CC';
     updates['pedidos/'+id+'/ts_fim_bipagem'] = agoraTs();
     updates['pedidos/'+id+'/bipado_por'] = (usuarioLogado?.nome||'') + ' (finalização em massa)';
+    const histMassa = Array.isArray(p.historico_edicoes) ? p.historico_edicoes.length : Object.keys(p.historico_edicoes||{}).length;
+    updates['pedidos/'+id+'/historico_edicoes/'+histMassa] = {
+      ts: agoraTs(), usuario_nome: usuarioLogado?.nome || '', usuario_tipo: usuarioLogado?.admin ? 'admin' : 'vendedor',
+      alteracoes: ['✅ Pedido marcado como Concluído (finalização em massa)']
+    };
     finalizados++;
   }
 
