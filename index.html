@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 26/11/2026 15:38\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 26/11/2026 15:38</span>
+            onclick="alert('Versão desta build: 26/11/2026 15:58\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 26/11/2026 15:58</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -2271,16 +2271,26 @@ tbody td{padding:11px 16px;font-size:14px}
     <div style="font-size:13px;color:var(--muted);margin-bottom:14px">
       Passa os clientes e os pedidos escolhidos de um vendedor para outro (ex: quando alguém sai e entra outra pessoa no lugar).
       Os pedidos faturados <strong>antes</strong> da data escolhida continuam no nome do vendedor antigo.
+      Se você desmarcar alguma cidade, só passam os pedidos dos clientes das cidades marcadas.
     </div>
     <div class="form-row"><div class="form-group">
       <label>De (vendedor que saiu)</label>
-      <select id="tc-origem" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px"></select>
+      <select id="tc-origem" onchange="tcAtualizarCidades()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px"></select>
     </div><div class="form-group">
       <label>Para (novo vendedor)</label>
       <select id="tc-destino" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px"></select>
     </div></div>
     <div style="border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;display:flex;flex-direction:column;gap:10px">
-      <label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="tc-clientes" checked> Passar <strong>todos os clientes</strong> da carteira</label>
+      <label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="tc-clientes" checked onchange="document.getElementById('tc-cidades-box').style.display=this.checked?'':'none'"> Passar <strong>clientes</strong> da carteira — das cidades marcadas abaixo</label>
+      <div id="tc-cidades-box" style="margin-left:24px">
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap">
+          <input type="text" id="tc-cidades-busca" placeholder="Filtrar cidade..." oninput="tcFiltrarCidades()" style="flex:1;min-width:120px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px">
+          <button type="button" class="btn btn-outline btn-sm" onclick="tcMarcarCidades(true)">Marcar todas</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="tcMarcarCidades(false)">Desmarcar todas</button>
+        </div>
+        <div id="tc-cidades" style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:6px;font-size:12px;color:var(--muted)">Escolha o vendedor de origem para ver as cidades.</div>
+        <div id="tc-cidades-resumo" style="font-size:12px;color:var(--muted);margin-top:4px"></div>
+      </div>
       <label style="display:flex;gap:8px;align-items:center;cursor:pointer;flex-wrap:wrap"><input type="checkbox" id="tc-faturados" checked> Pedidos <strong>faturados</strong> a partir de <input type="date" id="tc-data-fat" style="padding:4px 6px;border:1px solid var(--border);border-radius:6px"></label>
       <label style="display:flex;gap:8px;align-items:center;cursor:pointer;flex-wrap:wrap"><input type="checkbox" id="tc-abertos"> Pedidos <strong>ainda não faturados</strong> lançados a partir de <input type="date" id="tc-data-abertos" style="padding:4px 6px;border:1px solid var(--border);border-radius:6px"></label>
     </div>
@@ -5654,6 +5664,56 @@ function tcEhDaOrigem(reg, origem){
   if(reg.vendedor_id && reg.vendedor_id === origem.id) return true;
   return !!origem.nome && tcNorm(reg.vendedor_nome) === tcNorm(origem.nome);
 }
+// ── Filtro por cidade (usa só CLIENTES_DB já carregado — nenhuma leitura extra no Firebase) ──
+function tcChaveCidade(c){
+  const cid = String(c.cidade||'').trim().toUpperCase();
+  const uf = String(c.uf||'').trim().toUpperCase();
+  if(!cid) return '(SEM CIDADE)';
+  return tcNorm(cid).toUpperCase() + (uf ? '/'+uf : '');
+}
+function tcOrigemSelecionada(){
+  const so = document.getElementById('tc-origem');
+  if(!so || !so.value) return null;
+  return { id: so.value, nome: so.options[so.selectedIndex].dataset.nome };
+}
+function tcAtualizarCidades(){
+  const box = document.getElementById('tc-cidades');
+  document.getElementById('tc-resultado').innerHTML = '';
+  TRANSF_CARTEIRA = null;
+  const origem = tcOrigemSelecionada();
+  if(!origem){ box.innerHTML = 'Escolha o vendedor de origem para ver as cidades.'; tcResumoCidades(); return; }
+  const cont = {};
+  CLIENTES_DB.forEach(c => { if(c._key && tcEhDaOrigem(c, origem)){ const k = tcChaveCidade(c); cont[k] = (cont[k]||0) + 1; } });
+  const lista = Object.entries(cont).sort((a,b)=> a[0].localeCompare(b[0]));
+  if(!lista.length){ box.innerHTML = 'Esse vendedor não tem clientes na carteira.'; tcResumoCidades(); return; }
+  box.innerHTML = lista.map(([k,n]) => `<label class="tc-cid-item" data-busca="${esc(tcNorm(k))}" style="display:flex;gap:6px;align-items:center;padding:3px 2px;cursor:pointer;color:var(--text,#111)"><input type="checkbox" class="tc-cid" value="${esc(k)}" checked onchange="tcResumoCidades()"> ${esc(k)} <span style="color:var(--muted)">(${n})</span></label>`).join('');
+  document.getElementById('tc-cidades-busca').value = '';
+  tcResumoCidades();
+}
+function tcFiltrarCidades(){
+  const q = tcNorm(document.getElementById('tc-cidades-busca').value);
+  document.querySelectorAll('#tc-cidades .tc-cid-item').forEach(l => { l.style.display = (!q || l.dataset.busca.includes(q)) ? '' : 'none'; });
+}
+function tcMarcarCidades(marcar){
+  // Respeita o filtro de texto: marca/desmarca só as cidades visíveis
+  document.querySelectorAll('#tc-cidades .tc-cid-item').forEach(l => { if(l.style.display !== 'none') l.querySelector('input').checked = marcar; });
+  tcResumoCidades();
+}
+function tcCidadesMarcadas(){
+  return new Set([...document.querySelectorAll('#tc-cidades .tc-cid:checked')].map(i=>i.value));
+}
+function tcResumoCidades(){
+  const el = document.getElementById('tc-cidades-resumo');
+  const origem = tcOrigemSelecionada();
+  if(!origem){ el.textContent = ''; return; }
+  const todas = document.querySelectorAll('#tc-cidades .tc-cid').length;
+  const marc = tcCidadesMarcadas();
+  const n = CLIENTES_DB.filter(c => c._key && tcEhDaOrigem(c, origem) && marc.has(tcChaveCidade(c))).length;
+  el.textContent = `${marc.size} de ${todas} cidade(s) marcada(s) — ${n} cliente(s)`;
+  TRANSF_CARTEIRA = null;
+  document.getElementById('tc-resultado').innerHTML = '';
+}
+
 async function abrirModalTransferirCarteira(){
   if(!usuarioLogado.admin){ toast('Apenas admin pode transferir carteira','error'); return; }
   if(!TC_USUARIOS){
@@ -5669,6 +5729,9 @@ async function abrirModalTransferirCarteira(){
   document.getElementById('tc-data-fat').value = ymdLocal(hoje);
   document.getElementById('tc-data-abertos').value = ymdLocal(d90);
   document.getElementById('tc-resultado').innerHTML = '';
+  document.getElementById('tc-clientes').checked = true;
+  document.getElementById('tc-cidades-box').style.display = '';
+  tcAtualizarCidades();
   TRANSF_CARTEIRA = null;
   abrirModal('modal-transferir-carteira');
 }
@@ -5689,18 +5752,29 @@ async function previaTransferirCarteira(){
   const el = document.getElementById('tc-resultado');
   el.innerHTML = '⏳ Buscando...';
 
-  const clientes = querCli ? CLIENTES_DB.filter(c => c._key && tcEhDaOrigem(c, origem)) : [];
+  const cidadesMarc = tcCidadesMarcadas();
+  const totalCidades = document.querySelectorAll('#tc-cidades .tc-cid').length;
+  const filtrandoCidade = querCli && cidadesMarc.size < totalCidades;
+  if(querCli && totalCidades && !cidadesMarc.size){ toast('Marque pelo menos uma cidade','error'); el.innerHTML=''; return; }
+  const clientes = querCli ? CLIENTES_DB.filter(c => c._key && tcEhDaOrigem(c, origem) && cidadesMarc.has(tcChaveCidade(c))) : [];
+  // Com filtro de cidade, só passam os pedidos dos clientes escolhidos
+  const codsCli = new Set(clientes.map(c => String(c.codigo||'')));
+  const pedidoNoFiltro = p => {
+    if(!filtrandoCidade) return true;
+    if(p.cliente_codigo) return codsCli.has(String(p.cliente_codigo));
+    return cidadesMarc.has(tcChaveCidade({ cidade: p.cliente_cidade, uf: p.cliente_uf }));
+  };
   const pedidos = {};
   if(querFat){
     const v = (await db.ref('pedidos').orderByChild('data_faturamento').startAt(dFat).once('value')).val() || {};
-    for(const [id,p] of Object.entries(v)) if(p && p.faturado && tcEhDaOrigem(p, origem)) pedidos[id] = { ...p, _motivo:'faturado' };
+    for(const [id,p] of Object.entries(v)) if(p && p.faturado && tcEhDaOrigem(p, origem) && pedidoNoFiltro(p)) pedidos[id] = { ...p, _motivo:'faturado' };
   }
   if(querAb){
     const v = (await db.ref('pedidos').orderByChild('data').startAt(dAb).once('value')).val() || {};
     for(const [id,p] of Object.entries(v)){
       if(!p || p.faturado || pedidos[id]) continue;
       if(String(p.status||'').toLowerCase().startsWith('cancel')) continue;
-      if(tcEhDaOrigem(p, origem)) pedidos[id] = { ...p, _motivo:'em aberto' };
+      if(tcEhDaOrigem(p, origem) && pedidoNoFiltro(p)) pedidos[id] = { ...p, _motivo:'em aberto' };
     }
   }
   const listaPed = Object.entries(pedidos).map(([id,p])=>({ id, ...p })).sort((a,b)=>(b.numero||0)-(a.numero||0));
@@ -5713,10 +5787,13 @@ async function previaTransferirCarteira(){
   el.innerHTML = `
     <div style="padding:10px;background:#fef3c7;border-radius:8px;margin-bottom:10px">
       <strong>${esc(origem.nome)} → ${esc(destino.nome)}</strong><br>
-      ${querCli?`👥 ${clientes.length} cliente(s)<br>`:''}
+      ${querCli?`👥 ${clientes.length} cliente(s)${filtrandoCidade?` — ${cidadesMarc.size} cidade(s)`:' — todas as cidades'}<br>`:''}
       ${(querFat||querAb)?`📦 ${listaPed.length} pedido(s)`:''}
     </div>
-    ${listaPed.length?`<div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;margin-bottom:10px">
+    ${clientes.length?`<div style="font-weight:600;margin-bottom:4px">Clientes</div><div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;margin-bottom:10px">
+      ${clientes.slice().sort((a,b)=>tcChaveCidade(a).localeCompare(tcChaveCidade(b))||String(a.nome).localeCompare(String(b.nome))).map(c=>`<div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:12px">${esc(c.nome||'')} — <em>${esc(tcChaveCidade(c))}</em></div>`).join('')}
+    </div>`:''}
+    ${listaPed.length?`<div style="font-weight:600;margin-bottom:4px">Pedidos</div><div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;margin-bottom:10px">
       ${listaPed.map(p=>`<div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:12px">#${p.numero||'—'} — ${esc(p.cliente_nome||'')} — <em>${p._motivo}${p.data_faturamento?' em '+fmtData(p.data_faturamento):''}</em></div>`).join('')}
     </div>`:''}
     <button class="btn btn-primary" style="width:100%" onclick="aplicarTransferirCarteira()">✓ Transferir para ${esc(destino.nome)}</button>`;
