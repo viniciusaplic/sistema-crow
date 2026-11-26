@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 25/11/2026 17:10\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 25/11/2026 17:10</span>
+            onclick="alert('Versão desta build: 25/11/2026 17:30\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 25/11/2026 17:30</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -13892,9 +13892,10 @@ function enfRender(){
       <td style="padding:5px 4px"><strong>${esc(it.codigo)}</strong><div style="font-size:11px;color:${cf.cod ? 'var(--muted)' : '#dc2626'}">${cf.cod ? 'Forn.: ' + esc(cf.cod) : 'sem cód. fornecedor'}</div></td>
       <td style="padding:5px 4px;font-size:11px">${esc(it.nome || '')}</td>
       <td style="padding:5px 4px;text-align:right">${inp('qtd', l.qtd, 64, difQtd)}${difQtd ? `<div style="font-size:10px;color:#b45309">pedido ${enfFmtNum(qtdPed, 0)}</div>` : ''}</td>
-      <td style="padding:5px 4px;text-align:right">${inp('preco', l.preco, 76, difPreco)}${difPreco ? `<div style="font-size:10px;color:#b45309">pedido ${enfFmtNum(precoPed, 2)}</div>` : ''}</td>
+      <td style="padding:5px 4px;text-align:right">${inp('preco', l.preco, 76, difPreco)}<div style="font-size:10px;color:var(--muted)">${fmtMoeda(l.preco * l.qtd)}</div>${difPreco ? `<div style="font-size:10px;color:#b45309">pedido ${enfFmtNum(precoPed, 2)}</div>` : ''}</td>
       <td style="padding:5px 4px;text-align:right">${inp('ipi_pct', l.ipiPct, 52, false)}<div style="font-size:10px;color:var(--muted)">${fmtMoeda(l.ipiValor)}</div></td>
       <td style="padding:5px 4px;text-align:right">${inp('st', l.st, 72, false)}</td>
+      <td style="padding:5px 4px;text-align:right;font-weight:600">${fmtMoeda(l.totalItem + l.st)}</td>
       <td style="padding:5px 4px;text-align:right;font-weight:700;color:var(--success)">${l.qtd > 0 ? 'R$ ' + enfFmtNum(l.cmv, 4) : '—'}</td>
       <td style="padding:5px 4px;text-align:right;font-size:11px;color:${corVar}">${ant ? 'R$ ' + enfFmtNum(ant.cmv, 4) + `<div>${var_ !== null ? enfFmtPct(var_) : ''}${ant.origem === 'cadastro' ? ' (cadastro)' : ''}</div>` : '—'}</td>
     </tr>`;
@@ -13932,11 +13933,29 @@ function enfRender(){
           <th style="padding:6px 4px;text-align:left">Código</th><th style="padding:6px 4px;text-align:left">Descrição</th>
           <th style="padding:6px 4px;text-align:right">Qtd NF</th><th style="padding:6px 4px;text-align:right">Preço NF</th>
           <th style="padding:6px 4px;text-align:right">IPI %</th><th style="padding:6px 4px;text-align:right">ST total R$</th>
+          <th style="padding:6px 4px;text-align:right" title="Mercadoria + IPI + ST">Total item</th>
           <th style="padding:6px 4px;text-align:right">CMV final</th><th style="padding:6px 4px;text-align:right">CMV anterior</th>
         </tr></thead>
         <tbody>${linhasHtml}</tbody>
+        <tfoot>${(() => {
+          const at = calc.linhas.filter(l => l.qtd > 0);
+          const sQtd = at.reduce((s, l) => s + l.qtd, 0);
+          const sMerc = at.reduce((s, l) => s + l.preco * l.qtd, 0);
+          const sIpi = at.reduce((s, l) => s + l.ipiValor, 0);
+          const sSt = at.reduce((s, l) => s + l.st, 0);
+          const sCusto = at.reduce((s, l) => s + l.cmv * l.qtd, 0);
+          const td = 'padding:7px 4px;text-align:right;font-weight:800;border-top:2px solid var(--primary);background:var(--bg)';
+          return `<tr><td style="${td};text-align:left" colspan="2">TOTAIS</td>
+            <td style="${td}">${enfFmtNum(sQtd, 0)}</td>
+            <td style="${td}" title="Σ preço × qtd">${fmtMoeda(sMerc)}<div style="font-size:10px;font-weight:400;color:var(--muted)">mercadoria</div></td>
+            <td style="${td}">${fmtMoeda(sIpi)}<div style="font-size:10px;font-weight:400;color:var(--muted)">IPI</div></td>
+            <td style="${td}">${fmtMoeda(sSt)}<div style="font-size:10px;font-weight:400;color:var(--muted)">ST</div></td>
+            <td style="${td}">${fmtMoeda(sMerc + sIpi + sSt)}<div style="font-size:10px;font-weight:400;color:var(--muted)">merc. + IPI + ST</div></td>
+            <td style="${td};color:var(--success)" title="Σ CMV final × qtd">${fmtMoeda(sCusto)}<div style="font-size:10px;font-weight:400;color:var(--muted)">custo c/ frete</div></td>
+            <td style="${td}"></td></tr>`;
+        })()}</tfoot>
       </table>
-      <div style="font-size:11px;color:var(--muted);margin:6px 0">Destaque amarelo = diferente do pedido. Qtd 0 = item não veio (fica fora do cálculo e do LOG). Alterações aqui não mudam o pedido nem o estoque.</div>
+      <div style="font-size:11px;color:var(--muted);margin:6px 0">Destaque amarelo = diferente do pedido. Qtd 0 = item não veio (fica fora do cálculo e do LOG). Ao salvar, preço, IPI, ST e nº da NF são gravados no pedido de compra. A quantidade do pedido e o estoque não mudam.</div>
       <div id="enf-resumo"></div>
     </div>
     <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
@@ -14007,6 +14026,45 @@ function enfDadosParaGravar(){
   };
 }
 
+
+// Grava no pedido de compra o que foi conferido na NF: preço, IPI %, ST e nº da NF.
+// A QUANTIDADE do pedido não é alterada aqui — ela comanda a entrada no estoque (quando não há
+// conferência da expedição) e mexer nela depois do recebimento deixaria pedido e estoque diferentes.
+// Recalcula os campos derivados com a mesma regra de calcularItensCompra.
+async function enfAtualizarPedido(dados){
+  const snap = await db.ref('pedidos_compra/' + ENF.id + '/itens').once('value');
+  const brutos = snap.val() || [];
+  const arr = Array.isArray(brutos) ? brutos : Object.values(brutos);
+  const orig = ENF.c.itens || [];
+  if(arr.length !== orig.length || arr.some((it, i) => String(it?.codigo) !== String(orig[i]?.codigo))){
+    toast('Os itens do pedido foram alterados depois que a Entrada de NF foi aberta — feche e abra de novo. O pedido NÃO foi atualizado.','error');
+    return false;
+  }
+  const novos = arr.map((it, idx) => {
+    const e = ENF.itens[chaveItemCompra(it, idx)];
+    return e ? { ...it, preco_unit: enfNum(e.preco), ipi_pct: enfNum(e.ipi_pct), st_valor: enfNum(e.st) } : { ...it };
+  });
+  const frete = Number(ENF.c.frete) || 0;
+  const brutosV = novos.map(i => (Number(i.qtd) || 0) * (Number(i.preco_unit) || 0));
+  const totalBruto = brutosV.reduce((s, v) => s + v, 0);
+  novos.forEach((i, idx) => {
+    const valorBruto = brutosV[idx];
+    const valorIpi = valorBruto * ((Number(i.ipi_pct) || 0) / 100);
+    const valorSt = Number(i.st_valor || 0);
+    const rateioFrete = totalBruto > 0 ? (valorBruto / totalBruto) * frete : 0;
+    const custoTotalItem = valorBruto + valorIpi + valorSt + rateioFrete;
+    Object.assign(i, { valorBruto, valorIpi, valorSt, rateioFrete, custoTotalItem,
+      custoFinalUnitario: (Number(i.qtd) || 0) > 0 ? custoTotalItem / Number(i.qtd) : 0 });
+  });
+  const total = novos.reduce((s, i) => s + i.custoTotalItem, 0) - (Number(ENF.c.desconto) || 0);
+  const upd = { itens: novos, total };
+  if(dados.nfs) upd.nf = dados.nfs;
+  await db.ref('pedidos_compra/' + ENF.id).update(upd);
+  Object.assign(ENF.c, upd);
+  const cc = COMPRAS_CACHE.find(x => x.id === ENF.id); if(cc) Object.assign(cc, upd);
+  return true;
+}
+
 async function enfSalvar(silencioso){
   if(!ENF) return false;
   if(!usuarioLogado?.admin){ toast('Entrada de NF: somente administrador','error'); return false; }
@@ -14015,12 +14073,13 @@ async function enfSalvar(silencioso){
   const existe = (await db.ref('pedidos_compra/' + ENF.id + '/fornecedor').once('value')).exists();
   if(!existe){ toast('Pedido de compra não existe mais — nada foi salvo','error'); return false; }
   const dados = enfDadosParaGravar();
+  const pedidoOk = await enfAtualizarPedido(dados);
   await db.ref('pedidos_compra/' + ENF.id + '/entrada_nf').set(dados);
   const cc = COMPRAS_CACHE.find(x => x.id === ENF.id); if(cc) cc.entrada_nf = dados;
   ENF.c.entrada_nf = dados;
   ENF.salvo = true; ENF.alterado = false;
   invalidarCacheNo('pedidos_compra');
-  if(!silencioso){ toast('✓ Entrada de NF salva','success'); enfRender(); }
+  if(!silencioso){ toast(pedidoOk ? '✓ Entrada de NF salva e pedido de compra atualizado (preço, IPI, ST e NF)' : 'Entrada de NF salva, mas o pedido NÃO foi atualizado','success'); enfRender(); }
   return true;
 }
 
