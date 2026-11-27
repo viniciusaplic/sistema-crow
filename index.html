@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 26/11/2026 18:15\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 26/11/2026 18:15</span>
+            onclick="alert('Versão desta build: 27/11/2026 09:40\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 27/11/2026 09:40</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -30215,8 +30215,13 @@ function impRetiradasDo(compraId, regOv, comprasOv){
   lista.forEach(c => { if(c.importacao_origem === compraId) ids.add(c.id); });
   return lista.filter(c => ids.has(c.id));
 }
-// regOv/comprasOv: opcionais — o painel em Compras passa o registro lido na hora e a lista de Compras.
-function impResumoPedido(c, regOv, comprasOv){
+// impResumoPedido aceita SÓ o pedido: é usado em .map(impResumoPedido), e o .map passa
+// (item, posição, lista) — parâmetros extras ali recebiam a posição e quebravam a conta.
+function impResumoPedido(c){ return impResumoPedidoCom(c); }
+// regOv/comprasOv: o painel em Compras passa o registro lido na hora e a lista de Compras.
+function impResumoPedidoCom(c, regOv, comprasOv){
+  if(regOv !== undefined && (regOv === null || typeof regOv !== 'object' || Array.isArray(regOv))) regOv = undefined;
+  if(comprasOv !== undefined && !Array.isArray(comprasOv)) comprasOv = undefined;
   const reg = regOv || IMP.regs[c.id] || {};
   // Map (e não objeto) para manter a ordem do pedido — objeto põe códigos numéricos na frente
   const itensMap = new Map();
@@ -31204,7 +31209,7 @@ async function impHtmlPainelCompra(c){
     // Saldo por item (mesma conta da aba Importações). Pedidos de retirada: lista de Compras já
     // carregada na tela (sem leitura extra); se ela não estiver carregada, usa a da aba Importações.
     const listaCompras = (typeof COMPRAS_CACHE !== 'undefined' && Array.isArray(COMPRAS_CACHE) && COMPRAS_CACHE.length) ? COMPRAS_CACHE : IMP.compras;
-    const r = impResumoPedido(c, reg, listaCompras);
+    const r = impResumoPedidoCom(c, reg, listaCompras);
     const qtdCel = (v, cor) => `<td style="${v&&cor?'font-weight:700;color:'+cor:''}">${v?impFmtQtd(v):'—'}</td>`;
     const tabelaSaldo = r.itens.length ? `<div class="im-tab-wrap" style="flex-basis:100%;margin-top:4px"><table class="im-tab" style="background:#fff">
         <thead><tr><th style="text-align:left">Item</th><th>Encomendado</th><th>Chegou no fornec.</th><th>Em trânsito</th><th>Retirado</th><th>No fornecedor</th></tr></thead>
