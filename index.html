@@ -360,7 +360,7 @@ tbody td{padding:11px 16px;font-size:14px}
            navegador está servindo cache. Atualizado a cada entrega. -->
       <span id="build-stamp" title="Versão publicada — se não bater com a última entrega, o GitHub Pages não publicou ou o navegador está com cache antigo"
             style="font-size:11px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);padding:3px 9px;border-radius:20px;margin:0 4px;white-space:nowrap;cursor:help"
-            onclick="alert('Versão desta build: 26/11/2026 18:35\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 26/11/2026 18:35</span>
+            onclick="alert('Versão desta build: 26/11/2026 18:35\n\nSe não for a mais recente, force o recarregamento com Ctrl+F5 ou verifique se o deploy do GitHub Pages falhou.')">v 27/11/2026 15:45</span>
       <button class="btn-sair" onclick="sair()">Sair</button>
     </div>
   </div>
@@ -26531,7 +26531,9 @@ async function previaSubstituirInsumo(){
   }
 
   const th = 'padding:9px 11px;position:sticky;top:0;z-index:3;background:var(--primary);color:rgba(255,255,255,.85);white-space:nowrap;text-align:left';
-  const linha = (l, cor, extra) => `<tr style="border-bottom:1px solid var(--border);${cor}">
+  const linha = (l, cor, extra, idx) => `<tr style="border-bottom:1px solid var(--border);${cor}">
+      <td style="padding:8px 6px;text-align:center;width:34px">${idx==null ? '' :
+        `<input type="checkbox" class="subst-ins-chk" data-idx="${idx}" checked onchange="contarSelSubstituirInsumo()" style="width:16px;height:16px;cursor:pointer">`}</td>
       <td style="padding:8px 11px;font-weight:700;white-space:nowrap">${esc(l.prod)}</td>
       <td style="padding:8px 11px">${esc(l.nome)}${extra?`<div style="font-size:11.5px;color:#b45309;font-weight:600">${esc(extra)}</div>`:''}</td>
       <td style="padding:8px 11px;text-align:center;white-space:nowrap">${esc(l.qtd)}</td>
@@ -26546,22 +26548,45 @@ async function previaSubstituirInsumo(){
   if(trocar.length){
     html += `<div style="display:flex;justify-content:flex-end;margin-bottom:10px">
         <button class="btn btn-primary btn-sm" id="subst-ins-btn" onclick="aplicarSubstituirInsumo()">✅ Substituir em ${trocar.length} produto(s)</button>
-      </div>`;
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Desmarque os produtos que vão continuar com <strong>${esc(antigo)}</strong>.</div>`;
   }
   html += `<div style="overflow:auto;max-height:60vh;border:1px solid var(--border);border-radius:8px">
     <table style="width:100%;border-collapse:collapse;font-size:12.5px">
-    <thead><tr><th style="${th}">Produto</th><th style="${th}">Descrição</th><th style="${th};text-align:center">Qtd. por un.</th></tr></thead><tbody>`;
-  revisar.forEach(l=>{ html += linha(l, 'background:#fffbeb;', '⚠ Não será alterado — '+l.motivo); });
-  trocar.forEach(l=>{ html += linha(l, '', ''); });
+    <thead><tr><th style="${th};text-align:center;width:34px">${trocar.length?`<input type="checkbox" id="subst-ins-todos" checked onchange="marcarTodosSubstituirInsumo(this.checked)" title="Marcar/desmarcar todos" style="width:16px;height:16px;cursor:pointer">`:''}</th><th style="${th}">Produto</th><th style="${th}">Descrição</th><th style="${th};text-align:center">Qtd. por un.</th></tr></thead><tbody>`;
+  revisar.forEach(l=>{ html += linha(l, 'background:#fffbeb;', '⚠ Não será alterado — '+l.motivo, null); });
+  trocar.forEach((l,i)=>{ html += linha(l, '', '', i); });
   html += '</tbody></table></div>';
   out.innerHTML = html;
 }
 
+function _selSubstituirInsumo(){
+  const ctx = SUBST_INS_CTX; if(!ctx) return [];
+  return [...document.querySelectorAll('.subst-ins-chk')]
+    .filter(c=>c.checked).map(c=>ctx.trocar[Number(c.dataset.idx)]).filter(Boolean);
+}
+function contarSelSubstituirInsumo(){
+  const ctx = SUBST_INS_CTX; if(!ctx) return;
+  const n = _selSubstituirInsumo().length;
+  const btn = document.getElementById('subst-ins-btn');
+  if(btn){ btn.textContent = `✅ Substituir em ${n} produto(s)`; btn.disabled = n===0; }
+  const todos = document.getElementById('subst-ins-todos');
+  if(todos){ todos.checked = n===ctx.trocar.length; todos.indeterminate = n>0 && n<ctx.trocar.length; }
+}
+function marcarTodosSubstituirInsumo(v){
+  document.querySelectorAll('.subst-ins-chk').forEach(c=>{ c.checked = v; });
+  contarSelSubstituirInsumo();
+}
+
 async function aplicarSubstituirInsumo(){
   if(!usuarioLogado || !usuarioLogado.admin){ toast('Ação restrita a administradores','error'); return; }
-  const ctx = SUBST_INS_CTX;
-  if(!ctx || !ctx.trocar.length){ toast('Gere a prévia primeiro','error'); return; }
-  if(!confirm(`Substituir ${ctx.antigo} por ${ctx.novo} em ${ctx.trocar.length} composição(ões)?\n\nA quantidade de cada produto é mantida. As composições atuais ficam salvas em backup e dá para desfazer.`)) return;
+  const ctxPrevia = SUBST_INS_CTX;
+  if(!ctxPrevia || !ctxPrevia.trocar.length){ toast('Gere a prévia primeiro','error'); return; }
+  const selecionados = _selSubstituirInsumo();
+  if(!selecionados.length){ toast('Marque pelo menos um produto','error'); return; }
+  const mantidos = ctxPrevia.trocar.length - selecionados.length;
+  const ctx = { ...ctxPrevia, trocar: selecionados };
+  if(!confirm(`Substituir ${ctx.antigo} por ${ctx.novo} em ${ctx.trocar.length} composição(ões)?${mantidos?`\n${mantidos} produto(s) desmarcado(s) continuam com ${ctx.antigo}.`:''}\n\nA quantidade de cada produto é mantida. As composições atuais ficam salvas em backup e dá para desfazer.`)) return;
   const btn = document.getElementById('subst-ins-btn');
   if(btn){ btn.disabled = true; btn.textContent = '⏳ Gravando...'; }
   try {
@@ -26591,6 +26616,7 @@ async function aplicarSubstituirInsumo(){
     document.getElementById('subst-ins-resultado').innerHTML =
       `<div style="padding:18px;background:#dcfce7;border-radius:8px;color:#166534;font-size:13.5px;line-height:1.7">
         ✓ <strong>${esc(ctx.antigo)}</strong> substituído por <strong>${esc(ctx.novo)}</strong> em <strong>${prods.length} produto(s)</strong>.
+        ${mantidos?`<br>${mantidos} produto(s) desmarcado(s) continuam com ${esc(ctx.antigo)}.`:''}
         ${ctx.revisar.length?`<br>⚠ ${ctx.revisar.length} produto(s) ficaram de fora para revisão: ${ctx.revisar.map(l=>esc(l.prod)).join(', ')}`:''}
       </div>`;
     SUBST_INS_CTX = null;
@@ -26598,6 +26624,7 @@ async function aplicarSubstituirInsumo(){
     console.error(e);
     toast('Erro ao gravar: '+(e?.message||e),'error');
     if(btn){ btn.disabled = false; btn.textContent = `✅ Substituir em ${ctx.trocar.length} produto(s)`; }
+    SUBST_INS_CTX = ctxPrevia;
   }
 }
 
